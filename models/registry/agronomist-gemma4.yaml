@@ -1,0 +1,91 @@
+id: ai-pomona-agronomist-gemma4
+name: Pomona Agronomist Advisor
+version: 0.1.0
+author: Okyanus
+license: apache-2.0
+
+type: advisor_llm
+
+github:
+  training_repo: Okyanus/pomona-agronomist-llm
+  platform_repo: Okyanus/pomona
+
+huggingface:
+  repo_id: Okyanus/ai-pomona-agronomist-gemma4
+  base_model: google/gemma-4-E2B-it
+  url: https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  backends:
+    - huggingface       # HF Inference API (HF_TOKEN + provider)
+    - huggingface_local # GPU: pomona-agronomist-llm/deploy/app.py
+    - ollama
+    - stub              # default — offline demo
+
+language:
+  - en
+  - tr
+
+domain:
+  crop:
+    - tomato
+    - general_greenhouse
+  environment:
+    - greenhouse
+    - hydroponic
+  region:
+    - global
+
+inputs:
+  required:
+    - instruction
+  optional:
+    - air_temperature_c
+    - humidity_pct
+    - ec_ms_cm
+    - ph
+    - co2_ppm
+    - light_umol
+    - crop
+    - growth_stage
+    - soil_moisture_pct
+
+outputs:
+  schema:
+    - explanation
+    - likely_risks
+    - missing_data
+    - safe_checks
+    - human_review_required
+
+hardware:
+  minimum:
+    ram: 8GB
+    gpu_vram: 8GB
+  recommended:
+    device:
+      - nvidia_gpu
+      - apple_silicon_mps
+
+safety:
+  requires_safety_checker: true
+  advisory_only: true
+  forbidden:
+    - direct_pesticide_dosage
+    - definite_diagnosis_without_evidence
+    - unsafe_fertilizer_recommendation
+    - direct_actuator_control
+
+evaluation:
+  metrics:
+    - agronomic_safety
+    - explanation_quality
+    - missing_data_behavior
+
+integration:
+  pomona_flow: |
+    sensor data → tomato reasoner → safety checker → this model → farmer-friendly explanation
+  service: model-router
+  endpoint: POST /v1/advisor/explain

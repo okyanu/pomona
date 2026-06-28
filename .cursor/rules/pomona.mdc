@@ -1,0 +1,19 @@
+---
+description: Pomona platform — architecture, phase, and coding rules for AI agents
+alwaysApply: true
+---
+
+# Pomona
+
+Read **AGENTS.md** at repo root before coding.
+
+- Phase 2 next: dashboard + SQLite in `services/core/`
+- Platform repo only — ML training is `pomona-agronomist-llm` (sibling)
+- Every service: `/health`, JSON API, FastAPI + Pydantic
+- LLM must NOT control actuators directly
+- Run `make test` after changes; update `docs/PROJECT_STATUS.md` on milestones
+- Personal notes: `private/` (gitignored) — never commit `.env` or weights
+
+Quick commands: `./scripts/up.sh`, `./scripts/sim.sh`, `make test`
+
+Install: [docs/INSTALL.md](docs/INSTALL.md) — Docker (all OS) or pip dev

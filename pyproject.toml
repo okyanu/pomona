@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pomona"
+version = "0.1.0"
+description = "Open edge AI stack for agriculture"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [{ name = "Okyanus" }]
+keywords = ["agriculture", "greenhouse", "mqtt", "edge-ai"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+core = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "paho-mqtt>=2.1.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.6.0",
+]
+model-router = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.6.0",
+  "httpx>=0.28.0",
+  "pyyaml>=6.0.0",
+]
+simulator = ["paho-mqtt>=2.1.0"]
+dev = [
+  "pytest>=8.0",
+  "httpx>=0.28.0",
+  "ruff>=0.8.0",
+]
+llm = [
+  "transformers>=4.48.0",
+  "peft>=0.14.0",
+  "torch",
+  "pandas",
+  "gradio>=5.0.0",
+  "huggingface_hub",
+]
+all = ["pomona[core,model-router,simulator,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/Okyanus/pomona"
+Documentation = "https://github.com/Okyanus/pomona/tree/main/docs"
+HuggingFace = "https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = []  # meta-package; services installed via requirements.txt per service
+
+[tool.pytest.ini_options]
+testpaths = ["services/core/tests", "services/model-router/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

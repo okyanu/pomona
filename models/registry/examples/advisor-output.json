@@ -1,0 +1,24 @@
+{
+  "model_id": "ai-pomona-agronomist-gemma4",
+  "backend": "stub",
+  "explanation": "High humidity (88%) with warm air (31.2°C) increases fungal disease risk during flowering. pH 7.5 is above the typical tomato hydroponic range (5.5–6.5), which can reduce iron uptake and cause yellowing in young leaves. EC 3.4 mS/cm is moderately high — verify drain EC before changing feed.",
+  "likely_risks": [
+    "Botrytis / powdery mildew risk from high humidity",
+    "Iron lockout / micronutrient stress from elevated pH",
+    "Salt accumulation if drain EC is also high"
+  ],
+  "missing_data": [
+    "drain_ec",
+    "drain_ph",
+    "co2_ppm",
+    "leaf_symptoms"
+  ],
+  "safe_checks": [
+    "Measure drain EC and compare to feed EC",
+    "Check young leaf color and veins",
+    "Confirm ventilation / dehumidification schedule",
+    "Review last pH adjustment date"
+  ],
+  "human_review_required": true,
+  "safety_note": "Advisory only — not for direct pesticide, fertilizer dosing, or actuator control."
+}

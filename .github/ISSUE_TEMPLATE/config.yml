@@ -1,0 +1,13 @@
+---
+name: Config
+description: Issue template settings
+---
+
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/Okyanus/pomona/blob/main/CONTRIBUTING.md
+    about: How to contribute to Pomona
+  - name: Getting started
+    url: https://github.com/Okyanus/pomona/blob/main/docs/GETTING_STARTED.md
+    about: Run Pomona locally

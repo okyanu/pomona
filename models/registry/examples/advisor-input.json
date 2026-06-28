@@ -1,0 +1,15 @@
+{
+  "instruction": "Explain the likely risks and safe next checks for this tomato greenhouse reading.",
+  "sensor": {
+    "device_id": "sim-greenhouse-01",
+    "farm_id": "demo-farm",
+    "zone_id": "greenhouse-a",
+    "crop": "tomato",
+    "growth_stage": "flowering",
+    "air_temperature_c": 31.2,
+    "humidity_pct": 88,
+    "ec_ms_cm": 3.4,
+    "ph": 7.5,
+    "soil_moisture_pct": 42
+  }
+}

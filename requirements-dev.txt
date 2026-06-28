@@ -1,0 +1,7 @@
+# Dev dependencies — install with: pip3 install -r requirements-dev.txt
+-r services/core/requirements.txt
+-r services/model-router/requirements.txt
+-r examples/simulators/requirements.txt
+pytest>=8.0
+httpx>=0.28.0
+pyyaml>=6.0.0

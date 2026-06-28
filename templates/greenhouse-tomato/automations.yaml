@@ -1,0 +1,56 @@
+# Greenhouse Tomato Starter Automations
+
+automations:
+  - id: greenhouse_high_humidity_night
+    name: Night high humidity fungal risk
+    trigger:
+      type: sensor
+      entity: greenhouse-a.humidity
+      above: 85
+      duration_minutes: 15
+    condition:
+      - entity: greenhouse-a.crop
+        equals: tomato
+      - time:
+          after: "20:00"
+          before: "06:00"
+    model_check:
+      model: tomato-greenhouse-reasoner
+      task: fungal_risk
+      risk_above: 0.6
+    safety_check:
+      required: true
+    action:
+      - service: actuator.suggest_turn_on
+        target: greenhouse-a.fan_1
+        duration_minutes: 20
+      - service: notify
+        message: "Night humidity is high. Fungal risk increased. Fan operation is suggested."
+
+  - id: greenhouse_high_ec_alert
+    name: High EC alert
+    trigger:
+      type: sensor
+      entity: greenhouse-a.ec
+      above: 3.2
+      duration_minutes: 10
+    condition:
+      - entity: greenhouse-a.crop
+        equals: tomato
+    action:
+      - service: notify
+        message: "EC is high for tomato greenhouse. Check drainage EC before changing fertilizer."
+
+  - id: greenhouse_high_ph_alert
+    name: High pH nutrient uptake risk
+    trigger:
+      type: sensor
+      entity: greenhouse-a.ph
+      above: 7.2
+      duration_minutes: 10
+    condition:
+      - entity: greenhouse-a.crop
+        equals: tomato
+    action:
+      - service: notify
+        message: "pH is high. Nutrient uptake issues may occur. Correct gradually and verify calibration."

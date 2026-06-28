@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# Private — personal notes, research PDFs, planning (never GitHub)
+private/**
+!private/README.example.md
+!private/research/README.example.md
+!private/planning/README.example.md
+
+# Hugging Face / API tokens
+.hf_token
+hf_token.txt
+
+# Docker / local runtime data
+*.db
+data/
+volumes/
+
+# ML training — lives in pomona-agronomist-llm repo (after split)
+models/agronomist-llm/
+models/checkpoints/
+
+# Large model weights
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+optimizer.pt
+
+# Local-only assets (screenshots, PDFs, personal notes)
+assets/**
+!assets/README.md
+
+# Local blog drafts and writing logs
+/blog/
+
+# PDFs — reference docs belong in private/research/
+*.pdf
+
+# Legacy research folder (moved to private/research/)
+research/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+**/.DS_Store

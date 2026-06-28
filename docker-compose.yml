@@ -1,0 +1,57 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/version' -C 1 -W 3 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  core:
+    build: ./services/core
+    ports:
+      - "8080:8080"
+    environment:
+      CORE_HOST: ${CORE_HOST:-0.0.0.0}
+      CORE_PORT: ${CORE_PORT:-8080}
+      MQTT_HOST: ${MQTT_HOST:-mqtt}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_TOPIC_PATTERN: ${MQTT_TOPIC_PATTERN:-pomona/+/+/sensor/+/state}
+    depends_on:
+      mqtt:
+        condition: service_healthy
+
+  model-router:
+    build: ./services/model-router
+    ports:
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      MODELS_DIR: /app/models/registry
+      POMONA_LLM_BACKEND: ${POMONA_LLM_BACKEND:-stub}
+      HF_MODEL_ID: ${HF_MODEL_ID:-Okyanus/ai-pomona-agronomist-gemma4}
+      HF_BASE_MODEL_ID: ${HF_BASE_MODEL_ID:-google/gemma-4-E2B-it}
+      HF_TOKEN: ${HF_TOKEN:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-ai-pomona-agronomist-gemma4}
+    volumes:
+      - ./models/registry:/app/models/registry:ro
+    depends_on:
+      core:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/var/lib/ollama
+
+volumes:
+  ollama_data:
