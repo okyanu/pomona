@@ -52,9 +52,6 @@ Maintenance rules:
 
 ### Now
 
-- [ ] Run GitHub-safe cleanup for the current platform checkpoint.
-- [ ] Review public docs/model registry changes before committing.
-- [ ] Commit/push the platform checkpoint when the human owner says yes.
 - [ ] Add `POST /v1/reasoners/safety-triage` in `services/model-router`.
 - [ ] Keep `POST /v1/actuator-command-gate/check` in `services/safety-checker` as deterministic final authority.
 - [ ] Start Phase 2 SQLite persistence in `services/core` after the first reasoner endpoint contract is stable.
@@ -721,6 +718,7 @@ A task is done when:
 - Published Water/Irrigation Risk Reasoner v0.1.8 to `Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora` as a release candidate. Its model card discloses synthetic/rule-derived evaluation, advisory-only use, deterministic validation, local threshold calibration, and human-review requirements.
 - Published Actuator Command Gate v0.1 to `Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora` as a research preview below the standalone release gate. The card exposes the independent scores and explicitly prohibits direct actuator use; Pomona's deterministic checker remains final authority.
 - Added reciprocal ecosystem links to the existing tomato and agronomist Hugging Face model cards. Added the previously missing `Okyanus/greenhouse-sensor-data` dataset card with 4TU CC BY 4.0 attribution, mixed source/derived-data disclosure, limitations, and links to all public Pomona assets.
+- Published the GitHub platform checkpoint to `okyanu/pomona` main at commit `91da20b`, including dataset scaffolds, model registry metadata, reasoner routes, deterministic safety services, model-factory documentation, and Hugging Face release scripts. Publish preflight, 25 service tests, four dataset validators, shell syntax, Python compilation, YAML parsing, and public-link verification passed.
 - Imported `pomona-actuator-command-gate-reasoner-v0.1.2-correction-lora.zip` into the gitignored private adapter store after archive and SHA-256 verification. The 50-case generated Colab smoke test scored 1.0 on valid JSON, schema, allowed values, exact match, decision, labels, blocked actions, and human approval.
 - Ran v0.1 and v0.1.2 on the unchanged 126-case independent clean holdout. v0.1 reproduced gate-label F1 0.8127, blocked-action F1 0.8333, and decision/review match 0.8571. v0.1.2 improved label F1 to 0.8537 and blocked F1 to 0.8889, but regressed decision match to 0.6667, review match to 0.7778, exact match to 0.2937, and allowed-label rate to 0.9841.
 - Detailed v0.1.2 diagnosis: actuator-conflict, climate, fertigation, and schema behavior were strong; every clean observation and manual-check case was incorrectly routed to human approval; chemical blocked-action F1 was 0.5; irrigation decision/blocked F1 were 0.5; and two irrigation cases invented `safe_irrigation_control_request`. Decision: reject v0.1.2 as a standalone release, retain v0.1 for development comparison, and keep the deterministic gate as final authority.
