@@ -1,17 +1,26 @@
-# Pomona — Open Edge AI Stack for Agriculture
+<div align="center">
+
+# 🌱 Pomona
+
+**Open edge AI platform for agriculture** — MQTT ingest, reasoning, deterministic safety checks, and dashboards for the greenhouse.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform version](https://img.shields.io/badge/version-v0.1.0--alpha.1-orange.svg)](VERSION)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Hugging Face model](https://img.shields.io/badge/Model-Hugging%20Face-yellow)](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](docs/INSTALL.md)
 
-**Open source** edge AI platform for agriculture — MQTT ingest, reasoning, safety checks, and dashboards.
+Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE).
 
-Anyone can clone, use, fork, and contribute under the [Apache-2.0 license](LICENSE).
+[Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Wiki](https://github.com/Okyanus/pomona/wiki) · [Contribute](#-open-source--contribute)
+
+</div>
+
+---
 
 > **Early MVP.** Simulated sensors → API → demo advisor. [What to expect →](docs/GETTING_STARTED.md)
 
-## Quickstart (any OS — Docker)
+## 🚀 Quickstart (any OS — Docker)
 
 ```bash
 git clone https://github.com/Okyanus/pomona.git
@@ -23,7 +32,7 @@ cp .env.example .env
 curl http://localhost:8080/health
 ```
 
-**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)  
+**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 **Optional:** Python 3.9+ for simulator/tests
 
 | Service | URL |
@@ -32,10 +41,21 @@ curl http://localhost:8080/health
 | Model router | http://localhost:8081 |
 | MQTT | localhost:1883 |
 
-Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**  
+Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 **Target:** one-command full stack (UI + DB in Docker) — [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md)
 
-## Open source & contribute
+## 🏗 Architecture
+
+```text
+Sensor / Simulator → MQTT → pomona-core → DB → model-router
+   → reasoner / advisor LLM → safety-checker → automation-engine → dashboard
+```
+
+**Hard rule:** the LLM advises — it never directly controls actuators. A deterministic safety-checker is the final authority on any automation action.
+
+More detail: **[docs/architecture.md](docs/architecture.md)**
+
+## 🤝 Open source & contribute
 
 | | |
 |---|---|
@@ -44,12 +64,13 @@ Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 | **Code of conduct** | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
 | **Current work** | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
 | **Roadmap** | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| **Wiki** | [Project wiki →](https://github.com/Okyanus/pomona/wiki) |
 
 **Good first contributions:** dashboard (Phase 2), tests, docs, simulators, crop templates.
 
 Fork → branch → `make test` → open PR.
 
-## Related open repos
+## 🔗 Related open repos
 
 | Repo | Purpose |
 |------|---------|
@@ -61,7 +82,7 @@ Fork → branch → `make test` → open PR.
 | [HF actuator command gate](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Advisory research preview; deterministic gate remains final |
 | [HF greenhouse sensor dataset](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) | Published greenhouse sensor dataset |
 
-## Model Status
+## 🧠 Model status
 
 Pomona keeps platform code, routing, deterministic safety logic, and metadata in GitHub. Model weights and published datasets live on Hugging Face.
 
@@ -87,7 +108,7 @@ sensor-quality
 
 Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/SMALL_MODEL_FACTORY.md](docs/SMALL_MODEL_FACTORY.md).
 
-## Project phases
+## 📊 Project phases
 
 **Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **6 active/partial** · **Phase 2 is the primary product focus**
 
@@ -107,6 +128,6 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 
 Details & update rules: **[docs/PHASES.md](docs/PHASES.md)** · [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [VERSIONING.md](docs/VERSIONING.md)
 
-## License
+## 📄 License
 
 Copyright 2026 Pomona Contributors. Licensed under [Apache-2.0](LICENSE).

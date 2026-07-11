@@ -15,6 +15,7 @@ Public docs for contributors and users.
 | [PROJECT_STATUS.md](./PROJECT_STATUS.md) | What's done / current phase |
 | [REPOS.md](./REPOS.md) | Platform vs ML vs Hugging Face |
 | [EXECUTION_PLAN.md](./EXECUTION_PLAN.md) | Active Codex/Cursor task board and timetable |
+| [GitHub Wiki](https://github.com/Okyanus/pomona/wiki) | Reader-friendly summaries linking back here |
 
 ## Architecture & roadmap
 
