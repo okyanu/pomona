@@ -1,0 +1,9 @@
+id: pomona_generated_safety_templates
+name: Pomona Generated Safety Templates
+url: https://github.com/Okyanus/pomona
+doi: null
+license: apache-2.0
+allowed_use: Pomona-authored generated examples for safety, actuator, and command-gate model scaffolds.
+redistribution_notes: No third-party raw data is included. Generated JSONL examples may be redistributed with the Pomona dataset scaffold under the project license.
+attribution_required: Pomona / Okyanus
+status: preferred_initial_source

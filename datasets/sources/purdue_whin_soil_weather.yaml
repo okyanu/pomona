@@ -1,0 +1,16 @@
+id: purdue_whin_soil_weather
+name: "WHIN 2021 Soil Sensor and Weather Station Dataset"
+url: "https://purduewhin.ecn.purdue.edu/dataset2021"
+doi: null
+license: license_needs_manual_verification
+allowed_use: "Candidate real soil/weather time-series source for Pomona water and irrigation risk labels after license review."
+redistribution_notes: "Do not download, commit, redistribute, or publish derived artifacts until dataset license and terms are manually verified. If approved, raw files must stay under datasets/raw/purdue_whin_soil_weather/ and remain gitignored."
+redistribution_allowed: null
+derived_dataset_allowed: null
+attribution_required: true
+status: license_needs_manual_verification
+related_paper:
+  title: "An Open Dataset of Sensor Data from Soil Sensors and Weather Stations at Production Farms"
+  url: "https://arxiv.org/abs/2302.09072"
+  notes: "Paper describes soil sensor and weather station data from 3 production farms over 5 months."
+raw_files: []

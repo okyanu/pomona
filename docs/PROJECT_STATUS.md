@@ -101,6 +101,55 @@ Agents: read [PHASES.md](./PHASES.md) before starting work.
 
 ---
 
+## Small Reasoner Checkpoint ⏳ Local integration next
+
+**Goal:** Use narrow specialist models with deterministic safety guardrails inside the Pomona platform.
+
+| Reasoner | Status | Decision |
+|----------|--------|----------|
+| Tomato risk `v0.1.7` | Published on Hugging Face | Use with deterministic tomato rules |
+| Water/irrigation `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
+| Sensor quality `v0.1.1-boundary` | Local candidate, not published | Use for first integration |
+| Safety triage `v0.1` | Local candidate, not published | Use for first integration |
+| Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker is final authority |
+| Actuator command gate `v0.1.1-hardcases` | Local regression | Do not use |
+| Actuator command gate `v0.1.2-correction` | Independent-eval regression | Do not use |
+
+Published Hugging Face assets right now:
+
+```text
+model:   Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
+model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
+model:   Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora
+model:   Okyanus/ai-pomona-agronomist-gemma4
+dataset: Okyanus/greenhouse-sensor-data
+```
+
+Endpoint status:
+
+```text
+services/model-router:
+  done: POST /v1/reasoners/sensor-quality
+  done: POST /v1/reasoners/tomato-risk
+  next: POST /v1/reasoners/safety-triage
+
+services/safety-checker:
+  keep as deterministic final authority: POST /v1/actuator-command-gate/check
+```
+
+Future models after platform integration:
+
+```text
+water / irrigation risk reasoner
+nutrient / pH-EC reasoner
+crop-specific reasoners
+digital twin scenario reasoner
+```
+
+No model weights are committed to GitHub. Local adapters stay under `private/` and publishable weights belong on Hugging Face.
+
+---
+
 ## Phase 2 — Dashboard ⏳ In progress
 
 **Goal:** Web UI + SQLite persistence.

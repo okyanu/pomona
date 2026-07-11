@@ -1,0 +1,417 @@
+id: pomona-water-irrigation-risk-reasoner-v0.1
+name: Pomona Water Irrigation Risk Reasoner
+version: 0.1.0
+author: Okyanus
+license: apache-2.0
+
+type: water_irrigation_risk_reasoner
+status: published_release_candidate
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/WATER_IRRIGATION_RISK_REASONER.md
+
+huggingface:
+  repo_id: Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  url: https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
+  dataset: null
+  published: true
+  release_status: release_candidate
+  published_on: "2026-07-11"
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  output_format: json_object
+  backends:
+    - huggingface_local
+    - rules_fallback
+    - stub
+
+inputs:
+  required:
+    - farm_context
+    - sensor
+    - expected_fields
+
+outputs:
+  schema:
+    - irrigation_risk_labels
+    - missing_fields
+    - suspect_fields
+    - safe_next_checks
+    - blocked_actions
+    - human_review_required
+    - rationale
+
+safety:
+  advisory_only: true
+  final_authority: false
+  requires_deterministic_checker: true
+  forbidden:
+    - autonomous_irrigation_change
+    - direct_pump_control
+    - direct_valve_control
+    - irrigation_schedule_change
+
+integration:
+  pomona_flow: |
+    sensor quality reasoner -> water irrigation risk reasoner -> safety triage reasoner -> deterministic actuator gate
+  service:
+    - model-router
+    - safety-checker
+
+evaluation:
+  v0_1_local:
+    status: failed_experiment
+    cases: 50
+    valid_json_rate: 1.0
+    allowed_labels_rate: 1.0
+    exact_match_rate: 0.0
+    label_f1_avg: 0.0667
+    blocked_f1_avg: 0.692
+    human_review_match_rate: 0.9
+    notes: Learned JSON shape but over-predicted insufficient_context; do not publish.
+  v0_1_1_realderived:
+    status: trained_local_not_publishable
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.1-realderived-training-data.zip
+    scope: moisture risk only; pump and valve conflicts stay deterministic.
+    local_eval_50:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.16
+      label_f1_avg: 0.6
+      missing_f1_avg: 1.0
+      suspect_f1_avg: 0.6
+      blocked_f1_avg: 0.6
+      human_review_match_rate: 0.6
+    colab_eval_50:
+      valid_json_rate: 1.0
+      exact_match_rate: 0.58
+      label_f1_avg: 0.58
+      blocked_f1_avg: 0.58
+      human_review_match_rate: 0.58
+    notes: Better than v0.1 but still not public-usable; misses stale/anomaly/boundary risk states.
+  v0_1_2_hardcases:
+    status: rejected_regression
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.2-hardcases-training-data.zip
+    records: 3000
+    train: 2400
+    validation: 300
+    test: 300
+    scope: moisture risk only with stale/anomaly/boundary hardcases.
+    target: improve stale_irrigation_data, sensor_anomaly, low/high moisture boundary handling, and normal near-miss separation.
+    local_eval_50:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      exact_match_rate: 0.02
+      label_f1_avg: 0.44
+      blocked_f1_avg: 0.44
+      human_review_match_rate: 0.44
+    notes: Regressed by over-predicting normal; do not use.
+  v0_1_3_balancedfix:
+    status: trained_local_candidate_not_published
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.3-balancedfix-training-data.zip
+    adapter_zip: private/colab/adapters/water-irrigation-risk-v0.1.3-balancedfix-local.zip
+    records: 2520
+    train: 2016
+    validation: 252
+    test: 252
+    target: balanced buckets to reduce normal-collapse regression.
+    local_eval_50:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.02
+      label_f1_avg: 0.64
+      missing_f1_avg: 0.92
+      suspect_f1_avg: 0.8
+      blocked_f1_avg: 0.9
+      human_review_match_rate: 0.9
+    colab_eval_50:
+      valid_json_rate: 1.0
+      exact_match_rate: 0.66
+      label_f1_avg: 0.82
+      blocked_f1_avg: 0.82
+      human_review_match_rate: 0.82
+    notes: Best water-irrigation candidate so far. Good JSON/schema safety and much better review gating, but local label F1 is still below publish threshold and exact match remains weak. Keep local; do not publish yet.
+  v0_1_4_edgefix:
+    status: trained_strong_colab_candidate_needs_allowed_label_check
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.4-edgefix-training-data.zip
+    adapter_zip: private/colab/adapters/water-irrigation-risk-v0.1.4-edgefix-colab-full-local.zip
+    records: 2940
+    train: 2352
+    validation: 294
+    test: 294
+    label_buckets:
+      normal: 420
+      low_moisture: 420
+      high_moisture: 420
+      missing_moisture: 420
+      stale_irrigation_data: 420
+      sensor_anomaly: 420
+      insufficient_context: 420
+    target: focused edge curriculum for low/high moisture thresholds, stale data, missing fields, sensor anomalies, and insufficient context.
+    colab_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_colab.ipynb
+    colab_eval_50:
+      valid_json_rate: 1.0
+      exact_match_rate: 0.66
+      label_f1_avg: 0.96
+      blocked_f1_avg: 0.96
+      human_review_match_rate: 0.96
+    colab_eval_294:
+      valid_json_rate: 1.0
+      exact_match_rate: 0.8571
+      label_f1_avg: 0.9116
+      blocked_f1_avg: 0.9615
+      human_review_match_rate: 0.9728
+      known_issue: The pasted eval examples include invented labels on sensor-anomaly cases; rerun notebook after allowed-label metric update before publishing.
+    local_cpu_eval_50:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.0
+      label_f1_avg: 0.52
+      missing_f1_avg: 0.88
+      suspect_f1_avg: 0.66
+      blocked_f1_avg: 0.8533
+      human_review_match_rate: 0.88
+    local_cpu_eval_294:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.0
+      label_f1_avg: 0.4354
+      missing_f1_avg: 0.8571
+      suspect_f1_avg: 0.5476
+      blocked_f1_avg: 0.8061
+      human_review_match_rate: 0.8333
+    notes: Strongest water-irrigation candidate so far on Colab. Full Colab 294-case label/review scores are above target, but pasted examples show invalid invented labels in some sensor-anomaly cases. Rerun Colab eval with allowed_labels_rate before publishing; publish only if invalid_output_count is zero or post-processing enforces the schema.
+  v0_1_5_label_lock:
+    status: trained_full_colab_not_publishable_needs_label_diagnosis
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.5-label-lock-training-data.zip
+    adapter_zip: private/colab/adapters/water-irrigation-risk-v0.1.5-label-lock-local.zip
+    records: 3640
+    train: 2912
+    validation: 364
+    test: 364
+    label_buckets:
+      normal: 520
+      low_moisture: 520
+      high_moisture: 520
+      missing_moisture: 520
+      stale_irrigation_data: 520
+      sensor_anomaly: 520
+      insufficient_context: 520
+    target: preserve v0.1.4 accuracy while locking impossible moisture values to the allowed sensor_anomaly label.
+    colab_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_colab.ipynb
+    eval_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_5_eval_only_colab.ipynb
+    diagnostic_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_5_diagnostic_colab.ipynb
+    publish_gate:
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      invalid_output_count: 0
+      label_f1_avg_min: 0.9
+      human_review_match_rate_min: 0.95
+    local_cpu_eval_50:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.0
+      label_f1_avg: 0.728
+      missing_f1_avg: 0.88
+      suspect_f1_avg: 0.74
+      blocked_f1_avg: 0.9867
+      human_review_match_rate: 1.0
+    local_cpu_eval_364:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.0055
+      label_f1_avg: 0.672
+      missing_f1_avg: 0.8324
+      suspect_f1_avg: 0.6484
+      blocked_f1_avg: 0.9771
+      human_review_match_rate: 1.0
+    colab_eval_364:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.0934
+      label_f1_avg: 0.7753
+      blocked_f1_avg: 1.0
+      human_review_match_rate: 1.0
+      invalid_output_count: 0
+    notes: Full Colab eval confirms that v0.1.5 fixes invented labels and preserves blocked-action and review safety, but label F1 is below the 0.90 publish gate. Do not publish. Diagnose per-label and required-output-field failures before preparing v0.1.6.
+  v0_1_6_schema_order:
+    status: rejected_clean_holdout_generalization_failure
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.6-schema-order-training-data.zip
+    training_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_6_schema_order_colab.ipynb
+    diagnostic_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_6_schema_order_diagnostic_colab.ipynb
+    full_eval_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_6_schema_order_full_eval_colab.ipynb
+    clean_holdout_zip: private/colab/pomona-water-irrigation-risk-v0.1.6-clean-eval-data.zip
+    clean_holdout_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_6_clean_holdout_eval_colab.ipynb
+    clean_holdout_full_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_6_clean_holdout_full_eval_colab.ipynb
+    records: 4600
+    train: 3872
+    validation: 364
+    test: 364
+    target: Preserve v0.1.5 safety while eliminating stale/sensor-anomaly omission of irrigation_risk_labels and missing_fields.
+    method:
+      - Train output JSON in schema order with irrigation_risk_labels and missing_fields first.
+      - Add 480 train-only sensor_anomaly and 480 train-only stale_irrigation_data schema-completion examples.
+      - Keep validation and test balanced at 52 primary-label cases per bucket.
+    publish_gate:
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      invalid_output_count: 0
+      label_f1_avg_min: 0.9
+      human_review_match_rate_min: 0.95
+    leaked_split_eval_364:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.7005
+      label_f1_avg: 0.9951
+      blocked_f1_avg: 0.9982
+      human_review_match_rate: 1.0
+      invalid_output_count: 0
+      valid_for_publish: false
+    notes: The initial v0.1.6 364-case result was invalid because its split shared 141 exact train/test inputs. The independent clean holdout then confirmed weak generalization, so this version is rejected. Future training splits must pass validate_pomona_water_irrigation_splits.py.
+    clean_holdout_eval_168:
+      valid_json_rate: 1.0
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1_avg: 0.4782
+      blocked_f1_avg: 0.6726
+      human_review_match_rate: 0.75
+      bucket_label_f1:
+        high_moisture: 0.4306
+        insufficient_context: 0.0
+        low_moisture: 0.4167
+        missing_moisture: 1.0
+        normal: 0.5
+        sensor_anomaly: 1.0
+        stale_irrigation_data: 0.0
+    clean_holdout_decision: Reject for publication. Schema lock generalized, but moisture thresholds, stale data, normal separation, and context reasoning did not.
+  v0_1_7_generalized:
+    status: strong_internal_candidate_failed_external_release_gate
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.7-generalized-training-data.zip
+    training_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_7_generalized_colab.ipynb
+    diagnostic_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_7_generalized_diagnostic_colab.ipynb
+    full_eval_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_7_generalized_full_eval_colab.ipynb
+    external_clean_holdout_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_7_external_clean_holdout_eval_colab.ipynb
+    external_clean_holdout_zip: private/colab/pomona-water-irrigation-risk-v0.1.6-clean-eval-data.zip
+    records: 4144
+    train: 3360
+    validation: 392
+    test: 392
+    exact_split_overlap: 0
+    primary_label_cases_per_train_bucket: 480
+    primary_label_cases_per_validation_bucket: 56
+    primary_label_cases_per_test_bucket: 56
+    improvements:
+      - Continuous moisture values across normal, low, high, and anomaly ranges.
+      - Explicit low <= 28, high >= 78, and anomaly outside 0..100 prompt rules.
+      - Both literal stale timestamps and telemetry_age_minutes context.
+      - Combined stale plus low/high cases with all expected labels.
+      - Independently generated train, validation, and test splits with no resampled duplicates.
+    publish_gate:
+      valid_json_rate: 1.0
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1_avg_min: 0.9
+      blocked_f1_avg_min: 0.95
+      human_review_match_rate_min: 0.95
+    leakage_free_eval_392:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.9184
+      label_f1_avg: 0.9480
+      blocked_f1_avg: 0.9456
+      human_review_match_rate: 1.0
+      invalid_output_count: 0
+    decision: Strongest water model and passes schema, label, and review gates. Blocked-action F1 misses the 0.95 gate by 0.0044, so run the independent 168-case external holdout before release-candidate promotion.
+    external_clean_holdout_eval_168:
+      valid_json_rate: 1.0
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 0.9405
+      allowed_blocked_actions_rate: 1.0
+      label_f1_avg: 0.8988
+      blocked_f1_avg: 0.9087
+      human_review_match_rate: 1.0
+      bucket_label_f1:
+        high_moisture: 1.0
+        insufficient_context: 0.5
+        low_moisture: 0.7917
+        missing_moisture: 1.0
+        normal: 1.0
+        sensor_anomaly: 1.0
+        stale_irrigation_data: 1.0
+    external_decision: Do not publish standalone. Strong internal/hybrid candidate, but external label, blocked-action, and allowed-label gates fail narrowly.
+  v0_1_8_context_low_lock:
+    status: release_candidate_not_published
+    adapter_zip: private/colab/adapters/water-irrigation-risk-v0.1.8-context-low-lock-local.zip
+    hf_package: private/colab/hf-publish/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
+    dataset_zip: private/colab/pomona-water-irrigation-risk-v0.1.8-context-low-lock-training-data.zip
+    training_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_8_context_low_lock_colab.ipynb
+    diagnostic_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_8_context_low_lock_diagnostic_colab.ipynb
+    full_eval_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_8_context_low_lock_full_eval_colab.ipynb
+    external_clean_holdout_notebook: private/colab/pomona_water_irrigation_risk_reasoner_v0_1_8_external_clean_holdout_eval_colab.ipynb
+    records: 5344
+    train: 4560
+    validation: 392
+    test: 392
+    exact_split_overlap: 0
+    focused_train_records: 1200
+    focus:
+      missing_system_type: 480
+      low_moisture: 480
+      normal_low_boundary: 240
+    improvements:
+      - Lock empty system_type to insufficient_context plus autonomous irrigation blocking.
+      - Lock low moisture to both low_moisture and irrigation_underwatering plus both blocked actions.
+      - Explicitly forbid invented labels and descriptive synonyms.
+      - Preserve balanced untouched validation/test splits and zero exact overlap.
+    publish_gate:
+      valid_json_rate: 1.0
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1_avg_min: 0.9
+      blocked_f1_avg_min: 0.95
+      human_review_match_rate_min: 0.95
+    leakage_free_eval_392:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.8444
+      label_f1_avg: 1.0
+      blocked_f1_avg: 1.0
+      human_review_match_rate: 1.0
+      invalid_output_count: 0
+    external_clean_holdout_eval_168:
+      valid_json_rate: 1.0
+      required_fields_present_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1_avg: 1.0
+      blocked_f1_avg: 1.0
+      human_review_match_rate: 1.0
+      missing_key_count: 0
+      diagnostic_failure_count: 0
+      bucket_label_f1:
+        high_moisture: 1.0
+        insufficient_context: 1.0
+        low_moisture: 1.0
+        missing_moisture: 1.0
+        normal: 1.0
+        sensor_anomaly: 1.0
+        stale_irrigation_data: 1.0
+    decision: Release candidate. All internal and external semantic, schema, allowed-output, blocked-action, and review gates pass. Keep deterministic safety rules as final authority and disclose synthetic rule-derived evaluation limits.

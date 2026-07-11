@@ -44,11 +44,17 @@ data/              training data (gitignored)
 
 ---
 
-### 3. `Okyanus/ai-pomona-agronomist-gemma4` — Hugging Face (weights)
+### 3. Hugging Face — published models and datasets
 
-**Not GitHub.** Published LoRA adapter + model card.
+| Repo | Type | Publish script |
+|------|------|----------------|
+| [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Advisor LoRA | ML repo `./scripts/publish/huggingface.sh` |
+| [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato reasoner LoRA | **Published** — platform `./scripts/huggingface/publish_tomato_reasoner_to_hf.sh` for new versions only |
+| [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | Water/irrigation reasoner LoRA | Published release candidate — `./scripts/huggingface/publish_water_irrigation_reasoner_to_hf.sh` |
+| [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Actuator-gate LoRA | Published research preview — deterministic checker remains final |
+| [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) | Published greenhouse sensor dataset | `./scripts/huggingface/publish_dataset_to_hf.sh` for future dataset releases |
 
-**Publish:** `HF_TOKEN=hf_... ./scripts/publish/huggingface.sh` from ML repo.
+Platform GitHub repo keeps code, schemas, and registry YAML — not `.safetensors` or teacher datasets.
 
 ---
 
@@ -56,12 +62,11 @@ data/              training data (gitignored)
 
 | Repo | When to create | Contains |
 |------|----------------|----------|
-| `pomona-tomato-reasoner` | Phase 3 — rule/ML reasoner gets its own training pipeline | Training + eval for tomato reasoner |
-| `Okyanus/pomona-tomato-reasoner-v1` (HF) | When reasoner has trainable weights | Small reasoner model weights |
+| `pomona-tomato-reasoner` | If tomato training outgrows `private/colab/` | Training + eval for tomato reasoner |
 | `pomona-docs` | Only if docs outgrow platform repo | Public site, tutorials |
 | `pomona-devices` | Only if firmware explodes (many boards) | ESP32, RP2040 firmware monorepo |
 
-**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in `pomona`.
+**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in [Okyanus/pomona](https://github.com/Okyanus/pomona).
 
 ---
 
@@ -97,7 +102,7 @@ data/              training data (gitignored)
 ./scripts/split/extract-ml-repo.sh
 ```
 
-Then publish each repo independently. See [PUBLISHING.md](./PUBLISHING.md).
+Then publish each repo independently. Maintainer publish checklists are local only (not in this public repo).
 
 ---
 

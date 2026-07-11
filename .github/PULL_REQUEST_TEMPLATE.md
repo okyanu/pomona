@@ -24,7 +24,7 @@ make test
 - [ ] `make test` passes
 - [ ] No secrets or large files committed (`.env`, weights, private assets)
 - [ ] Updated docs if behavior changed
-- [ ] Follows [AGENTS.md](../AGENTS.md) / architecture rules (LLM does not control actuators)
+- [ ] Follows [architecture.md](../docs/architecture.md) rules (LLM does not control actuators)
 
 ## Screenshots (if UI)
 

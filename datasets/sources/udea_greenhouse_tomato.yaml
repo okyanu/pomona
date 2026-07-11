@@ -1,0 +1,20 @@
+id: udea_greenhouse_tomato
+name: "Mobile and Manual Dataset for Greenhouse Tomato Crop"
+url: "https://zenodo.org/doi/10.5281/zenodo.16745909"
+doi: "10.5281/zenodo.16745909"
+license: "CC BY 4.0"
+allowed_use: "Use as a preferred initial source for greenhouse tomato derived Pomona risk labels, source mapping, and evaluation records, with attribution."
+redistribution_notes: "CC BY 4.0 permits sharing and adaptation with attribution. Do not commit raw files to GitHub; keep raw downloads local in datasets/raw/ and publish only clean derived artifacts after attribution is added."
+redistribution_allowed: true
+derived_dataset_allowed: true
+attribution_required: true
+license_verified_on: "2026-06-30"
+verification_source: "Zenodo/DataCite DOI metadata"
+raw_files:
+  - filename: "DB_Mobile_Manual_Tomato.csv"
+    local_path: "datasets/raw/udea_greenhouse_tomato/DB_Mobile_Manual_Tomato.csv"
+    content_type: "text/csv"
+    size_bytes: 303047
+    sha256: "2d74042081c01d6da828b033c7dacbc6574cea4f441b0f2a343a992961679423"
+    git_policy: "ignored_raw_source_do_not_commit"
+status: active_v0_1_source

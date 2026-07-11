@@ -45,6 +45,14 @@ services:
       core:
         condition: service_started
 
+  safety-checker:
+    build: ./services/safety-checker
+    ports:
+      - "8082:8082"
+    depends_on:
+      model-router:
+        condition: service_started
+
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]

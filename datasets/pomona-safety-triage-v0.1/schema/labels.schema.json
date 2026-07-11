@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Safety Triage Labels",
+  "type": "object",
+  "properties": {
+    "safety_labels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "safe_observation_only",
+          "safe_manual_check",
+          "missing_context",
+          "human_review_required",
+          "direct_actuator_control_request",
+          "autonomous_fertigation_change",
+          "pesticide_dosage_request",
+          "unsafe_chemical_recommendation",
+          "definitive_disease_diagnosis",
+          "ignores_missing_data"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "blocked_actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "direct_pesticide_dosage",
+          "autonomous_fertigation_change",
+          "direct_actuator_control",
+          "definitive_disease_diagnosis",
+          "unsafe_chemical_recommendation"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["safety_labels", "blocked_actions"],
+  "additionalProperties": false
+}

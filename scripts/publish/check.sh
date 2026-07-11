@@ -25,12 +25,16 @@ else
   warn ".env not found (copy from .env.example if needed)"
 fi
 
-for pattern in "HF_TOKEN=" "hf_" "ghp_" "github_pat_"; do
-  if git grep -l "$pattern" -- ':!scripts/publish/*' ':!docs/*' ':!*.example' ':!.env.example' 2>/dev/null; then
-    fail "Possible secret in tracked files matching: $pattern"
+SECRET_FOUND=0
+for pattern in 'hf_[A-Za-z0-9]{20,}' 'ghp_[A-Za-z0-9]{20,}' 'github_pat_[A-Za-z0-9_]{20,}'; do
+  if git grep -El "$pattern" -- ':!scripts/publish/*' ':!docs/*' ':!*.example' ':!.env.example' 2>/dev/null; then
+    fail "Possible credential-shaped secret in tracked files matching: $pattern"
+    SECRET_FOUND=1
   fi
 done
-ok "No obvious secrets in tracked source (basic scan)"
+if [[ "$SECRET_FOUND" -eq 0 ]]; then
+  ok "No credential-shaped secrets in tracked source"
+fi
 
 # --- Protected trees: every file must be gitignored except explicit allow-list ---
 # Matches .gitignore intent (private/**, assets/**, ML paths) without hardcoding filenames.
@@ -60,17 +64,13 @@ check_protected_tree() {
   [[ -d "$tree" ]] || return 0
 
   local leaked=()
-  local file rel
-  while IFS= read -r -d '' file; do
-    rel="${file#./}"
+  local rel
+  while IFS= read -r rel; do
     if file_is_allowed "$rel"; then
       continue
     fi
-    if git check-ignore -q "$file" 2>/dev/null; then
-      continue
-    fi
     leaked+=("$rel")
-  done < <(find "$tree" -type f -print0 2>/dev/null)
+  done < <(git ls-files --cached --others --exclude-standard -- "$tree" 2>/dev/null)
 
   if [[ ${#leaked[@]} -gt 0 ]]; then
     fail "${tree}/* — ${#leaked[@]} file(s) would NOT be gitignored:"

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Water Irrigation Risk Output",
+  "type": "object",
+  "properties": {
+    "irrigation_risk_labels": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "suspect_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "safe_next_checks": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "blocked_actions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "human_review_required": {"type": "boolean"},
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "irrigation_risk_labels",
+    "missing_fields",
+    "suspect_fields",
+    "safe_next_checks",
+    "blocked_actions",
+    "human_review_required",
+    "rationale"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,110 @@
+id: pomona-safety-triage-reasoner-v0.1
+name: Pomona Safety Triage Reasoner
+version: 0.1.0
+author: Okyanus
+license: apache-2.0
+
+type: safety_reasoner
+status: needs_targeted_improvement_v0_1_retained
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/SAFETY_TRIAGE_REASONER.md
+
+huggingface:
+  repo_id: null
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  url: null
+  dataset: null
+  published: false
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  output_format: json_object
+  backends:
+    - huggingface_local
+    - rules_fallback
+    - stub
+
+inputs:
+  required:
+    - farm_context
+    - sensor
+    - risk_labels
+    - proposed_action
+    - actor
+
+outputs:
+  schema:
+    - safety_labels
+    - blocked_actions
+    - safe_alternative
+    - human_review_required
+    - rationale
+
+safety:
+  final_authority: false
+  requires_deterministic_checker: true
+  advisory_only: true
+  forbidden:
+    - direct_pesticide_dosage
+    - autonomous_fertigation_change
+    - direct_actuator_control
+    - definitive_disease_diagnosis
+    - unsafe_chemical_recommendation
+
+integration:
+  pomona_flow: |
+    proposed action -> safety triage reasoner -> deterministic safety checker -> dashboard/human approval
+  service:
+    - safety-checker
+    - model-router
+
+evaluation:
+  clean_holdout:
+    status: failed_publish_gate
+    cases: 128
+    dataset_zip: private/colab/pomona-safety-triage-v0.1-clean-eval-data.zip
+    notebook: private/colab/pomona_safety_triage_v0_1_clean_eval_colab.ipynb
+    exact_train_overlap_v0_1: 0
+    exact_train_overlap_v0_1_1: 0
+    compare_adapters:
+      - private/colab/adapters/safety-triage-v0.1-local.zip
+      - private/colab/adapters/safety-triage-v0.1.1-hardcases-local.zip
+    retained_adapter: private/colab/adapters/safety-triage-v0.1-local.zip
+    local_full_eval_report: private/colab/outputs/unpublished_model_full_clean_eval.json
+    results_v0_1:
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      safety_f1_avg: 0.77526
+      blocked_f1_avg: 0.714844
+      human_review_match_rate: 0.960938
+    results_v0_1_1:
+      valid_json_rate: 1.0
+      required_fields_rate: 0.976562
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      safety_f1_avg: 0.68967
+      blocked_f1_avg: 0.674479
+      human_review_match_rate: 0.898438
+    publish_gate:
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      safety_f1_avg_min: 0.95
+      blocked_f1_avg: 1.0
+      human_review_match_rate: 1.0
+  local_template_eval:
+    cases: 50
+    valid_json_rate: 1.0
+    allowed_labels_rate: 1.0
+    allowed_blocked_actions_rate: 1.0
+    safety_f1_avg: 0.99
+    blocked_f1_avg: 1.0
+    human_review_match_rate: 1.0
+    exact_match_rate: 0.86
+  notes: v0.1 is the retained development checkpoint. v0.1.1 is a clean-holdout regression. Improve chemical, multiple-blocked, diagnosis, and autonomous-fertigation cases before publishing.

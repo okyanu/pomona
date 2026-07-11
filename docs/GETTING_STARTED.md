@@ -40,10 +40,6 @@ docker compose up -d mqtt
 | Stub agronomist advice | Real LLM in Docker |
 | | ESP32, automation, safety |
 
-## AI assistants
-
-Read [AGENTS.md](../AGENTS.md) (Cursor, Claude, Codex).
-
 ## Contribute
 
 Open source under Apache-2.0. See [CONTRIBUTING.md](../CONTRIBUTING.md).

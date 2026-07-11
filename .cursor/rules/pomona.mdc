@@ -6,6 +6,8 @@ alwaysApply: true
 # Pomona
 
 Read **AGENTS.md** at repo root before coding.
+Use **docs/EXECUTION_PLAN.md** for the current timetable, Codex/Cursor division of work, and future model-factory planning rules.
+Treat `docs/EXECUTION_PLAN.md` as the active task board: remove completed active items and add dated decision/work log entries.
 
 - Phase 2 next: dashboard + SQLite in `services/core/`
 - Platform repo only — ML training is `pomona-agronomist-llm` (sibling)

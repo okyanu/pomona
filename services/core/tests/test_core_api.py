@@ -1,7 +1,16 @@
 from datetime import datetime, timezone
+import sys
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+SERVICE_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SERVICE_DIR))
+for module_name in list(sys.modules):
+    if module_name == "app" or module_name.startswith("app."):
+        del sys.modules[module_name]
 
 from app.main import app
 from app.store import event_store

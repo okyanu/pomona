@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Sensor Quality Labels",
+  "type": "object",
+  "properties": {
+    "data_quality_labels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "missing_ph",
+          "missing_ec",
+          "missing_temperature",
+          "missing_humidity",
+          "missing_moisture",
+          "impossible_ph",
+          "impossible_ec",
+          "impossible_temperature",
+          "impossible_humidity",
+          "stale_reading",
+          "unit_mismatch",
+          "sensor_drift_possible",
+          "conflicting_readings",
+          "insufficient_context"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["data_quality_labels"],
+  "additionalProperties": false
+}

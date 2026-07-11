@@ -28,10 +28,9 @@ make test
 
 Read before coding:
 
-1. [AGENTS.md](../AGENTS.md) — rules for humans and AI assistants
+1. [docs/architecture.md](architecture.md) — system design and safety boundaries
 2. [docs/PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done; pick unclaimed work
 3. [docs/ROADMAP.md](ROADMAP.md) — phase goals
-4. [docs/architecture.md](architecture.md) — system design
 
 ---
 

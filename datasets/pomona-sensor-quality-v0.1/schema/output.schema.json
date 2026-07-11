@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Sensor Quality Output",
+  "type": "object",
+  "properties": {
+    "data_quality_labels": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "suspect_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "safe_next_checks": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "human_review_required": {"type": "boolean"},
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "data_quality_labels",
+    "missing_fields",
+    "suspect_fields",
+    "safe_next_checks",
+    "human_review_required",
+    "rationale"
+  ],
+  "additionalProperties": false
+}

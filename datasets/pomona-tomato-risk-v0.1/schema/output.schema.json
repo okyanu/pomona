@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Tomato Risk Expected Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "risk_labels",
+    "missing_data",
+    "safe_next_checks",
+    "blocked_actions",
+    "human_review_required"
+  ],
+  "properties": {
+    "risk_labels": {
+      "type": "array",
+      "items": { "$ref": "labels.schema.json#/$defs/risk_label" },
+      "uniqueItems": true
+    },
+    "missing_data": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "safe_next_checks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked_actions": {
+      "type": "array",
+      "items": { "$ref": "labels.schema.json#/$defs/blocked_action" },
+      "uniqueItems": true
+    },
+    "human_review_required": { "type": "boolean" }
+  }
+}

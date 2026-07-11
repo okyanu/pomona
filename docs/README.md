@@ -1,6 +1,6 @@
 # Documentation
 
-Public docs for contributors and users. Personal planning → `private/` (gitignored).
+Public docs for contributors and users.
 
 ## Start here
 
@@ -12,36 +12,22 @@ Public docs for contributors and users. Personal planning → `private/` (gitign
 | [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Community standards |
 | [HF_USAGE.md](./HF_USAGE.md) | **Why stub default + how to use HF model** |
 | [GETTING_STARTED.md](./GETTING_STARTED.md) | Quick run + expectations |
-| [../AGENTS.md](../AGENTS.md) | **AI agents** (Cursor, Claude, Codex) |
 | [PROJECT_STATUS.md](./PROJECT_STATUS.md) | What's done / current phase |
 | [REPOS.md](./REPOS.md) | Platform vs ML vs Hugging Face |
+| [EXECUTION_PLAN.md](./EXECUTION_PLAN.md) | Active Codex/Cursor task board and timetable |
 
 ## Architecture & roadmap
 
 | Doc | Purpose |
 |-----|---------|
 | [PHASES.md](./PHASES.md) | **Phase tracker — update when phases complete** |
-| [ROADMAP.md](./ROADMAP.md) | Roadmap summary |
+| [ROADMAP.md](./ROADMAP.md) | Roadmap summary + Hugging Face links |
 | [architecture.md](./architecture.md) | Architecture (short) |
-| [MODEL_STANDARD.md](./MODEL_STANDARD.md) | Model registry conventions |
+| [SMALL_MODEL_FACTORY.md](./SMALL_MODEL_FACTORY.md) | Repeatable pipeline for narrow specialist models |
+| [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | First tomato risk reasoner notes |
+| [SAFETY_TRIAGE_REASONER.md](./SAFETY_TRIAGE_REASONER.md) | Planned safety triage small model |
+| [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md) | Planned sensor quality small model |
 
-## Publishing
+## Maintainer-only (local, not in Git)
 
-| Doc | Purpose |
-|-----|---------|
-| [MULTI_REPO.md](./MULTI_REPO.md) | Split layout |
-| [PUBLISHING.md](./PUBLISHING.md) | GitHub + HF scripts |
-| [GITHUB.md](./GITHUB.md) | Safe public publish |
-
-## AI tooling in this repo
-
-| File | Tool |
-|------|------|
-| [AGENTS.md](../AGENTS.md) | Universal agent entry point |
-| [CURSOR_RULES.md](./CURSOR_RULES.md) | Cursor supplement |
-| [.cursor/rules/pomona.mdc](../.cursor/rules/pomona.mdc) | Cursor always-on rule |
-| [.github/copilot-instructions.md](../.github/copilot-instructions.md) | GitHub Copilot / Codex |
-
-## Private (not in Git)
-
-Owner notes & research PDFs: `private/` — see [private/README.example.md](../private/README.example.md)
+Private experiments, raw data notes, adapter zips, publish checklists, and internal ML run logs live on the maintainer machine under `private/` and other gitignored paths. They are not part of the public GitHub repo.

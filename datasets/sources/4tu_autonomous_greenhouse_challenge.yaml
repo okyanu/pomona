@@ -1,0 +1,33 @@
+id: 4tu_autonomous_greenhouse_challenge
+name: "4th Autonomous Greenhouse Challenge: Dwarf Tomato Timeseries and Images"
+url: "https://data.4tu.nl/datasets/fa102772-32db-4b30-bace-12f2016722ce/1"
+doi: "10.4121/fa102772-32db-4b30-bace-12f2016722ce.v1"
+license: "CC BY 4.0"
+allowed_use: "Use as a preferred v0.1 source for derived Pomona greenhouse tomato risk labels from timeseries CSV data, with attribution and change notices."
+redistribution_notes: "CC BY 4.0 permits sharing and adaptation with attribution. Raw files stay local in datasets/raw/ and must not be committed to GitHub. For v0.1, use only the timeseries zip and README; skip the 31 GB canopy camera image zip."
+redistribution_allowed: true
+derived_dataset_allowed: true
+attribution_required: true
+license_verified_on: "2026-06-30"
+verification_source: "4TU.ResearchData landing page and DataCite DOI metadata"
+pipeline_priority: "preferred_after_udea"
+data_quality_status: "timeseries_zip_contains_csv_and_harvest_xlsx"
+raw_files:
+  - filename: "README.md"
+    local_path: "datasets/raw/4tu_autonomous_greenhouse_challenge/README.md"
+    content_type: "text/markdown"
+    size_bytes: 3715
+    md5: "f22125b584f3e25ae80ed87e2ba72de1"
+    sha256: "44f6fd53a2523a1d20e1706ceeb480f38a357d92ebe763db0e170938a8010aa5"
+    git_policy: "ignored_raw_source_do_not_commit"
+  - filename: "autonomous_greenhouse_challenge4_timeseries.zip"
+    local_path: "datasets/raw/4tu_autonomous_greenhouse_challenge/autonomous_greenhouse_challenge4_timeseries.zip"
+    content_type: "application/zip"
+    size_bytes: 6014133
+    md5: "c4da1b2696c4a1e5ea5744f2482b0f93"
+    sha256: "19bfddf994ffeeb6eff8c20da14af8ae09956d23d7c6d85d7e5aa017cff3f7b1"
+    git_policy: "ignored_raw_source_do_not_commit"
+skipped_files:
+  - filename: "autonomous_greenhouse_challenge4_canopy_camera.zip"
+    reason: "31 GB image archive is not needed for the compact v0.1 risk-label reasoner dataset."
+status: active_v0_1_source

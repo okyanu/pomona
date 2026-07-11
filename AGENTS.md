@@ -26,10 +26,13 @@ Human quickstart: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 2. [docs/PHASES.md](docs/PHASES.md) — current phase (short)
 3. [docs/architecture.md](docs/architecture.md) — system design (short)
 4. [docs/REPOS.md](docs/REPOS.md) — which repo owns what
+5. [docs/EXECUTION_PLAN.md](docs/EXECUTION_PLAN.md) — timetable, Codex/Cursor workflow, future model planning
 
 Detailed deliverables: `private/planning/` on maintainer machine (gitignored).
 
 Personal owner notes live in `private/` (gitignored) — not in public docs.
+
+Use [docs/EXECUTION_PLAN.md](docs/EXECUTION_PLAN.md) as the active task board: read it before "what next" work, remove completed active items, and add dated decisions/work log entries.
 
 ---
 

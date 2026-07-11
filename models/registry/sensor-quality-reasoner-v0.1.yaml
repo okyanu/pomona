@@ -1,0 +1,91 @@
+id: pomona-sensor-quality-reasoner-v0.1
+name: Pomona Sensor Quality Reasoner
+version: 0.1.0
+author: Okyanus
+license: apache-2.0
+
+type: sensor_quality_reasoner
+status: needs_targeted_improvement
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/SENSOR_QUALITY_REASONER.md
+
+huggingface:
+  repo_id: null
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  url: null
+  dataset: null
+  published: false
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  output_format: json_object
+  backends:
+    - huggingface_local
+    - rules_fallback
+    - stub
+
+inputs:
+  required:
+    - farm_context
+    - sensor
+    - expected_fields
+
+outputs:
+  schema:
+    - data_quality_labels
+    - missing_fields
+    - suspect_fields
+    - safe_next_checks
+    - human_review_required
+    - rationale
+
+safety:
+  advisory_only: true
+  final_authority: false
+  requires_deterministic_checker: true
+
+integration:
+  pomona_flow: |
+    sensor input -> sensor quality reasoner -> crop risk reasoner -> safety triage reasoner
+  service:
+    - model-router
+    - safety-checker
+
+evaluation:
+  clean_holdout:
+    status: failed_publish_gate
+    cases: 180
+    dataset_zip: private/colab/pomona-sensor-quality-v0.1.1-clean-eval-data.zip
+    notebook: private/colab/pomona_sensor_quality_v0_1_1_clean_eval_colab.ipynb
+    exact_train_overlap: 0
+    local_full_eval_report: private/colab/outputs/unpublished_model_full_clean_eval.json
+    results:
+      valid_json_rate: 1.0
+      required_fields_rate: 0.966667
+      allowed_labels_rate: 1.0
+      label_f1_avg: 0.538889
+      missing_f1_avg: 0.833333
+      suspect_f1_avg: 0.588889
+      human_review_match_rate: 0.933333
+    publish_gate:
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_labels_rate: 1.0
+      label_f1_avg_min: 0.9
+      missing_f1_avg_min: 0.9
+      suspect_f1_avg_min: 0.9
+      human_review_match_rate_min: 0.95
+  local_full_test:
+    version: v0.1.1-boundary
+    cases: 270
+    valid_json_rate: 1.0
+    allowed_labels_rate: 1.0
+    exact_match_rate: 0.319
+    label_f1_avg: 0.793
+    missing_f1_avg: 1.0
+    suspect_f1_avg: 0.788
+    human_review_match_rate: 0.933
+  notes: Independent holdout failed the publish gate. Prioritize normal and unit-mismatch separation, impossible-pH cases, and generalized missing-field examples.

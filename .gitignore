@@ -15,6 +15,7 @@ env/
 # IDE / OS
 .vscode/
 .idea/
+.obsidian/
 *.swp
 .DS_Store
 
@@ -72,3 +73,56 @@ research/
 *.ipynb
 
 **/.DS_Store
+
+# Dataset pipeline local data - publish clean artifacts via Hugging Face instead
+datasets/raw/**
+!datasets/raw/README.md
+!datasets/raw/.gitkeep
+datasets/interim/**
+!datasets/interim/README.md
+!datasets/interim/.gitkeep
+datasets/processed/**
+!datasets/processed/README.md
+!datasets/processed/.gitkeep
+datasets/**/data/train.jsonl
+datasets/**/data/validation.jsonl
+datasets/**/data/test.jsonl
+!datasets/pomona-tomato-risk-v0.1/data/
+!datasets/pomona-tomato-risk-v0.1/data/samples.jsonl
+!datasets/pomona-tomato-risk-v0.1/data/eval_cases.jsonl
+!datasets/pomona-safety-triage-v0.1/data/
+!datasets/pomona-safety-triage-v0.1/data/samples.jsonl
+!datasets/pomona-safety-triage-v0.1/data/eval_cases.jsonl
+!datasets/pomona-sensor-quality-v0.1/data/
+!datasets/pomona-sensor-quality-v0.1/data/samples.jsonl
+!datasets/pomona-sensor-quality-v0.1/data/eval_cases.jsonl
+!datasets/pomona-actuator-command-gate-v0.1/data/
+!datasets/pomona-actuator-command-gate-v0.1/data/samples.jsonl
+!datasets/pomona-actuator-command-gate-v0.1/data/eval_cases.jsonl
+
+# Local model eval — golden set used with private/colab adapters (not public scaffold)
+datasets/pomona-tomato-risk-v0.1/data/golden_eval.jsonl
+scripts/datasets/evaluate_tomato_risk_rules.py
+
+# Local train/val/test splits (outputs under datasets/processed/)
+scripts/datasets/split_dataset.py
+
+# Source normalizers — run locally after downloading to datasets/raw/
+scripts/datasets/normalize_4tu_autonomous_greenhouse.py
+scripts/datasets/normalize_udea_greenhouse_tomato.py
+
+# Local teacher-dataset iteration — outputs go to private/colab/ (not public GitHub)
+scripts/datasets/build_pomona_teacher_dataset.py
+scripts/datasets/build_pomona_risk_labels_only_dataset.py
+scripts/datasets/build_pomona_risk_label_list_*.py
+
+# Excluded v0.1 source — keep local until DOCX extraction is ready
+datasets/sources/mendeley_hydroponics_fertigation.yaml
+scripts/datasets/normalize_mendeley_hydroponics.py
+
+# Local Hugging Face release checkouts (publish scripts copy artifacts here)
+hf-repos/
+
+# Downloaded source file types — keep under datasets/raw/ (already ignored) or private/
+*.docx
+*.7z

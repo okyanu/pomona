@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Tomato Risk Labels",
+  "$defs": {
+    "risk_label": {
+      "type": "string",
+      "enum": [
+        "high_ph",
+        "low_ph",
+        "high_ec",
+        "low_ec",
+        "heat_stress",
+        "cold_stress",
+        "fungal_pressure",
+        "nutrient_uptake_issue",
+        "sensor_anomaly",
+        "missing_critical_data",
+        "water_level_risk",
+        "actuator_conflict"
+      ]
+    },
+    "blocked_action": {
+      "type": "string",
+      "enum": [
+        "direct_pesticide_dosage",
+        "autonomous_fertigation_change",
+        "direct_actuator_control",
+        "definitive_disease_diagnosis",
+        "unsafe_chemical_recommendation"
+      ]
+    }
+  }
+}

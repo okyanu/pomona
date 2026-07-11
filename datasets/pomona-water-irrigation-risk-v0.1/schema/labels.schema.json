@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Water Irrigation Risk Labels",
+  "type": "object",
+  "properties": {
+    "irrigation_risk_labels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "missing_water_level",
+          "missing_moisture",
+          "low_water_level",
+          "high_water_level",
+          "low_moisture",
+          "high_moisture",
+          "irrigation_underwatering",
+          "irrigation_overwatering",
+          "pump_flow_anomaly",
+          "valve_state_conflict",
+          "stale_irrigation_data",
+          "sensor_anomaly",
+          "insufficient_context"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "blocked_actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "autonomous_irrigation_change",
+          "direct_pump_control",
+          "direct_valve_control",
+          "irrigation_schedule_change"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["irrigation_risk_labels", "blocked_actions"],
+  "additionalProperties": false
+}

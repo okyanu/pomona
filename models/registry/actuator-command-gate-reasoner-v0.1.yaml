@@ -1,0 +1,154 @@
+id: pomona-actuator-command-gate-reasoner-v0.1
+name: Pomona Actuator Command Gate Reasoner
+version: 0.1.0
+author: Okyanus
+license: apache-2.0
+
+type: actuator_command_gate_reasoner
+status: published_research_preview_below_standalone_gate
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/ACTUATOR_COMMAND_GATE_REASONER.md
+
+huggingface:
+  repo_id: Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  url: https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora
+  dataset: null
+  published: true
+  release_status: research_preview
+  standalone_release_gate_passed: false
+  published_on: "2026-07-11"
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  output_format: json_object
+  backends:
+    - huggingface_local
+    - deterministic_checker
+    - stub
+
+inputs:
+  required:
+    - farm_context
+    - sensor
+    - sensor_quality
+    - risk_labels
+    - actor
+    - proposed_command
+
+outputs:
+  schema:
+    - decision
+    - gate_labels
+    - blocked_actions
+    - human_approval_required
+    - safe_alternatives
+    - rationale
+
+safety:
+  advisory_only: true
+  final_authority: false
+  requires_deterministic_checker: true
+  forbidden:
+    - direct_pesticide_dosage
+    - autonomous_fertigation_change
+    - direct_actuator_control
+    - definitive_disease_diagnosis
+    - unsafe_chemical_recommendation
+
+integration:
+  pomona_flow: |
+    proposed command -> actuator command gate reasoner -> deterministic safety checker -> dashboard/human approval
+  service:
+    - model-router
+    - safety-checker
+  deterministic_endpoint: POST /v1/actuator-command-gate/check
+  future_reasoner_endpoint: POST /v1/reasoners/actuator-command-gate
+
+evaluation:
+  clean_holdout:
+    status: failed_publish_gate
+    cases: 126
+    dataset_zip: private/colab/pomona-actuator-command-gate-v0.1-clean-eval-data.zip
+    notebook: private/colab/pomona_actuator_command_gate_v0_1_clean_eval_colab.ipynb
+    exact_train_overlap: 0
+    local_full_eval_report: private/colab/outputs/unpublished_model_full_clean_eval.json
+    results:
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_decision_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.436508
+      decision_match_rate: 0.857143
+      gate_label_f1_avg: 0.812698
+      blocked_f1_avg: 0.833333
+      human_approval_match_rate: 0.857143
+    publish_gate:
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_decision_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      decision_match_rate_min: 0.95
+      gate_label_f1_avg_min: 0.9
+      blocked_f1_avg: 1.0
+      human_approval_match_rate_min: 0.95
+  local_full_test:
+    version: v0.1
+    cases: 241
+    valid_json_rate: 1.0
+    allowed_decision_rate: 1.0
+    allowed_labels_rate: 1.0
+    allowed_blocked_actions_rate: 1.0
+    exact_match_rate: 0.556
+    decision_match_rate: 0.772
+    gate_label_f1_avg: 0.873
+    blocked_f1_avg: 0.959
+    human_approval_match_rate: 0.772
+  rejected_versions:
+    - version: v0.1.1-hardcases
+      reason: Local regression; worse than v0.1 on hardcase comparison.
+    - version: v0.1.2-correction
+      reason: Improved label and blocked-action F1, but regressed decision/human-review behavior and emitted an unknown label on the independent holdout.
+  latest_experiment:
+    version: v0.1.2-correction
+    status: rejected_regression
+    base_model: Qwen/Qwen2.5-0.5B-Instruct
+    train_records: 4237
+    validation_records: 528
+    generated_test_records: 529
+    clean_holdout_records: 126
+    exact_clean_holdout_overlap: 0
+    training_zip: private/colab/pomona-actuator-command-gate-v0.1.2-correction-training-data.zip
+    notebook: private/colab/pomona_actuator_command_gate_reasoner_v0_1_2_correction_colab.ipynb
+    expected_adapter: private/colab/adapters/actuator-command-gate-v0.1.2-correction-local.zip
+    training:
+      epochs: 1
+      learning_rate: 0.00015
+    colab_generated_test_smoke:
+      cases: 50
+      valid_json_rate: 1.0
+      exact_match_rate: 1.0
+      gate_label_f1_avg: 1.0
+      blocked_f1_avg: 1.0
+      decision_match_rate: 1.0
+      human_approval_match_rate: 1.0
+    independent_clean_holdout:
+      report: private/colab/outputs/actuator-v0.1.2-clean-diagnostic.json
+      cases: 126
+      valid_json_rate: 1.0
+      required_fields_rate: 1.0
+      allowed_decision_rate: 1.0
+      allowed_labels_rate: 0.984127
+      allowed_blocked_actions_rate: 1.0
+      exact_match_rate: 0.293651
+      gate_label_f1_avg: 0.853704
+      blocked_f1_avg: 0.888889
+      decision_match_rate: 0.666667
+      human_approval_match_rate: 0.777778
+      invalid_output_count: 2
+  notes: Closest unpublished candidate, but the clean holdout still fails release gates. Improve chemical, manual-check, irrigation-control, and actuator-conflict cases. Deterministic safety-checker remains final authority.

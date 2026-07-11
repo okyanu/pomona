@@ -1,0 +1,98 @@
+id: pomona-tomato-risk-reasoner-v0.1.7
+name: Pomona Tomato Risk Reasoner
+version: 0.1.7
+author: Okyanus
+license: apache-2.0
+
+type: reasoner
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/TOMATO_RISK_REASONER.md
+
+huggingface:
+  repo_id: Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  url: https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
+  dataset: Okyanus/greenhouse-sensor-data
+
+runtime:
+  engine: peft-lora
+  format: safetensors
+  output_format: json_label_list
+  backends:
+    - huggingface_local
+    - hybrid_guarded
+    - stub
+
+domain:
+  crop:
+    - tomato
+  environment:
+    - greenhouse
+    - hydroponic
+    - substrate
+
+inputs:
+  required:
+    - system_type
+    - crop
+    - growth_stage
+    - air_temperature_c
+    - humidity_pct
+    - ph
+    - ec_ms_cm
+  optional:
+    - co2_ppm
+    - light_lux
+    - light_ppfd
+    - tds_ppm
+    - water_temperature_c
+    - substrate_temperature_c
+    - substrate_moisture_pct
+    - actuator_states
+    - symptoms
+
+outputs:
+  schema:
+    - risk_labels
+  allowed_risk_labels:
+    - high_ph
+    - low_ph
+    - high_ec
+    - low_ec
+    - heat_stress
+    - cold_stress
+    - fungal_pressure
+    - nutrient_uptake_issue
+    - sensor_anomaly
+    - missing_critical_data
+    - water_level_risk
+    - actuator_conflict
+
+safety:
+  requires_safety_checker: true
+  requires_rule_guardrails: true
+  advisory_only: true
+  forbidden:
+    - direct_pesticide_dosage
+    - autonomous_fertigation_change
+    - direct_actuator_control
+    - definitive_disease_diagnosis
+    - unsafe_chemical_recommendation
+
+evaluation:
+  model_only:
+    staged_risk_f1: 0.924
+    golden_risk_f1: 0.667
+  hybrid_guarded:
+    golden_risk_f1: 1.0
+    staged_risk_f1: 1.0
+  notes: Hybrid scores are from rule-derived evaluation data and validate guardrail integration.
+
+integration:
+  pomona_flow: |
+    sensor data -> tomato risk reasoner -> deterministic tomato rules -> safety checker -> dashboard/API
+  service:
+    - model-router
+    - safety-checker

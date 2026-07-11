@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Tomato Risk Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "system_type",
+    "crop",
+    "growth_stage",
+    "air_temperature_c",
+    "humidity_pct",
+    "co2_ppm",
+    "light_lux",
+    "light_ppfd",
+    "ph",
+    "ec_ms_cm",
+    "tds_ppm",
+    "water_temperature_c",
+    "substrate_temperature_c",
+    "substrate_moisture_pct",
+    "actuator_states",
+    "symptoms"
+  ],
+  "properties": {
+    "system_type": { "type": ["string", "null"] },
+    "crop": { "type": ["string", "null"] },
+    "growth_stage": { "type": ["string", "null"] },
+    "air_temperature_c": { "type": ["number", "null"] },
+    "humidity_pct": { "type": ["number", "null"] },
+    "co2_ppm": { "type": ["number", "null"] },
+    "light_lux": { "type": ["number", "null"] },
+    "light_ppfd": { "type": ["number", "null"] },
+    "ph": { "type": ["number", "null"] },
+    "ec_ms_cm": { "type": ["number", "null"] },
+    "tds_ppm": { "type": ["number", "null"] },
+    "water_temperature_c": { "type": ["number", "null"] },
+    "substrate_temperature_c": { "type": ["number", "null"] },
+    "substrate_moisture_pct": { "type": ["number", "null"] },
+    "actuator_states": {
+      "type": "object",
+      "additionalProperties": { "type": ["boolean", "string", "number", "null"] }
+    },
+    "symptoms": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -60,7 +60,8 @@ where = ["."]
 include = []  # meta-package; services installed via requirements.txt per service
 
 [tool.pytest.ini_options]
-testpaths = ["services/core/tests", "services/model-router/tests"]
+testpaths = ["services/core/tests", "services/model-router/tests", "services/safety-checker/tests"]
+addopts = ["--import-mode=importlib"]
 
 [tool.ruff]
 line-length = 100

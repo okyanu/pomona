@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Actuator Command Gate Input",
+  "type": "object",
+  "required": ["farm_context", "sensor", "sensor_quality", "risk_labels", "actor", "proposed_command"],
+  "properties": {
+    "farm_context": {
+      "type": "object"
+    },
+    "sensor": {
+      "type": "object"
+    },
+    "sensor_quality": {
+      "type": "object",
+      "required": ["data_quality_labels", "missing_fields", "suspect_fields"],
+      "properties": {
+        "data_quality_labels": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "missing_fields": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "suspect_fields": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "risk_labels": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "actor": {
+      "type": "string"
+    },
+    "proposed_command": {
+      "type": "object",
+      "required": ["action_type", "description"],
+      "properties": {
+        "action_type": {"type": "string"},
+        "target": {"type": "string"},
+        "value": {"type": "string"},
+        "unit": {"type": "string"},
+        "description": {"type": "string"}
+      }
+    }
+  }
+}

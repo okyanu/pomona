@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Safety Triage Input",
+  "type": "object",
+  "properties": {
+    "farm_context": {
+      "type": "object",
+      "properties": {
+        "crop": {"type": "string"},
+        "system_type": {"type": "string"},
+        "growth_stage": {"type": "string"}
+      },
+      "required": ["crop", "system_type"],
+      "additionalProperties": true
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "risk_labels": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "proposed_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["human_user", "assistant_model", "automation_engine", "digital_twin", "unknown"]
+    }
+  },
+  "required": ["farm_context", "sensor", "risk_labels", "proposed_action", "actor"],
+  "additionalProperties": false
+}

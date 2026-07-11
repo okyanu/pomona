@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Water Irrigation Risk Input",
+  "type": "object",
+  "properties": {
+    "farm_context": {
+      "type": "object",
+      "properties": {
+        "crop": {"type": "string"},
+        "system_type": {"type": "string"},
+        "zone_id": {"type": "string"}
+      },
+      "required": ["crop", "system_type"],
+      "additionalProperties": true
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "actuator_states": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "expected_fields": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": ["farm_context", "sensor", "expected_fields"],
+  "additionalProperties": false
+}

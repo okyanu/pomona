@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pomona Actuator Command Gate Output",
+  "type": "object",
+  "required": [
+    "decision",
+    "gate_labels",
+    "blocked_actions",
+    "human_approval_required",
+    "safe_alternatives",
+    "rationale"
+  ],
+  "properties": {
+    "decision": {
+      "enum": ["allowed", "blocked", "needs_human_approval"]
+    },
+    "gate_labels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "safe_observation_only",
+          "safe_manual_check",
+          "human_approval_required",
+          "direct_actuator_control_request",
+          "autonomous_fertigation_change",
+          "irrigation_control_request",
+          "climate_control_request",
+          "chemical_application_request",
+          "unsafe_chemical_recommendation",
+          "definitive_disease_diagnosis",
+          "missing_or_bad_sensor_data",
+          "actuator_conflict",
+          "out_of_policy_request"
+        ]
+      }
+    },
+    "blocked_actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "direct_pesticide_dosage",
+          "autonomous_fertigation_change",
+          "direct_actuator_control",
+          "definitive_disease_diagnosis",
+          "unsafe_chemical_recommendation"
+        ]
+      }
+    },
+    "human_approval_required": {
+      "type": "boolean"
+    },
+    "safe_alternatives": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "rationale": {
+      "type": "string"
+    }
+  }
+}
