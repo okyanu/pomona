@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pomona"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Open edge AI stack for agriculture"
 readme = "README.md"
 license = { text = "Apache-2.0" }

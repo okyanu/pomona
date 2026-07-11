@@ -715,6 +715,7 @@ A task is done when:
 
 ### 2026-07-11
 
+- Established independent platform/model/dataset versioning. The current GitHub platform checkpoint is `v0.1.0-alpha.1`; model checkpoints retain their own versions and lifecycle labels, and phases remain product milestones rather than release numbers. Added `VERSION` and `docs/VERSIONING.md`, synchronized the public phase tables, and documented experimental, research-preview, release-candidate, stable, deprecated, and rejected-regression states.
 - Published Water/Irrigation Risk Reasoner v0.1.8 to `Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora` as a release candidate. Its model card discloses synthetic/rule-derived evaluation, advisory-only use, deterministic validation, local threshold calibration, and human-review requirements.
 - Published Actuator Command Gate v0.1 to `Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora` as a research preview below the standalone release gate. The card exposes the independent scores and explicitly prohibits direct actuator use; Pomona's deterministic checker remains final authority.
 - Added reciprocal ecosystem links to the existing tomato and agronomist Hugging Face model cards. Added the previously missing `Okyanus/greenhouse-sensor-data` dataset card with 4TU CC BY 4.0 attribution, mixed source/derived-data disclosure, limitations, and links to all public Pomona assets.

@@ -2,7 +2,7 @@
 
 Open edge AI for controlled agriculture.
 
-**11 phases (0–10)** · **2 done** · **Phase 2 in progress** · [Full tracker →](./PHASES.md)
+**Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **6 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
 
 | # | Focus | Status |
 |---|--------|--------|
@@ -11,15 +11,15 @@ Open edge AI for controlled agriculture.
 | 2 | Dashboard + persistence | ⏳ **now** |
 | 3 | Tomato reasoner | ⏳ partial — [HF LoRA](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) published; platform wiring pending |
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; platform wiring pending |
-| 4 | Safety checker | ⬜ |
-| 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⬜ |
+| 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
+| 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter and router contract exist; live wiring pending |
 | 6 | Automation (suggestions) | ⬜ |
 | 7 | Public browser demo | ⬜ |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — `models/registry/` |
 | 10 | Train reasoner models | ⏳ partial — v0.1.7 LoRA on HF |
 
-**v0.1:** Tomato greenhouse — pH, EC, humidity, temperature, soil moisture.
+Product phases and release versions are separate. See [VERSIONING.md](./VERSIONING.md).
 
 ## Repos and releases
 
@@ -43,9 +43,10 @@ Current best model set:
 | Tomato risk `v0.1.7` | Published | Best tomato risk-label adapter; use with deterministic tomato rules |
 | Sensor quality `v0.1.1-boundary` | Local, not published | Good enough for first integration; detects missing/suspect/stale/conflicting sensor packets |
 | Safety triage `v0.1` | Local, not published | Good enough for first integration; classifies unsafe proposed actions |
-| Actuator command gate `v0.1` | Local, not published | Advisory only; deterministic checker remains final authority |
+| Water / irrigation risk `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
+| Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker remains final authority |
 | Actuator command gate `v0.1.1-hardcases` | Rejected | Local eval regression; do not use |
-| Water / irrigation risk `v0.1` | Local scaffold | Next new model family; dataset builder and validator scaffold |
+| Actuator command gate `v0.1.2-correction` | Rejected | Independent-eval regression; do not use |
 
 Next integration work:
 
@@ -59,7 +60,6 @@ POST /v1/actuator-command-gate/check
 Future model families:
 
 ```text
-water / irrigation risk reasoner (scaffold started)
 nutrient / pH-EC reasoner
 strawberry risk reasoner
 lettuce risk reasoner

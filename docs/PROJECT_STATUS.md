@@ -8,7 +8,9 @@ Living record of completed work. **Update when a phase completes** — see check
 |---|---|
 | **Total phases** | 11 (Phase 0 – Phase 10) |
 | **Completed** | Phase 0 ✅, Phase 1 ✅ |
-| **In progress** | Phase 2 ⏳ |
+| **Primary focus** | Phase 2 ⏳ |
+| **Active / partial** | Phases 2, 3, 4, 5, 9, 10 |
+| **Platform version** | `v0.1.0-alpha.1` |
 | **Canonical tracker** | [PHASES.md](./PHASES.md) |
 
 Agents: read [PHASES.md](./PHASES.md) before starting work.

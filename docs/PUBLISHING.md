@@ -11,6 +11,10 @@ Three publish targets — **three different places**, not one Git repo for every
 
 > **Multi-repo recommended.** Platform + ML training are separate GitHub repos. Weights and dataset releases live on Hugging Face only.
 
+Platform, model, and dataset versions advance independently. Lifecycle labels
+such as research preview and release candidate must be published alongside the
+number. See [VERSIONING.md](./VERSIONING.md).
+
 ---
 
 ## Published assets (current)

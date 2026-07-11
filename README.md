@@ -1,6 +1,7 @@
 # Pomona — Open Edge AI Stack for Agriculture
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Platform version](https://img.shields.io/badge/version-v0.1.0--alpha.1-orange.svg)](VERSION)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Hugging Face model](https://img.shields.io/badge/Model-Hugging%20Face-yellow)](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)
 
@@ -88,23 +89,23 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 
 ## Project phases
 
-**11 phases total** · **2 completed** · **Phase 2 in progress**
+**Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **6 active/partial** · **Phase 2 is the primary product focus**
 
 | Phase | Name | Status |
 |-------|------|--------|
 | 0 | Project setup & open source | ✅ |
 | 1 | Local MVP (Docker, core, simulator) | ✅ |
 | 2 | Dashboard + database | ⏳ **now** — completes Docker plug-and-play |
-| 3 | Tomato reasoner | ⬜ |
-| 4 | Safety checker | ⬜ |
-| 5 | LLM advisor | ⬜ |
+| 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
+| 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
+| 5 | LLM advisor | ⏳ partial — published adapter + router contract |
 | 6 | Automation engine | ⬜ |
 | 7 | Public demo | ⬜ |
 | 8 | ESP32 devices | ⬜ |
-| 9 | Model registry | ⬜ |
-| 10 | Fine-tune pipeline | ⬜ |
+| 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |
+| 10 | Fine-tune pipeline | ⏳ partial — builders, validators, Colab, clean eval |
 
-Details & update rules: **[docs/PHASES.md](docs/PHASES.md)** · [PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+Details & update rules: **[docs/PHASES.md](docs/PHASES.md)** · [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [VERSIONING.md](docs/VERSIONING.md)
 
 ## License
 

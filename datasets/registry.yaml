@@ -1,6 +1,8 @@
 datasets:
   - id: pomona-tomato-risk-v0.1
     name: Pomona Tomato Risk v0.1
+    version: 0.1.0
+    lifecycle: published_research_dataset
     task: greenhouse_tomato_risk_labeling
     status: scaffold
     github_path: datasets/pomona-tomato-risk-v0.1
@@ -29,6 +31,8 @@ datasets:
       - data/test.jsonl
   - id: pomona-actuator-command-gate-v0.1
     name: Pomona Actuator Command Gate v0.1
+    version: 0.1.0
+    lifecycle: scaffold
     task: actuator_command_gate_classification
     status: local_v0_1_failed_v0_1_1_scaffold_ready
     github_path: datasets/pomona-actuator-command-gate-v0.1
@@ -46,6 +50,8 @@ datasets:
       - data/eval_cases.jsonl
   - id: pomona-water-irrigation-risk-v0.1
     name: Pomona Water Irrigation Risk v0.1
+    version: 0.1.0
+    lifecycle: scaffold
     task: water_irrigation_risk_labeling
     status: local_scaffold_generated
     github_path: datasets/pomona-water-irrigation-risk-v0.1

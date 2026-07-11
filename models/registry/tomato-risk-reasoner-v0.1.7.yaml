@@ -5,6 +5,7 @@ author: Okyanus
 license: apache-2.0
 
 type: reasoner
+status: published_experimental_specialist
 
 github:
   platform_repo: Okyanus/pomona
@@ -15,6 +16,8 @@ huggingface:
   base_model: Qwen/Qwen2.5-0.5B-Instruct
   url: https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
   dataset: Okyanus/greenhouse-sensor-data
+  published: true
+  release_status: experimental
 
 runtime:
   engine: peft-lora

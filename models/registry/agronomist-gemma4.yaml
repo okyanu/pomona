@@ -5,6 +5,7 @@ author: Okyanus
 license: apache-2.0
 
 type: advisor_llm
+status: published_advisory
 
 github:
   training_repo: Okyanus/pomona-agronomist-llm
@@ -14,6 +15,8 @@ huggingface:
   repo_id: Okyanus/ai-pomona-agronomist-gemma4
   base_model: google/gemma-4-E2B-it
   url: https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4
+  published: true
+  release_status: experimental
 
 runtime:
   engine: peft-lora

@@ -22,6 +22,7 @@ Public docs for contributors and users.
 |-----|---------|
 | [PHASES.md](./PHASES.md) | **Phase tracker — update when phases complete** |
 | [ROADMAP.md](./ROADMAP.md) | Roadmap summary + Hugging Face links |
+| [VERSIONING.md](./VERSIONING.md) | Platform, model, dataset, and lifecycle version rules |
 | [architecture.md](./architecture.md) | Architecture (short) |
 | [SMALL_MODEL_FACTORY.md](./SMALL_MODEL_FACTORY.md) | Repeatable pipeline for narrow specialist models |
 | [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | First tomato risk reasoner notes |
