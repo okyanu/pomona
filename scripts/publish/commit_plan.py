@@ -55,12 +55,6 @@ LOCAL_SENSITIVE_PATHS = {
     "scripts/capture_article_scenarios.py",
     "scripts/run_article_demo.sh",
 }
-TRACKED_REDACTION_PATHS = {
-    "docs/EXECUTION_PLAN.md",
-    "docs/UNPUBLISHED_MODEL_RELEASES.md",
-}
-
-
 @dataclass(frozen=True)
 class Change:
     path: str
@@ -156,13 +150,6 @@ def classify(path: str) -> tuple[str, str, str]:
             "Owner draft, evidence, visual, or roadmap; keep outside open-source Git.",
         )
 
-    if path in TRACKED_REDACTION_PATHS:
-        return (
-            "tracked_redaction_review",
-            "tracked_operational_notes",
-            "Already tracked; redact local paths and unpublished operational detail before commit.",
-        )
-
     if path.startswith("services/"):
         return (
             "platform_candidate",
@@ -199,7 +186,14 @@ def classify(path: str) -> tuple[str, str, str]:
             "simulator",
             "Public platform simulator.",
         )
-    if path in {".env.example", ".gitignore", "Makefile", "README.md", "docker-compose.yml"}:
+    if path.startswith((".cursor/", ".github/", "wiki/")) or path in {
+        ".env.example",
+        ".gitignore",
+        "AGENTS.md",
+        "Makefile",
+        "README.md",
+        "docker-compose.yml",
+    }:
         return (
             "platform_candidate",
             "platform_foundation",

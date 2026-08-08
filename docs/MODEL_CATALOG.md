@@ -58,6 +58,5 @@ sensor packet -> specialist model -> schema/label validation
   -> deterministic Pomona safety rules -> human approval -> optional automation
 ```
 
-See [UNPUBLISHED_MODEL_RELEASES.md](UNPUBLISHED_MODEL_RELEASES.md), the
-[model registry](../models/registry/README.md), and
+See the [model registry](../models/registry/README.md) and
 [LOCAL_MODEL_RUNTIMES.md](LOCAL_MODEL_RUNTIMES.md).

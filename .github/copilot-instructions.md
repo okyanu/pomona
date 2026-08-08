@@ -1,7 +1,7 @@
 # Copilot / Codex instructions
 
 Read [AGENTS.md](../AGENTS.md) at the repository root before making changes.
-Use [docs/EXECUTION_PLAN.md](../docs/EXECUTION_PLAN.md) for the current timetable, Codex/Cursor workflow, and future planning rules.
+Use [docs/PROJECT_STATUS.md](../docs/PROJECT_STATUS.md) and [docs/PHASES.md](../docs/PHASES.md) for the public project state and current phase.
 
 **Pomona** — edge AI platform for agriculture. Early MVP.
 

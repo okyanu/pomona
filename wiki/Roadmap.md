@@ -35,4 +35,4 @@ POST /v1/actuator-command-gate/check
 
 ## Details
 
-Full phase tracker with update rules: [docs/PHASES.md](https://github.com/Okyanus/pomona/blob/main/docs/PHASES.md) · [docs/PROJECT_STATUS.md](https://github.com/Okyanus/pomona/blob/main/docs/PROJECT_STATUS.md) · [docs/EXECUTION_PLAN.md](https://github.com/Okyanus/pomona/blob/main/docs/EXECUTION_PLAN.md)
+Full phase tracker with update rules: [docs/PHASES.md](https://github.com/Okyanus/pomona/blob/main/docs/PHASES.md) · [docs/PROJECT_STATUS.md](https://github.com/Okyanus/pomona/blob/main/docs/PROJECT_STATUS.md)
