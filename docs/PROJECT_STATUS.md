@@ -158,6 +158,21 @@ No model weights are committed to GitHub. Local adapters stay under `private/` a
 
 See `private/planning/ROADMAP.full.md` for deliverables (local).
 
+### Current local checkpoint (2026-07-21)
+
+| Deliverable | Status | Verification |
+|---|---|---|
+| SQLite sensor-event persistence | ✅ local | restart recovery in `make local-check` |
+| Read-only dashboard | ✅ local | HTML and API assertions pass |
+| Guarded pipeline view | ✅ local | high-risk and routine scenarios pass |
+| Summary-only audit view | ✅ local | payload redaction test passes |
+| Backup and restore scripts | ✅ local | SQLite online-backup round-trip passes |
+| Docker Compose deployment smoke test | ✅ local | all six services healthy; benchmark assertions pass |
+
+The local Docker, MQTT simulation, backup/recovery, and pre-hardware safety
+checks are complete. This is still not a production or hardware validation
+result; real device testing remains a separate milestone.
+
 ---
 
 ## When a phase completes — update checklist

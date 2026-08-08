@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pomona.ag/schemas/sensor-event.schema.json",
+  "title": "Pomona Sensor Event",
+  "description": "Canonical sensor packet accepted by pomona-core HTTP and MQTT ingestion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id", "farm_id", "zone_id", "crop", "growth_stage", "system_type", "air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct", "timestamp"],
+  "properties": {
+    "device_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "farm_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "zone_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "crop": {"type": "string", "minLength": 1, "maxLength": 64, "default": "tomato"},
+    "growth_stage": {"type": "string", "minLength": 1, "maxLength": 64, "default": "flowering"},
+    "system_type": {"type": "string", "minLength": 1, "maxLength": 64, "default": "greenhouse_substrate"},
+    "air_temperature_c": {"type": "number", "minimum": -40, "maximum": 80},
+    "humidity_pct": {"type": "number", "minimum": 0, "maximum": 100},
+    "ec_ms_cm": {"type": "number", "minimum": 0, "maximum": 20},
+    "ph": {"type": "number", "minimum": 0, "maximum": 14},
+    "soil_moisture_pct": {"type": "number", "minimum": 0, "maximum": 100},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "source": {"type": ["string", "null"], "maxLength": 64}
+  }
+}

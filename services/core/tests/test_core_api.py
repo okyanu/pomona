@@ -18,9 +18,9 @@ from app.store import event_store
 
 @pytest.fixture(autouse=True)
 def clear_store():
-    event_store._events.clear()
+    event_store.clear()
     yield
-    event_store._events.clear()
+    event_store.clear()
 
 
 @pytest.fixture
@@ -63,3 +63,32 @@ def test_ingest_and_list_sensor_event(client: TestClient):
     latest = client.get("/v1/sensors/events/latest")
     assert latest.status_code == 200
     assert latest.json()["ph"] == 6.2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("humidity_pct", 101.0),
+        ("soil_moisture_pct", -0.1),
+        ("ph", 14.1),
+        ("ec_ms_cm", 20.1),
+        ("air_temperature_c", -40.1),
+    ],
+)
+def test_rejects_sensor_values_outside_hardware_contract(client: TestClient, field: str, value: float):
+    payload = {
+        "device_id": "test-device",
+        "farm_id": "demo-farm",
+        "zone_id": "greenhouse-a",
+        "air_temperature_c": 25.0,
+        "humidity_pct": 60.0,
+        "ec_ms_cm": 2.0,
+        "ph": 6.0,
+        "soil_moisture_pct": 45.0,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    payload[field] = value
+
+    response = client.post("/v1/sensors/events", json=payload)
+
+    assert response.status_code == 422

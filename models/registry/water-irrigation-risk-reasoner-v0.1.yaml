@@ -26,8 +26,37 @@ runtime:
   output_format: json_object
   backends:
     - huggingface_local
+    - ollama_gguf
+    - mlx
     - rules_fallback
     - stub
+  local_deployment_candidates:
+    ollama_f16:
+      status: published
+      format: gguf
+      model: pomona-water-irrigation:v0.1.8
+      repository: Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-GGUF
+      url: https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-GGUF
+      frozen_holdout_cases: 168
+      label_f1: 1.0
+      blocked_action_f1: 1.0
+      human_review_match: 1.0
+    mlx_8bit:
+      status: published
+      format: mlx
+      repository: Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-MLX
+      url: https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-MLX
+      frozen_holdout_cases: 168
+      label_f1: 1.0
+      blocked_action_f1: 1.0
+      human_review_match: 1.0
+    mlx_4bit:
+      status: rejected_regression
+      format: mlx
+      frozen_holdout_cases: 168
+      label_f1: 0.7262
+      blocked_action_f1: 0.9762
+      human_review_match: 0.5536
 
 inputs:
   required:

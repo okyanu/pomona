@@ -1,0 +1,32 @@
+{
+  "scenario_id": "hydroponic-leafy-greens-normal-simulated",
+  "label": "Simulated validation scenario - not commercial greenhouse or field results.",
+  "validation_expectations": {
+    "human_review_required": false,
+    "blocked_actions_nonempty": false
+  },
+  "farm_context": {
+    "farm_id": "demo-leafy-greens",
+    "zone_id": "rack-1",
+    "crop": "lettuce",
+    "growth_stage": "vegetative",
+    "system_type": "hydroponic"
+  },
+  "expected_fields": [
+    "air_temperature_c",
+    "humidity_pct",
+    "ph",
+    "ec_ms_cm",
+    "water_temperature_c"
+  ],
+  "sensor": {
+    "timestamp": "__CURRENT_TIMESTAMP__",
+    "air_temperature_c": 21.0,
+    "humidity_pct": 64.0,
+    "ph": 6.1,
+    "ec_ms_cm": 1.8,
+    "water_temperature_c": 20.0
+  },
+  "proposed_command": {"action_type": "continue_monitoring"},
+  "actor": "assistant_model"
+}

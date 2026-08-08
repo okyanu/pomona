@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -14,12 +15,27 @@ def format_sensor_summary(sensor: Dict[str, Any]) -> str:
     return ", ".join(parts) if parts else "no sensor data"
 
 
-def build_user_message(instruction: str, sensor: Dict[str, Any]) -> str:
+def build_user_message(
+    instruction: str,
+    sensor: Dict[str, Any],
+    guarded_context: Optional[Dict[str, Any]] = None,
+) -> str:
     summary = format_sensor_summary(sensor)
-    return f"{instruction}\n\nSensor data: {summary}"
+    message = f"{instruction}\n\nSensor data: {summary}"
+    if guarded_context:
+        message += (
+            "\n\nGuarded Pomona context (treat as authoritative for safety): "
+            + json.dumps(guarded_context, sort_keys=True, default=str)
+            + "\nExplain this context. Do not add actions that are not present in safe checks."
+        )
+    return message
 
 
-def _stub_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[str, Any]:
+def _stub_explanation(
+    instruction: str,
+    sensor: Dict[str, Any],
+    guarded_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     humidity = sensor.get("humidity_pct")
     ph = sensor.get("ph")
     temp = sensor.get("air_temperature_c")
@@ -45,10 +61,25 @@ def _stub_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[str, Any
     if not risks:
         risks.append("No critical threshold breach in stub analysis — verify with reasoner rules")
 
+    if guarded_context:
+        blocked = guarded_context.get("blocked_actions") or []
+        if blocked:
+            risks.append("Guarded review is required before: " + ", ".join(blocked))
+        checks.extend(guarded_context.get("safe_next_checks") or [])
+
+    guarded_summary = ""
+    if guarded_context and guarded_context.get("blocked_actions"):
+        guarded_summary = (
+            " Blocked actions: "
+            + ", ".join(guarded_context["blocked_actions"])
+            + "."
+        )
     explanation = (
         f"[stub backend] {instruction} "
         f"Based on available readings ({format_sensor_summary(sensor)}), "
-        f"review {len(risks)} risk signal(s) before acting."
+        f"review {len(risks)} risk signal(s) before acting. "
+        + ("Use the guarded context as the safety boundary." if guarded_context else "")
+        + guarded_summary
     )
 
     return {
@@ -64,8 +95,12 @@ def _stub_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-async def _ollama_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[str, Any]:
-    user_message = build_user_message(instruction, sensor)
+async def _ollama_explanation(
+    instruction: str,
+    sensor: Dict[str, Any],
+    guarded_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    user_message = build_user_message(instruction, sensor, guarded_context)
     payload = {
         "model": settings.ollama_model,
         "messages": [{"role": "user", "content": user_message}],
@@ -91,7 +126,11 @@ async def _ollama_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[
     }
 
 
-async def _huggingface_explanation(instruction: str, sensor: Dict[str, Any]) -> Dict[str, Any]:
+async def _huggingface_explanation(
+    instruction: str,
+    sensor: Dict[str, Any],
+    guarded_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Call Hugging Face Inference API for the registered agronomist model."""
     if not settings.hf_token:
         raise ValueError(
@@ -101,7 +140,7 @@ async def _huggingface_explanation(instruction: str, sensor: Dict[str, Any]) -> 
 
     from huggingface_hub import InferenceClient
 
-    user_message = build_user_message(instruction, sensor)
+    user_message = build_user_message(instruction, sensor, guarded_context)
     prompt = (
         f"<start_of_turn>user\n{user_message}<end_of_turn>\n"
         f"<start_of_turn>model\n"
@@ -129,14 +168,19 @@ async def _huggingface_explanation(instruction: str, sensor: Dict[str, Any]) -> 
     }
 
 
-async def explain(instruction: str, sensor: Dict[str, Any], backend: Optional[str] = None) -> Dict[str, Any]:
+async def explain(
+    instruction: str,
+    sensor: Dict[str, Any],
+    backend: Optional[str] = None,
+    guarded_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     selected = (backend or settings.backend).lower()
 
     if selected == "huggingface":
         try:
-            return await _huggingface_explanation(instruction, sensor)
+            return await _huggingface_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
-            result = _stub_explanation(instruction, sensor)
+            result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
             result["fallback_reason"] = (
                 f"Hugging Face inference failed: {exc}. "
@@ -147,11 +191,11 @@ async def explain(instruction: str, sensor: Dict[str, Any], backend: Optional[st
 
     if selected == "ollama":
         try:
-            return await _ollama_explanation(instruction, sensor)
+            return await _ollama_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
-            result = _stub_explanation(instruction, sensor)
+            result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
             result["fallback_reason"] = f"ollama unavailable: {exc}"
             return result
 
-    return _stub_explanation(instruction, sensor)
+    return _stub_explanation(instruction, sensor, guarded_context)

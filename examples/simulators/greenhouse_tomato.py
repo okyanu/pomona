@@ -27,6 +27,7 @@ def build_reading() -> dict:
         "zone_id": ZONE_ID,
         "crop": "tomato",
         "growth_stage": "flowering",
+        "system_type": "greenhouse_substrate",
         "air_temperature_c": round(random.uniform(22.0, 34.0), 1),
         "humidity_pct": round(random.uniform(55.0, 92.0), 1),
         "ec_ms_cm": round(random.uniform(1.8, 4.2), 2),

@@ -8,11 +8,11 @@ Open edge AI for controlled agriculture.
 |---|--------|--------|
 | 0 | Repo, docs, open source | ✅ |
 | 1 | Docker, core API, MQTT, simulator | ✅ |
-| 2 | Dashboard + persistence | ⏳ **now** |
-| 3 | Tomato reasoner | ⏳ partial — [HF LoRA](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) published; platform wiring pending |
-| 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; platform wiring pending |
+| 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; production hardening remains |
+| 3 | Tomato reasoner | ⏳ partial — deterministic guarded route works; local LoRA wiring pending |
+| 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
-| 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter and router contract exist; live wiring pending |
+| 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
 | 6 | Automation (suggestions) | ⬜ |
 | 7 | Public browser demo | ⬜ |
 | 8 | ESP32 devices | ⬜ |

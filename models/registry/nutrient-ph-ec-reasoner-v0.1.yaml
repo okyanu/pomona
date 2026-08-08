@@ -1,0 +1,63 @@
+id: pomona-nutrient-ph-ec-reasoner-v0.1
+name: Pomona Nutrient pH EC Reasoner
+version: 0.1.1
+author: Okyanus
+license: apache-2.0
+type: nutrient_ph_ec_reasoner
+status: release_candidate_guarded_runtime_published
+
+github:
+  platform_repo: Okyanus/pomona
+  docs: docs/NUTRIENT_PH_EC_REASONER.md
+
+huggingface:
+  repo_id: Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-lora
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  published: true
+  runtime_repositories:
+    gguf: Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-GGUF
+    mlx: Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-MLX
+
+runtime:
+  engine: deterministic_rules_first
+  output_format: json_object
+  backends:
+    - rules_fallback
+    - future_huggingface_local
+    - local_peft_lora_candidate
+    - local_gguf_ollama_guarded
+    - local_mlx_guarded
+
+evaluation:
+  clean_holdout_cases: 140
+  valid_json_rate: 1.0
+  allowed_labels_rate: 1.0
+  allowed_blocked_actions_rate: 1.0
+  label_f1: 1.0
+  blocked_action_f1: 1.0
+  human_review_match: 1.0
+  exact_match: 0.0
+  note: Exact match misses are rationale wording variation; semantic fields matched.
+  guarded_runtime:
+    ollama_gguf_f16:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1: 1.0
+      blocked_action_f1: 1.0
+      human_review_match: 1.0
+    mlx_8bit:
+      valid_json_rate: 1.0
+      allowed_labels_rate: 1.0
+      allowed_blocked_actions_rate: 1.0
+      label_f1: 1.0
+      blocked_action_f1: 1.0
+      human_review_match: 1.0
+
+safety:
+  advisory_only: true
+  final_authority: false
+  requires_deterministic_checker: true
+  forbidden:
+    - autonomous_fertigation_change
+    - direct_pesticide_dosage

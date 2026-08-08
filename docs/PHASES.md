@@ -35,13 +35,31 @@ platform and model versions; see [VERSIONING.md](./VERSIONING.md).
 
 ---
 
+## Current Phase 2 checkpoint
+
+Phase 2 is partially implemented locally, with its local Docker validation
+checkpoint complete:
+
+- Core persists sensor events in SQLite and survives a service restart.
+- The read-only dashboard shows readings, guarded pipeline output, audit summaries,
+  service status, and runtime status.
+- `make local-check` runs the service tests and the temporary-state four-service
+  validation runner.
+- `make docker-config` validates Compose syntax, and the local Docker Compose
+  smoke benchmark passes all four scenarios.
+
+Phase 2 remains partial because production hardening and hardware validation
+are separate milestones. The local Docker deployment, simulation, backup, and
+recovery gates are complete.
+
 ## What works after Phase 1
 
 - `./scripts/up.sh` — MQTT + core + model-router
 - `./scripts/sim.sh` — greenhouse sensor simulator
 - REST API + demo advisor (stub)
 
-**Next milestone (Phase 2):** Web dashboard + SQLite persistence.
+**Next milestone:** Continue owner-approved local runtime integration and
+hardware-preparation validation without enabling autonomous actuator control.
 
 ---
 

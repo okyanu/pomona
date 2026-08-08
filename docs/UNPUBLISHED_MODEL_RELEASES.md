@@ -24,6 +24,7 @@ Every candidate must have:
 | Safety triage | v0.1 retained; v0.1.1 rejected | 128 adversarial cases, 8 categories | safety F1 >= 0.95; blocked/review = 1.0 | Needs targeted improvement; v0.1 clean safety F1 0.775 |
 | Actuator command gate | v0.1 published research preview; v0.1.2 rejected | 126 cases, 9 categories | decision >= 0.95; gate F1 >= 0.90; blocked F1 = 1.0 | Public for transparent research only; deterministic gate final |
 | Water/irrigation risk | v0.1.8 context/low lock | 392 leakage-free test cases plus 168-case external holdout | label F1 >= 0.90; blocked/review >= 0.95 | Published release candidate |
+| Nutrient/pH-EC risk | v0.1.1 correction | 140 independent cases, 7 balanced categories | label F1 >= 0.90; blocked/review = 1.0 | Local release candidate; not published |
 
 ## Evaluation Artifacts
 

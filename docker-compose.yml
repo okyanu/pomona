@@ -21,6 +21,9 @@ services:
       MQTT_HOST: ${MQTT_HOST:-mqtt}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_TOPIC_PATTERN: ${MQTT_TOPIC_PATTERN:-pomona/+/+/sensor/+/state}
+      DB_PATH: ${DB_PATH:-/app/data/pomona.db}
+    volumes:
+      - core_data:/app/data
     depends_on:
       mqtt:
         condition: service_healthy
@@ -39,11 +42,36 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-ai-pomona-agronomist-gemma4}
+      REASONER_BACKEND: ${REASONER_BACKEND:-rules}
+      WATER_IRRIGATION_OLLAMA_MODEL: ${WATER_IRRIGATION_OLLAMA_MODEL:-pomona-water-irrigation:v0.1.8}
+      MLX_HOST: ${MLX_HOST:-http://host.docker.internal:8083}
+      WATER_IRRIGATION_MLX_MODEL: ${WATER_IRRIGATION_MLX_MODEL:-}
     volumes:
       - ./models/registry:/app/models/registry:ro
+      - ./services/safety-checker/app:/app/safety_checker_rules:ro
     depends_on:
       core:
         condition: service_started
+
+  dashboard:
+    build: ./services/dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      CORE_URL: ${CORE_URL:-http://core:8080}
+      MODEL_ROUTER_URL: ${MODEL_ROUTER_URL:-http://model-router:8081}
+      SAFETY_CHECKER_URL: ${SAFETY_CHECKER_URL:-http://safety-checker:8082}
+      DIGITAL_TWIN_URL: ${DIGITAL_TWIN_URL:-http://digital-twin:8084}
+    depends_on:
+      core:
+        condition: service_started
+      model-router:
+        condition: service_started
+
+  digital-twin:
+    build: ./services/digital-twin
+    ports:
+      - "8084:8084"
 
   safety-checker:
     build: ./services/safety-checker
@@ -62,4 +90,5 @@ services:
       - ollama_data:/var/lib/ollama
 
 volumes:
+  core_data:
   ollama_data:

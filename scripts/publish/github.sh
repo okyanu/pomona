@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Publish Pomona source code to GitHub (no model weights).
 #
-# Usage:
-#   ./scripts/publish/github.sh              # first-time init + push
-#   ./scripts/publish/github.sh push         # commit all changes + push
-#   ./scripts/publish/github.sh push "fix: core mqtt reconnect"
+# Usage after explicit owner approval and explicit-path staging:
+#   PUSH_TO_GITHUB=1 ./scripts/publish/github.sh push "fix: core mqtt reconnect"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -27,6 +25,12 @@ echo "    repo: ${GITHUB_USER}/${GITHUB_REPO}"
 echo "    mode: ${MODE}"
 echo ""
 
+if [[ "${PUSH_TO_GITHUB:-0}" != "1" ]]; then
+  echo "Refusing to commit or push without PUSH_TO_GITHUB=1."
+  echo "Review private/COMMIT_PLAN.md and stage explicit platform paths first."
+  exit 2
+fi
+
 "$(dirname "$0")/check.sh"
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -35,17 +39,17 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "Initialized git on branch ${BRANCH}"
 fi
 
-git add .
-
 echo ""
 echo "==> Staged files:"
 git diff --cached --stat
 
 if git diff --cached --quiet; then
-  echo "Nothing new to commit."
-else
-  git commit -m "$COMMIT_MSG"
+  echo "Nothing is staged. This script never runs git add."
+  exit 2
 fi
+
+python3 scripts/publish/commit_plan.py --check-staged
+git commit -m "$COMMIT_MSG"
 
 REMOTE_URL="git@github.com:${GITHUB_USER}/${GITHUB_REPO}.git"
 

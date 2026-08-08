@@ -12,6 +12,7 @@ Each `*.yaml` file describes a model Pomona can use at runtime. Published weight
 | `actuator-command-gate-reasoner-v0.1.yaml` | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) — research preview; deterministic checker required |
 | `safety-triage-reasoner-v0.1.yaml` | Local candidate, not published |
 | `sensor-quality-reasoner-v0.1.yaml` | Local candidate, not published |
+| `nutrient-ph-ec-reasoner-v0.1.yaml` | Local v0.1.1 correction candidate, not published |
 | `water-irrigation-risk-reasoner-v0.1.yaml` | Local scaffold, not trained or published |
 
 Training code lives in a separate GitHub repo: [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm).
@@ -35,6 +36,7 @@ use: tomato-risk v0.1.7
 use as release candidate with deterministic validation: water-irrigation v0.1.8
 use: sensor-quality v0.1.1-boundary
 use: safety-triage v0.1
+use as local release candidate with deterministic validation: nutrient-ph-ec v0.1.1 correction
 use with deterministic checker: actuator-command-gate v0.1
 do not use: actuator-command-gate v0.1.1-hardcases
 do not use: actuator-command-gate v0.1.2-correction

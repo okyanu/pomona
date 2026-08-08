@@ -1,0 +1,34 @@
+{
+  "scenario_id": "arizona-tomato-fruiting-simulated",
+  "label": "Simulated validation scenario - not commercial greenhouse or field results.",
+  "validation_expectations": {
+    "human_review_required": true,
+    "blocked_actions_nonempty": true
+  },
+  "farm_context": {
+    "farm_id": "demo-arizona-tomato",
+    "zone_id": "greenhouse-a",
+    "crop": "tomato",
+    "growth_stage": "fruiting",
+    "system_type": "greenhouse_substrate"
+  },
+  "expected_fields": [
+    "air_temperature_c",
+    "humidity_pct",
+    "ph",
+    "ec_ms_cm",
+    "substrate_moisture_pct",
+    "substrate_temperature_c"
+  ],
+  "sensor": {
+    "timestamp": "__CURRENT_TIMESTAMP__",
+    "air_temperature_c": 33.0,
+    "humidity_pct": 80.0,
+    "substrate_moisture_pct": 27.0,
+    "ph": 5.2,
+    "ec_ms_cm": 3.8,
+    "substrate_temperature_c": 27.0
+  },
+  "proposed_command": {"action_type": "start_irrigation"},
+  "actor": "assistant_model"
+}

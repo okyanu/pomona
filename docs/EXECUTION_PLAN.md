@@ -2,6 +2,8 @@
 
 This is the practical timetable and AI-agent workflow for moving Pomona from the current checkpoint to a usable SaaS MVP with model routing, hybrid reasoners, and future small-model generation.
 
+Product direction and long-range architecture: [POMONA_MASTER_ROADMAP.md](./POMONA_MASTER_ROADMAP.md).
+
 ## Current Checkpoint
 
 Completed or available now:
@@ -52,38 +54,85 @@ Maintenance rules:
 
 ### Now
 
-- [ ] Add `POST /v1/reasoners/safety-triage` in `services/model-router`.
-- [ ] Keep `POST /v1/actuator-command-gate/check` in `services/safety-checker` as deterministic final authority.
-- [ ] Start Phase 2 SQLite persistence in `services/core` after the first reasoner endpoint contract is stable.
+- [x] Add one shared reasoner-chain contract in `services/model-router`: sensor quality first, water/irrigation risk second, deterministic actuator safety last.
+- [x] Add integration tests for normal, missing-data, moisture-risk, and actuator-blocked packets across the shared chain.
+- [x] Keep `POST /v1/actuator-command-gate/check` in `services/safety-checker` as deterministic final authority.
+- [x] Start Phase 2 SQLite persistence in `services/core` after the first reasoner endpoint contract is stable.
+- [x] Add the first read-only dashboard skeleton at `http://localhost:3000` for persisted sensor readings.
+- [x] Add the dashboard guarded risk view sourced from the shared reasoner chain.
+- [x] Add the first integrated software-validation pipeline endpoint with deterministic specialist orchestration and local audit output.
+- [x] Add a reproducible local software-validation benchmark with latency, schema, safety, and machine metadata.
+- [x] Add a safety-failure matrix covering missing, stale, impossible, conflicting, malformed, and unsafe-action inputs.
+- [x] Connect the unified guarded pipeline to the read-only dashboard through `GET /api/pipeline`.
+- [x] Expose bounded read-only pipeline audit summaries through model-router and dashboard APIs.
+- [x] Add a repeatable no-Docker local validation runner with temporary state and assertions.
+- [x] Include the dedicated Safety Checker service in the no-Docker runner and assert direct actuator rejection.
+- [x] Assert dashboard service-status and deterministic-runtime visibility in the no-Docker runner.
+- [x] Cover both high-risk blocking and routine observation paths in the no-Docker runner.
+- [x] Verify the rendered dashboard HTML contains the integrated pipeline, audit, and read-only safety view.
+- [x] Verify SQLite event recovery after restarting Core in the local runner.
+- [x] Add local SQLite backup and restore commands independent of Docker.
+- [x] Connect the unified pipeline's water/irrigation specialist to the configured local backend with deterministic guarded authority.
+- [x] Route Nutrient/pH-EC through its explicit hybrid/rules contract inside the unified pipeline.
+- [x] Show individual guarded specialist outputs and runtime sources in the read-only dashboard.
+- [x] Expose a dashboard Digital Twin forecast-only preview from the latest persisted event.
+- [x] Route Sensor Quality and Safety Triage through explicit guarded contracts inside the unified pipeline.
+- [x] Add bounded Digital Twin scenario controls and validate forecast states through the guarded pipeline.
+- [x] Add a repeatable pre-hardware validation suite for missing, stale, impossible, nutrient-risk, and unsafe-command scenarios.
+- [x] Define and enforce the ESP32/MQTT sensor-event contract with units, transport bounds, JSON Schema, and Core API rejection tests.
+- [x] Add a dry-run actuator command endpoint that audits safety decisions and guarantees no execution.
+- [x] Add a one-shot ESP32/MQTT simulation validation that checks ingest, persistence, dashboard guarding, and dry-run actuator safety.
+- [x] Add a non-destructive Docker SQLite backup, restart, and restore validation.
+- [x] Carry an explicit `system_type` through the sensor contract and dashboard so hardware profiles can be selected without changing the transport layer.
 
 ### Next
 
-- [ ] Build dashboard skeleton for latest farm/zone sensor readings.
-- [ ] Add dashboard risk view for guarded labels, blocked actions, and safe checks.
-- [ ] Add model-router endpoint contracts for the small-model chain:
-  - safety triage,
-  - actuator command gate advisory route if needed.
+- [x] Build dashboard skeleton for latest farm/zone sensor readings.
+- [x] Add dashboard risk view for guarded labels, blocked actions, and safe checks.
+- [x] Add dashboard service-status panel for core, model-router, and safety-checker.
+- [x] Add dashboard advisory Agronomist note sourced from the guarded context.
+- [x] Add Digital Twin v0 forecast-only scenario API.
+- [x] Add model-router endpoint contracts for the small-model chain:
+  - actuator command gate advisory route.
+- [x] Add model-router safety triage advisory route using the deterministic safety policy.
+- [x] Add deterministic Nutrient/pH-EC reasoner endpoint scaffold and registry metadata.
+- [x] Add the local Nutrient/pH-EC dataset scaffold, balanced generated builder, and JSONL validator.
 
 ### Later
 
-- [ ] Add big assistant explanation route using `ai-pomona-agronomist-gemma4`.
-- [ ] Add digital twin v0 service/API contract.
-- [ ] Apply the Pomona publishing schema to future Hugging Face model cards, dataset cards, and GitHub-facing docs when new artifacts are created.
+- [x] Review Nutrient/pH-EC thresholds and independent cases, then prepare a local-only Colab training/evaluation notebook.
+- [x] Finish the guarded runtime quality gate for Nutrient/pH-EC GGUF/Ollama and MLX conversions; both guarded paths pass the full 140-case holdout, while model-only conversion scores remain disclosed and below the standalone gate.
+- [x] Add guarded big assistant explanation route using `ai-pomona-agronomist-gemma4` or configured fallback.
+- [x] Add digital twin v0 service/API contract.
+- [x] Define the Pomona publishing schema with separate lifecycle and publication states; keep local artifacts `local_only` or `prepared_not_uploaded` until owner approval.
 
 ### Current Model Checkpoint
 
-Current active work is platform integration, not more training.
+The current product direction is shared-model platform integration. Tomato v0.2.1 through v0.2.4 standalone correction adapters are rejected; Tomato remains deterministic rules plus guarded hybrid output until a larger-base experiment is justified.
 
 Use the current best local/published reasoners:
 
 ```text
-tomato-risk: v0.1.7
+tomato-risk: v0.1.7 published baseline; v0.2.1 through v0.2.4 standalone correction adapters rejected; use deterministic rules plus guarded hybrid path
 water-irrigation-risk: v0.1.8 published release candidate
 sensor-quality: v0.1.1-boundary
 safety-triage: v0.1
 actuator-command-gate: v0.1 published research preview + deterministic checker final authority
 rejected: actuator-command-gate v0.1.1-hardcases and v0.1.2-correction
 ```
+
+Tomato standalone model gate, for any future larger-base experiment:
+
+```text
+1. Dataset validator passes with zero train/validation/test/release overlap.
+2. Model-only output is valid JSON and uses only the declared risk labels.
+3. Independent golden and release evaluation reach at least 0.90 label F1.
+4. Deterministic rules-only and hybrid evaluation remain 1.00 on the safety holdout.
+5. The model card states that labels are rule-derived/synthetic and are not field-ground-truth accuracy.
+6. Only after these checks, ask the owner before any Hugging Face upload.
+```
+
+The v0.2.1 adapter failed this gate: it produced `fungal_pressure` for unrelated cases after deduplication removed most rare-label training examples. The v0.2.2 balanced-clean adapter also failed the golden gate with model-only label F1 0.6333 and exact match 0.60; it confused normal, high-EC, temperature, and missing-data cases. Both remain local-only for diagnosis. The deterministic rules-only and hybrid paths stayed at 1.00 on the golden holdout.
 
 Do not start another nutrient or crop expansion model until the current chain is consumable through `model-router` and `safety-checker`. Water/irrigation v0.1.8 is now published; platform integration is the next step for that model family.
 
@@ -449,6 +498,117 @@ Do not train another model until the platform can use the first one.
 
 Add newest entries at the top.
 
+### 2026-07-26
+
+- Added the local `make article-demo` evidence gate for the InfoQ technical article. It runs 65 service tests, the integrated local stack, and the seven-case pre-hardware benchmark, then writes ignored machine-readable evidence under `private/colab/outputs/`.
+- Added the safety-constrained architecture diagram and two canonical annotated scenarios: simulated Arizona tomato risk and routine hydroponic lettuce. The scenario capture stores complete inputs and outputs locally and explicitly excludes field, hardware, adoption, and autonomous-safety claims.
+- Replaced the Arizona scenario's fixed timestamp with `__CURRENT_TIMESTAMP__` so the article case isolates heat, moisture, pH, and nutrient behavior; the dedicated stale-telemetry fixture remains unchanged. The regenerated seven-case benchmark passed all schema, blocking, and human-review assertions at 1.0. No commit, push, hardware command, or Hugging Face upload was performed.
+- Added a repeatable InfoQ runtime benchmark for cold startup, first request, 70 warm guarded-pipeline requests, 30 blocked dry-run gate requests, sampled Model Router RSS, and process CPU time. The full article gate passed with 259.061 ms cold startup, 0.552 ms average warm pipeline latency, 0.684 ms average dry-run gate latency, and 49.594 MB sampled peak RSS on the local Apple Silicon development machine. These measurements use the deterministic/stub runtime and are explicitly not edge-device or local-model results.
+- Added the first complete InfoQ article draft, `docs/INFOQ_ARTICLE_DRAFT.md`, centered on separating probabilistic recommendations from deterministic control authority. The 2,547-word draft includes the architecture, two captured scenarios, local benchmark, model/dataset failures, reproducibility command, general lessons, and explicit unsupported claims. Target hardware measurements and independent reproduction remain pending; nothing was submitted, committed, pushed, or uploaded.
+
+### 2026-07-21
+
+- Rechecked Docker Desktop: the initial CLI context could not reach the engine even though the app was open; `docker compose config` still parsed successfully. Later direct socket verification confirmed the Docker API was healthy.
+- Re-ran `make local-check` with the no-Docker runner: Core, Dashboard, Safety Checker, Digital Twin, and Model Router passed 53 tests; high-risk blocking, routine hydroponic flow, dashboard HTML, audit summaries, and SQLite restart recovery all passed.
+- Confirmed Docker Desktop's API socket is healthy through the explicit `desktop-linux` socket endpoint, then built and started all six Compose services. Core, model-router, safety-checker, digital-twin, dashboard, and MQTT health checks passed; the Docker benchmark passed 4/4 cases with valid JSON, required fields, blocking assertions, and human-review assertions all at 1.0.
+- Ingested a fresh simulated sensor event through the Docker Core API. SQLite-backed latest-event recovery, dashboard overview, guarded high-risk pipeline output, and summary-only audit redaction all passed.
+- The first live Docker Ollama Water/Irrigation check exposed a false-positive normal classification: the model labeled 50% moisture as low moisture. Tightened guarded mode so deterministic rules own all structured decision fields and added a regression test; model-only mode remains explicitly unsafe for production use.
+- Rebuilt the Docker model-router with the guard fix. Live Ollama checks now pass for normal 50% moisture and low 20% moisture, and the two-scenario Docker benchmark passes 4/4 cases with valid JSON, required fields, blocking assertions, and human-review assertions all at 1.0.
+- Connected the unified pipeline to the configured Water/Irrigation backend. Local unit tests pass 35/35; Docker Ollama pipeline checks returned `ollama_guarded` for normal and low-moisture packets with deterministic labels, blocking, and review decisions; restored the default `REASONER_BACKEND=rules` afterward. No commit, push, or Hugging Face upload was performed.
+- Routed Nutrient/pH-EC through its explicit `hybrid_guarded` contract inside the unified pipeline. The current implementation remains deterministic because model inference is not wired; the response now exposes the specialist mode/source consistently for future runtime integration. No commit, push, or Hugging Face upload was performed.
+- Added a read-only dashboard specialist table for Sensor Quality, Water/Irrigation, Nutrient/pH-EC, Crop Risk, and Actuator Safety. It exposes labels, runtime source, and review state without adding any action controls. No commit, push, or Hugging Face upload was performed.
+- Added `GET /api/digital-twin` and a dashboard forecast preview backed by the Digital Twin service. The preview is bounded, uses the latest persisted event, strips source metadata, and explicitly cannot execute or authorize actions. No commit, push, or Hugging Face upload was performed.
+- Routed Sensor Quality and Safety Triage through explicit guarded contracts inside the unified pipeline. The response now exposes their mode/source metadata while deterministic rules remain authoritative; the final actuator safety gate is unchanged. No commit, push, or Hugging Face upload was performed.
+- Added bounded dashboard Digital Twin controls for temperature, humidity, irrigation duration, ventilation, and horizon. `POST /api/digital-twin` validates scenario limits, runs the forecast, and evaluates the final forecast state through the guarded pipeline; it never creates or executes an actuator command. No commit, push, or Hugging Face upload was performed.
+- Added `scripts/run_pre_hardware_validation.sh` and five additional simulated scenarios for missing data, stale telemetry, impossible sensor values, nutrient risk, and unsafe chemical commands. The seven-case suite passed with valid JSON, required fields, blocked-action assertions, and human-review assertions all at 1.0. It is dry-run software validation only; no hardware command was executed. No commit, push, or Hugging Face upload was performed.
+- Added `schemas/sensor-event.schema.json` and `docs/HARDWARE_EVENT_CONTRACT.md` for the ESP32/MQTT payload contract. Core now rejects transport-level values outside physical ranges, with five boundary rejection tests. No device connection, actuator execution, commit, push, or Hugging Face upload was performed.
+- Added `POST /v1/actuator-commands/dry-run` to model-router. It returns deterministic `allowed`/`blocked` decisions, writes redacted audit summaries, and always reports `execution_performed: false`; two API tests cover blocked and observation-only paths. No hardware command, commit, push, or Hugging Face upload was performed.
+- Added `scripts/run_hardware_simulation_validation.sh` and `make hardware-simulation-validation`. With Docker running, it publishes two observation-only ESP32-shaped MQTT packets, verifies Core and Dashboard behavior, and checks the dry-run gate. No actuator command, commit, push, or Hugging Face upload was performed.
+- Added `scripts/run_backup_recovery_validation.sh` and `make backup-recovery-validation`. It backs up the live Core database, restarts Core, verifies event recovery, and restores into a temporary database. Updated local phase/status/roadmap wording; Phase 2 remains partial because production hardening and real hardware validation are not complete. No commit, push, or Hugging Face upload was performed.
+- Added `system_type` to the shared sensor event and dashboard context. Soil, greenhouse substrate/soilless, hydroponic, and aquaponic profiles can share transport, while their reasoner rules remain profile-specific. No commit, push, or Hugging Face upload was performed.
+
+### 2026-07-20
+
+- Reviewed `POMONA_PRE_HARDWARE_VALIDATION_PLAN.md` feedback. Decision: pause new model releases and complete the integrated software-simulation release first. Added `POST /v1/pipeline/evaluate`, combining sensor quality, water/irrigation, nutrient/pH-EC, tomato/crop rules, agronomist explanation, deterministic actuator safety, and a local append-only audit record.
+- Added simulated scenarios `examples/scenarios/arizona_tomato.json` and `examples/scenarios/hydroponic_leafy_greens.json`, plus `scripts/run_software_validation.sh`. The tomato scenario demonstrates blocked irrigation/fertigation/actuator actions; the lettuce scenario demonstrates a routine observation path. Both are explicitly simulated and not field results.
+- Added a local benchmark report at `private/colab/outputs/software_validation_benchmark.json` and a safety-failure matrix for missing, stale, impossible, conflicting, malformed, and unsafe-action inputs. Connected the same unified pipeline to the read-only dashboard at `GET /api/pipeline`, then added bounded summary-only audit views at `/v1/pipeline/audit` and `/api/audit`; the combined dashboard/model-router validation passes with 35 tests. No GitHub commit, push, Hugging Face upload, or public release was performed.
+- Verified the local process path with temporary Core, Model Router, and Dashboard ports plus a temporary SQLite file. HTTP sensor ingest, dashboard pipeline output, dashboard audit summaries, and health endpoints passed end to end. Docker Compose could not start because Docker Desktop was not running; no repository or remote state was changed.
+- Added `scripts/run_local_validation.sh` so the same no-Docker smoke test is repeatable with temporary SQLite/log state and automatic cleanup.
+- Ran the broader local service suite: Core, Dashboard, Safety Checker, and Digital Twin pass 20 tests together; Model Router passes 33 tests separately. Added service-test import isolation for the shared `app` package name. No GitHub commit, push, or Hugging Face upload was performed.
+- Extended `scripts/run_local_validation.sh` to start Safety Checker locally and verify `/v1/actuator-command-gate/check` independently blocks an unsafe irrigation command. The four-service local runner passes with high-risk pipeline output, one isolated audit summary, and a blocked safety-gate decision.
+- Added dashboard `/api/services` and `/api/runtimes` assertions to the local runner; the smoke test now verifies all four services and the deterministic rules runtime are visible to the dashboard.
+- Added a normal hydroponic lettuce case to the local runner; it must remain routine with no blocked actions or human review while the tomato case remains blocked.
+- Added a dashboard HTML assertion to the local runner so the local checkpoint verifies the visible page labels as well as service APIs.
+- Added Core restart recovery to the local runner; the ingested event must remain available from temporary SQLite after Core restarts.
+- Added `scripts/backup_sqlite.sh` and `scripts/restore_sqlite.sh` for local SQLite recovery when Docker is unavailable.
+- Documented the no-Docker local validation command in the root README for repeatable contributor verification.
+- Added `make local-validation` as the short local entry point for the same isolated runner.
+- Added `make test-local` for the full local service contract suite: Core, Dashboard, Safety Checker, Digital Twin, and Model Router.
+- Added `make local-check` to run the full service tests and isolated four-service smoke test together before a human-reviewed commit.
+- Added `docs/LOCAL_VALIDATION.md` documenting local commands, coverage, and non-production limitations.
+- Added `docs/PUBLISHING_SCHEMA.md` with separate lifecycle/publication states for models, datasets, LoRA adapters, GGUF/Ollama, and MLX variants. Local preparation never changes an artifact to `published`; owner approval is required before any Hugging Face upload, and GitHub commit/push remains a separate approval.
+- Added `make docker-config` to validate Docker Compose syntax without requiring the Docker daemon. The compose file parses locally; full container smoke testing remains blocked until Docker Desktop is running.
+- Fixed `make test` to use the service virtual environments, matching the already-passing local test suite instead of failing when system Python lacks pytest.
+- Synchronized README, PHASES, ROADMAP, and PROJECT_STATUS with the actual Phase 2 local checkpoint: SQLite persistence, dashboard, guarded pipeline, audit summaries, and no-Docker validation are complete locally; Docker smoke testing remains pending.
+- Fixed the Docker benchmark's routine hydroponic fixture to resolve `__CURRENT_TIMESTAMP__` at validation time. The previous fixed-date fixture became stale and incorrectly failed the routine human-review assertion; explicit stale-data cases remain unchanged.
+
+### 2026-07-17
+
+- With explicit user approval, uploaded the Nutrient/pH-EC v0.1.1 F16 GGUF and MLX 8-bit guarded runtime packages to `Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-GGUF` and `Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-MLX`. Both cards disclose the lower model-only conversion scores, the 1.0000 guarded-hybrid holdout results, deterministic safety authority, and advisory-only scope. No GitHub commit or push was performed.
+- Added `scripts/models/guard_nutrient_ph_ec_output.py` and guarded runtime evaluation. The deterministic Pomona rules now authoritatively enforce labels, missing fields, blocked actions, and human review after GGUF/MLX generation. Full 140-case guarded evaluations passed 1.0000 on every gate for both Ollama F16 GGUF and MLX 8-bit. This qualifies the guarded hybrid packages for owner review, not the bare converted models.
+
+- Prepared structurally uploadable local packages for Nutrient/pH-EC v0.1.1 F16 GGUF/Ollama and MLX 8-bit under ignored `private/colab/hf-publish/`. Added complete model cards, Apache-2.0 licenses, citations, runtime configuration, and evaluation metadata. No Hugging Face upload, GitHub commit, or push was performed. The latest full raw Ollama evaluation remains below the runtime gate (allowed-label rate 0.8571, label F1 0.6690, blocked-action F1 0.8571, human-review match 0.8571); MLX has only an 0.8667-label-F1 smoke result. Both are experimental/not release-ready.
+
+- Added the local model catalog, reciprocal local-card links, Nutrient/pH-EC v0.1.1 release-candidate card, and runtime conversion instructions. The catalog records 4 published model families and 3 active unpublished families: Sensor Quality, Safety Triage, and Nutrient/pH-EC. Nutrient GGUF/Ollama and MLX scripts are executable and write only under ignored `private/models/`; no conversion, upload, commit, or push was performed.
+- Built the Nutrient/pH-EC v0.1.1 merged local checkpoint and F16 GGUF at `private/models/gguf/pomona-nutrient-ph-ec-v0.1.1-f16.gguf`, then registered it locally as `pomona-nutrient-ph-ec:v0.1.1` in Ollama. The exact-prompt runtime evaluator passed the five-case smoke but failed the full 140-case holdout: label F1 0.7857, blocked-action F1 0.9071, human-review match 0.8643, and allowed-label rate 0.8571. Built the 8-bit MLX conversion locally after installing `mlx-lm` in an ignored environment; its five-case smoke scored label F1 0.8667. Both converted formats are rejected pending runtime correction; no upload or repository publication was performed.
+- Reviewed the existing independent clean evaluations for the remaining unpublished families. Sensor Quality v0.1.1 boundary remains blocked by label F1 0.5389, especially normal, unit-mismatch, impossible-pH, and missing-field buckets. Safety Triage v0.1 remains the retained candidate but is blocked by safety-label F1 0.7753 and blocked-action F1 0.7148, with chemical, diagnosis, multiple-blocked, and autonomous-fertigation weaknesses; v0.1.1 hardcases is rejected as a regression. Neither family is publishable.
+- Prepared local Hugging Face staging packages for Sensor Quality v0.1.1 boundary, Safety Triage v0.1, and Nutrient/pH-EC v0.1.1 correction. Cards and evaluation JSON explicitly mark the first two as `not_publishable`; all packages remain under ignored `private/colab/hf-publish/`. No upload, commit, or push was performed.
+- Completed and integrity-checked the local Nutrient/pH-EC v0.1.1 LoRA release package with adapter weights, tokenizer, chat template, labels, sample input/output, license, citation, and independent evaluation metadata. The LoRA itself is ready for owner review and possible upload; no upload was performed. GGUF/MLX remain separate runtime-format candidates and require their own evaluation.
+- Received and verified `pomona-nutrient-ph-ec-reasoner-v0.1.1-correction-lora.zip`. Prepared the independent evaluation package `private/colab/pomona-nutrient-ph-ec-v0.1.1-correction-eval-data.zip` and matching notebook `private/colab/pomona_nutrient_ph_ec_reasoner_v0_1_1_correction_eval_colab.ipynb`; no publication was performed.
+- Evaluated Nutrient/pH-EC v0.1.1 correction on the independent 140-case release holdout: valid JSON, allowed labels/actions, label F1, blocked-action F1, and human-review match were all 1.0. Exact match was 0.0 only because the adapter varied rationale wording while preserving the correct labels, checks, blocked action, and review decision. Promoted locally to `release_candidate_not_published`; no Hugging Face upload was performed.
+- Rejected Nutrient/pH-EC v0.1-lora-2 as a standalone adapter after the 70-case evaluation: valid JSON 0.9857, allowed values 1.0, label F1 0.4143, blocked-action F1 0.8429, and human-review match 0.8429. Kept deterministic rules as authority.
+- Built Nutrient/pH-EC v0.1.1 correction data with explicit derived pH/EC states, balanced hard cases, 1,412 training-contract records, and a separate 140-case release holdout. Validation passed; generated files remain ignored under `datasets/processed/`.
+- Prepared local-only `private/colab/pomona_nutrient_ph_ec_reasoner_v0_1_1_correction_colab.ipynb` and `private/colab/pomona-nutrient-ph-ec-v0.1.1-correction-training-data.zip`. No training, commit, push, or Hugging Face upload was performed.
+
+### 2026-07-16
+
+- Evaluated `pomona-nutrient-ph-ec-reasoner-v0.1-lora-2.zip` on the 70-case generated test split. It achieved valid JSON 0.9857, allowed labels/actions 1.0, exact match 0.0, label F1 0.4143, blocked-action F1 0.8429, and human-review match 0.8429. It frequently collapsed pH/EC cases into `low_ph`, missed `sensor_anomaly` and `high_ec`, and varied rationale wording. Decision: reject as a standalone model; keep deterministic rules or guarded hybrid mode as authority. Next correction should add explicit derived pH/EC state features, balanced hard negatives, and a clean independent holdout.
+- Received the first and second Nutrient/pH-EC adapter archives locally and verified they contain different LoRA weights. Added the evaluation-only notebook `private/colab/pomona_nutrient_ph_ec_reasoner_v0_1_lora_2_eval_colab.ipynb`, locked to the `-2` filename; no model evaluation result or publication decision has been made yet.
+- Prepared local-only Nutrient/pH-EC training artifacts: `private/colab/pomona_nutrient_ph_ec_reasoner_v0_1_colab.ipynb` and `private/colab/pomona-nutrient-ph-ec-v0.1-training-data.zip`. The notebook trains `Qwen/Qwen2.5-0.5B-Instruct` with LoRA and downloads only the adapter archive. It must not be treated as a release until independent evaluation and domain review pass.
+- Added the local Nutrient/pH-EC dataset scaffold with 12 committed hand-written sample/evaluation records, schemas, dataset card, and release-scope documentation. Added a balanced generated builder with 712 total records across normal, pH, EC, anomaly, and missing-data buckets; generated train/validation/test files remain under ignored `datasets/processed/`.
+- Validated the Nutrient/pH-EC committed data and generated splits: 724 records checked, JSONL/schema/type/allowed-label/action validation passed, and all 712 generated expected outputs match the deterministic router implementation. No raw data, model weights, commit, push, or Hugging Face upload was performed.
+- Verified Nutrient/pH-EC endpoint behavior live with a high-pH/high-EC packet. It returned `high_ph`, `high_ec`, `nutrient_uptake_issue`, blocked `autonomous_fertigation_change`, and required human review. Full model-router suite now passes 25 tests.
+- Added the deterministic-first Nutrient/pH-EC Reasoner scaffold at `POST /v1/reasoners/nutrient-ph-ec`, with pH/EC thresholds, missing-data handling, fertigation blocking, registry metadata, documentation, and API tests. No training data or model weights were created.
+- Verified `GET /v1/runtimes` and dashboard `GET /api/runtimes` live. Rules are available, Ollama is reachable with both local Pomona models visible, and MLX is accurately reported offline because no MLX server is running. Router tests remain at 22 passed.
+- Added `GET /v1/runtimes` to model-router and `GET /api/runtimes` to the dashboard. They report deterministic rules availability plus Ollama/MLX reachability and configured models without loading weights or changing runtime state.
+- Rebuilt the dashboard and verified `GET /api/safety` against the persisted Docker event. It returned the Safety Triage result with `safe_observation_only`, no blocked actions, and no operational execution path. Digital Twin tests passed 2 tests.
+- Added dashboard `GET /api/safety` and a read-only Safety Triage panel. It displays the current advisory decision, labels, blocked actions, safe alternative, and review status using a non-operational `continue_monitoring` action. No command execution path was added.
+- Verified the installed local Ollama runtime through `POST /v1/reasoners/water-irrigation-risk` using `pomona-water-irrigation:v0.1.8`. The direct router case and a 10-case frozen smoke evaluation both returned valid, allowed outputs with label F1 1.0, blocked-action F1 1.0, and human-review match 1.0. The report is local-only at `private/colab/outputs/water-v0.1.8-ollama-smoke.json`; no model download, rebuild, commit, or upload was performed.
+- Verified `scripts/backup_core_db.sh` against the running Docker SQLite volume using a temporary `/tmp` destination. The backup opened successfully and preserved the persisted sensor event (`esp32-greenhouse-01`); no restore or active database modification was performed.
+- Built and verified the complete local Docker stack: MQTT, Core, Model Router, Safety Checker, Dashboard, and Digital Twin. Fixed model-router path resolution for `/app` containers and added a read-only safety-rule mount so the shared chain starts correctly in Docker. Verified SQLite event persistence, health endpoints, shared-chain blocking, dashboard overview/risk/explanation, service status, and forecast-only Digital Twin output. No commit or push was performed.
+- Added guarded Agronomist context to `POST /v1/advisor/explain` and the dashboard explanation path. The advisor now receives validated reasoner output as a safety boundary, while stub/Ollama/Hugging Face backends remain advisory and cannot issue operational actions. Added a router test for guarded context propagation; no commit, push, model upload, or dataset upload was performed.
+- Added `POST /v1/reasoners/safety-triage` to `services/model-router`. It maps the deterministic actuator gate into the safety-triage schema, supports advisory `rules_only` and `hybrid_guarded` modes, rejects model-only mode until independent evaluation passes, and keeps the safety-checker as final authority. Added safe, blocked, and model-only contract tests; no commit, push, model upload, or dataset upload was performed.
+- Added `POST /v1/reasoners/actuator-command-gate` to `services/model-router`. It exposes the existing deterministic actuator gate as an advisory `rules_only` or `hybrid_guarded` route, rejects model-only mode until a candidate passes independent evaluation, and keeps `services/safety-checker` as final authority. Added API contract tests; no commit, push, model upload, or dataset upload was performed.
+
+- Imported the maintainer's full product roadmap as `docs/POMONA_MASTER_ROADMAP.md` and linked it from this execution plan. The roadmap keeps the product sequence centered on a real edge data loop, deterministic safety, hybrid reasoners, Digital Twin, Agronomist, and Model Studio rather than isolated model uploads.
+- Rejected Tomato v0.2.1 correction as a model-only release after the unchanged golden holdout regressed to label F1 0.1778. The failure was traced to unsafe deduplication and severe rare-label imbalance, not to the deterministic Tomato rules.
+- Started Tomato v0.2.2 balanced-clean locally. The new builder preserves rare-label coverage, jitters sensor values, excludes golden-equivalent inputs, and creates an independent release evaluation split. No adapter training, Hugging Face upload, GitHub commit, or push was performed.
+- Tomato v0.2.2 is complete only after dataset validation, model-only golden/release evaluation, rules-only/hybrid comparison, and an honest synthetic-data limitation statement all pass the gates recorded above. After that checkpoint, return to the platform chain and ask the owner before publication.
+- Evaluated `pomona-tomato-risk-reasoner-v0.2.2-balanced-lora.zip` locally with the v0.2.2 prompt on the 15-case golden holdout. Model-only output was valid JSON/list syntax with allowed labels, but label F1 was 0.6333 and exact match was 0.60. It misclassified normal controlled/substrate cases, high EC, heat, cold, and missing pH. Rules-only and hybrid guarded outputs were both 1.00. Decision: reject v0.2.2 as a standalone model and do not run a full release evaluation or publish it.
+- Prepared Tomato v0.2.3 golden-correction data with 2,340 training-contract records: 1,872 train, 234 validation, 234 test, 780 independent release cases, and 15 golden cases. It focuses on the v0.2.2 confusions, preserves every allowed label combination, uses value-jittered inputs to avoid exact golden leakage, and changes training to three epochs at `7e-5`. Colab artifacts remain local-only under `private/colab/`; no training, commit, push, or publication was performed.
+- Evaluated `pomona-tomato-risk-reasoner-v0.2.3-golden-correction-lora.zip` locally on the 15-case golden holdout. Model-only output was valid JSON/list syntax with allowed labels, but label F1 fell to 0.3778 and exact match to 0.3333. It confused normal data with pH/EC labels and missed cold, fungal, missing-data, anomaly, and water cases. Rules-only and hybrid guarded outputs were both 1.00. Decision: reject v0.2.3 and do not run release evaluation or publish it.
+- Prepared the final structured-input Tomato v0.2.4 attempt. Every record now contains the raw sensor packet plus deterministic `derived_signals` (`ph_state`, `ec_state`, temperature/humidity/moisture states, missing-data state, fungal signal, nutrient signal, and actuator conflict). The Qwen 0.5B adapter is trained as a constrained label formatter, with two epochs at `5e-5`. Dataset validation passes with 1,872 train, 234 validation, 234 test, 780 release, and 15 golden records with zero overlap. Colab artifacts remain local-only; no training, commit, push, or publication was performed.
+- Evaluated `pomona-tomato-risk-reasoner-v0.2.4-structured-lora.zip` with the matching structured evaluator on the 15-case golden holdout. Model-only output was valid JSON/list syntax, but label F1 was 0.4000 and exact match was 0.2667; hybrid guarded output remained 1.00. The adapter still confused normal, nutrient, temperature, and risk states. Decision: reject v0.2.4 as a standalone/public model. The Tomato model work is complete for this Qwen 0.5B line; keep deterministic rules as authority and use the small adapter only as an optional non-authoritative experiment.
+- Product decision: stop iterating the Tomato Qwen2.5-0.5B standalone adapter and focus on the shared model chain. The next implementation task is one router-level integration contract: Sensor Quality -> Water/Irrigation Risk -> deterministic Actuator Safety. This makes the successful shared models useful across Tomato, strawberry, lettuce, and future crop profiles before adding more crop-specific training.
+- Implemented `POST /v1/reasoners/shared-chain` with deterministic dependency order: Sensor Quality -> Water/Irrigation Risk -> Actuator Safety. It returns nested specialist results, combined blocked actions, review status, and explicit hybrid fallback metadata. Added normal, missing-data/moisture-risk, and actuator-blocked integration tests; `services/model-router/.venv/bin/python -m pytest services/model-router/tests/test_model_router_api.py -q` passes 15 tests. No commit or push was performed.
+- Replaced the in-memory core event deque with SQLite persistence at configurable `DB_PATH` (default `data/pomona.db`), added Docker `core_data` volume wiring, and retained the existing sensor event API. Core verification passes 2 tests. Next platform task is the dashboard/read-model slice.
+- Added local-only `scripts/backup_core_db.sh` and `scripts/restore_core_db.sh` for exporting/restoring the Docker SQLite database. Backup files under `backups/` are gitignored; no database contents are committed.
+- Added the first dashboard service under `services/dashboard`: read-only live sensor overview, core availability status, recent event table, Docker wiring on port 3000, and smoke verification. It does not execute model output or control actuators. No commit or push was performed.
+- Added dashboard `/api/risk` and a guarded risk status view showing sensor-quality labels, water/irrigation labels, safety decision, blocked actions, and human-review status. The dashboard remains read-only; Compose now waits for model-router as well as core. Dashboard smoke tests and Compose validation pass.
+- Added dashboard `/api/services` and a service-status panel for core, model-router, and safety-checker health. The dashboard now exposes the local chain's operational availability without executing commands. Dashboard service-status smoke test, Python compilation, Compose validation, and diff checks pass. No commit or push was performed.
+- Added dashboard `/api/explanation`, which sends the latest sensor packet to the existing Agronomist advisor with guarded-context instructions and renders the result as advisory-only text. It never executes model output or exposes actuator control. No commit or push was performed.
+- Added `services/digital-twin` with `POST /v1/digital-twin/scenarios/simulate`, bounded temperature/humidity/moisture trajectories, safety disclaimers, Docker Compose wiring on port 8084, and API tests. It is forecast-only and never controls actuators.
+
 ### 2026-07-09
 
 - Current model decision: stop training for now and move to platform integration. Use tomato-risk `v0.1.7`, sensor-quality `v0.1.1-boundary`, safety-triage `v0.1`, and actuator-command-gate `v0.1` with deterministic checker final authority.
@@ -712,6 +872,26 @@ A task is done when:
 - final summary explains what changed and what remains.
 
 ## Work Log
+
+### 2026-07-26
+
+- Added a local-only commit-control workflow for the large dirty worktree. `make commit-plan` classifies changed paths into platform candidates, ML-repo holds, local-sensitive files, tracked redaction reviews, manual review, and never-commit groups, then writes ignored Markdown and JSON reports under `private/`. It never stages, deletes, commits, pushes, or uploads files. InfoQ drafts/evidence and the owner master roadmap are now explicitly ignored; already tracked operational logs remain blocked for redaction review rather than being treated as automatically public.
+
+### 2026-07-14
+
+- Prepared local-only Tomato v0.1.7 deployment candidates for Ollama/GGUF F16 and MLX 8-bit. Both formats returned valid JSON and allowed labels on the 15-case golden smoke suite, but each reached only label F1 0.600 and exact-label match 0.600. The original LoRA reached model-only F1 0.6667 on the same suite; deterministic tomato rules and guarded hybrid logic reached 1.0. Decision: keep both runtime formats private integration candidates only, not release candidates. Their staging notes, artifacts, and reports are under gitignored `private/`; no Hugging Face, GitHub, commit, push, or public update was made.
+- Prepared Tomato v0.2.1 local quality-correction training data from the later v0.2 boundary curriculum. v0.2 improved the unchanged 15-case golden model-only label F1 from 0.6667 to 0.7778, but still missed safe substrate normals, missing pH, impossible EC, and humidity-plus-screen conflict behavior. The v0.2.1 builder adds targeted contrasts, globally deduplicates source inputs, excludes all golden-equivalent rows from train/validation/test, and produces 3,326 train, 412 validation, 412 test, 15 golden, and 420 zero-overlap release-evaluation records. The release holdout is rule-derived synthetic data, not independent field ground truth. Local Colab ZIP and notebook are under gitignored `private/colab/`; no training, commit, push, or publication was performed.
+- Evaluated locally trained Tomato v0.2.1 correction adapter (`SHA-256 0818a1d4ff5dc4c81d990ecf6ba028ce7d0616530aa76a3577f5be2d3a681bd5`). It is rejected: the unchanged 15-case golden model-only F1 regressed to 0.1778 and exact match to 0.1333, while JSON validity remained 1.0. Diagnosis: global exact-input deduplication collapsed the training distribution to 2,723 normal rows but only 1-26 examples for several risk labels; the adapter consequently over-predicted `fungal_pressure`. Do not run release evaluation, upload, or use this adapter beyond guarded-rule experiments. Next data version must use balanced, value-jittered examples and preserve label coverage without split leakage.
+
+### 2026-07-12
+
+- With explicit user approval, published the accepted Water/Irrigation v0.1.8 deployment formats to Hugging Face: `Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-GGUF` (F16 GGUF/Ollama) and `Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-MLX` (8-bit MLX). Both cards identify the canonical LoRA lineage, frozen 168-case results, synthetic/rule-derived evaluation limits, advisory-only scope, and deterministic-safety requirements. The rejected 4-bit MLX artifact was not uploaded. No GitHub commit or push was performed.
+- Built and evaluated local deployment formats for Water/Irrigation v0.1.8. Ollama F16 GGUF passed all 168 frozen holdout cases with valid/required/allowed outputs, label F1, blocked-action F1, and human-review match all at 1.0 in 97.14 seconds. MLX 8-bit also scored 1.0 on every gate in 80.47 seconds and is the preferred Apple Silicon candidate. MLX 4-bit regressed to label F1 0.7262 and review match 0.5536 and is rejected.
+- Added a reusable Ollama/MLX frozen-holdout evaluator. Private reports are under `private/colab/outputs/`; merged, GGUF, Ollama, and MLX artifacts remain under gitignored `private/models/`. No runtime artifact was published.
+- Added `POST /v1/reasoners/water-irrigation-risk` with one stable API contract across deterministic rules, Ollama/GGUF, and an OpenAI-compatible MLX server. `hybrid_guarded` validates model JSON and merges deterministic risk/action guards; unavailable or invalid local runtimes fall back to rules. `model_only` rejects invalid outputs and is intended for evaluation.
+- Added local-only packaging tools to merge the v0.1.8 Qwen LoRA, build an Ollama-compatible GGUF model, and build a 4-bit MLX model. Generated artifacts stay under gitignored `private/models/`; no weights were committed or uploaded.
+- Added runtime configuration, Docker environment wiring, registry metadata, and `docs/LOCAL_MODEL_RUNTIMES.md`. Full verification passed: 2 core tests and 12 model-router tests, plus Python compilation, shell syntax, YAML parsing, and `git diff --check`.
+- No commit, push, tag, GitHub update, or Hugging Face update was performed. Next local action is installing/locating Ollama and `llama.cpp`, building the GGUF candidate, then rerunning the frozen v0.1.8 evaluation against the quantized runtime before considering any publication.
 
 ### 2026-07-11
 

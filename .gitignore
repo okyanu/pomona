@@ -39,12 +39,37 @@ hf_token.txt
 
 # Docker / local runtime data
 *.db
+backups/
 data/
 volumes/
 
 # ML training — lives in pomona-agronomist-llm repo (after split)
 models/agronomist-llm/
 models/checkpoints/
+
+# Local ML work awaiting migration to pomona-agronomist-llm
+datasets/pomona-nutrient-ph-ec-v0.1/
+scripts/datasets/build_pomona_nutrient_ph_ec_dataset.py
+scripts/datasets/build_pomona_nutrient_ph_ec_v0_1_1_correction_dataset.py
+scripts/datasets/build_pomona_tomato_v0_2_1_correction_dataset.py
+scripts/datasets/build_pomona_tomato_v0_2_2_balanced_dataset.py
+scripts/datasets/build_pomona_tomato_v0_2_3_golden_correction_dataset.py
+scripts/datasets/build_pomona_tomato_v0_2_4_structured_dataset.py
+scripts/datasets/validate_pomona_nutrient_ph_ec_dataset.py
+scripts/datasets/validate_pomona_tomato_label_list_splits.py
+scripts/huggingface/publish_nutrient_ph_ec_reasoner_to_hf.sh
+scripts/huggingface/publish_nutrient_ph_ec_runtime_to_hf.sh
+scripts/models/build_nutrient_ph_ec_mlx.sh
+scripts/models/build_nutrient_ph_ec_ollama.sh
+scripts/models/build_tomato_risk_mlx.sh
+scripts/models/build_tomato_risk_ollama.sh
+scripts/models/build_water_irrigation_mlx.sh
+scripts/models/build_water_irrigation_ollama.sh
+scripts/models/evaluate_nutrient_ph_ec_runtime.py
+scripts/models/evaluate_tomato_risk_runtime.py
+scripts/models/evaluate_water_irrigation_runtime.py
+scripts/models/guard_nutrient_ph_ec_output.py
+scripts/models/merge_lora_adapter.py
 
 # Large model weights
 *.safetensors
@@ -61,6 +86,16 @@ assets/**
 
 # Local blog drafts and writing logs
 /blog/
+
+# Local publication drafts, evidence, and owner roadmap
+docs/INFOQ_*.md
+docs/POMONA_MASTER_ROADMAP.md
+docs/assets/pomona-safety-architecture.png
+docs/assets/pomona-safety-architecture.svg
+scripts/benchmark_article_runtime.py
+scripts/build_article_evidence.py
+scripts/capture_article_scenarios.py
+scripts/run_article_demo.sh
 
 # PDFs — reference docs belong in private/research/
 *.pdf
@@ -126,3 +161,5 @@ hf-repos/
 # Downloaded source file types — keep under datasets/raw/ (already ignored) or private/
 *.docx
 *.7z
+docs/EXECUTION_PLAN.md
+docs/UNPUBLISHED_MODEL_RELEASES.md

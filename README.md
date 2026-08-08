@@ -18,7 +18,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 ---
 
-> **Early MVP.** Simulated sensors → API → demo advisor. [What to expect →](docs/GETTING_STARTED.md)
+> **Early MVP.** Simulated sensors → SQLite-backed API → guarded reasoner pipeline → read-only dashboard. Docker remains the recommended deployment path; local validation also works without Docker. [What to expect →](docs/GETTING_STARTED.md)
 
 ## 🚀 Quickstart (any OS — Docker)
 
@@ -43,6 +43,34 @@ curl http://localhost:8080/health
 
 Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 **Target:** one-command full stack (UI + DB in Docker) — [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md)
+Local validation details: **[docs/LOCAL_VALIDATION.md](docs/LOCAL_VALIDATION.md)**
+
+### Local validation without Docker
+
+When Docker Desktop is unavailable, run the four-service smoke test with the
+local Python environments:
+
+```bash
+./scripts/run_local_validation.sh
+# or
+make local-validation
+```
+
+Run the complete local service test suite with:
+
+```bash
+make test-local
+```
+
+Run tests and the full local service smoke test together with:
+
+```bash
+make local-check
+```
+
+It uses temporary SQLite and audit state, verifies both high-risk and routine
+paths, checks the dedicated Safety Checker, and removes temporary processes and
+files when it finishes.
 
 ## 🏗 Architecture
 
@@ -82,6 +110,8 @@ Fork → branch → `make test` → open PR.
 | [HF actuator command gate](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Advisory research preview; deterministic gate remains final |
 | [HF greenhouse sensor dataset](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) | Published greenhouse sensor dataset |
 
+Model catalog and release status: **[docs/MODEL_CATALOG.md](docs/MODEL_CATALOG.md)**
+
 ## 🧠 Model status
 
 Pomona keeps platform code, routing, deterministic safety logic, and metadata in GitHub. Model weights and published datasets live on Hugging Face.
@@ -95,6 +125,7 @@ Pomona keeps platform code, routing, deterministic safety logic, and metadata in
 | Actuator command gate `v0.1` | Published research preview, below standalone release gate | ⚠️ Advisory only; deterministic checker required |
 | Actuator command gate `v0.1.1-hardcases` | Regression in local eval | ❌ Do not use |
 | Actuator command gate `v0.1.2-correction` | Regression in independent eval | ❌ Do not use |
+| Nutrient / pH-EC reasoner `v0.1.1-correction` | LoRA, GGUF, and MLX published | ✅ Use only through deterministic guarded route |
 
 Near-term integration chain:
 
@@ -116,7 +147,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 |-------|------|--------|
 | 0 | Project setup & open source | ✅ |
 | 1 | Local MVP (Docker, core, simulator) | ✅ |
-| 2 | Dashboard + database | ⏳ **now** — completes Docker plug-and-play |
+| 2 | Dashboard + database | ⏳ partial — local SQLite, dashboard, audit, Docker, simulation, and backup validation complete; production hardening remains |
 | 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |

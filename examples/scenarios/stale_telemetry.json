@@ -1,0 +1,26 @@
+{
+  "scenario_id": "stale-telemetry-simulated",
+  "label": "Simulated validation scenario - stale telemetry must not authorize action.",
+  "validation_expectations": {
+    "human_review_required": true,
+    "blocked_actions_nonempty": true
+  },
+  "farm_context": {
+    "farm_id": "demo-farm",
+    "zone_id": "greenhouse-a",
+    "crop": "tomato",
+    "growth_stage": "fruiting",
+    "system_type": "greenhouse_substrate"
+  },
+  "expected_fields": ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "substrate_moisture_pct"],
+  "sensor": {
+    "timestamp": "2026-07-08T06:00:00Z",
+    "air_temperature_c": 25.0,
+    "humidity_pct": 65.0,
+    "ph": 6.0,
+    "ec_ms_cm": 2.2,
+    "substrate_moisture_pct": 45.0
+  },
+  "proposed_command": {"action_type": "start_irrigation"},
+  "actor": "automation_engine"
+}

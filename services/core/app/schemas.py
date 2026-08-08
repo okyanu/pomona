@@ -9,16 +9,17 @@ def utc_now() -> datetime:
 
 
 class SensorEvent(BaseModel):
-    device_id: str
-    farm_id: str
-    zone_id: str
-    crop: str = "tomato"
-    growth_stage: str = "flowering"
-    air_temperature_c: float
-    humidity_pct: float
-    ec_ms_cm: float
-    ph: float
-    soil_moisture_pct: float
+    device_id: str = Field(..., min_length=1, max_length=128)
+    farm_id: str = Field(..., min_length=1, max_length=128)
+    zone_id: str = Field(..., min_length=1, max_length=128)
+    crop: str = Field(default="tomato", min_length=1, max_length=64)
+    growth_stage: str = Field(default="flowering", min_length=1, max_length=64)
+    system_type: str = Field(default="greenhouse_substrate", min_length=1, max_length=64)
+    air_temperature_c: float = Field(..., ge=-40.0, le=80.0)
+    humidity_pct: float = Field(..., ge=0.0, le=100.0)
+    ec_ms_cm: float = Field(..., ge=0.0, le=20.0)
+    ph: float = Field(..., ge=0.0, le=14.0)
+    soil_moisture_pct: float = Field(..., ge=0.0, le=100.0)
     timestamp: datetime = Field(default_factory=utc_now)
     source: Optional[str] = None
 
