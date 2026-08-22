@@ -37,10 +37,18 @@ cd pomona
 cp .env.example .env
 ./scripts/up.sh
 
+python3 examples/tomato_risk_quickstart.py
+```
+
+That script sends the committed
+[examples/scenarios/arizona_tomato.json](../examples/scenarios/arizona_tomato.json)
+scenario to `POST /v1/reasoners/tomato-risk` with no extra dependencies and no
+files under `private/`. The equivalent raw request:
+
+```bash
 curl -s -X POST http://localhost:8081/v1/reasoners/tomato-risk \
   -H "Content-Type: application/json" \
   -d '{
-    "model_id": "pomona-tomato-risk-reasoner-v0.1.7",
     "mode": "hybrid_guarded",
     "input": {
       "system_type": "greenhouse_substrate",
@@ -74,9 +82,6 @@ Real output from this exact request:
   "fallback_reason": "LoRA runtime is not configured yet; used deterministic rules fallback."
 }
 ```
-
-The same scenario, as a reusable file, is committed at
-[examples/scenarios/arizona_tomato.json](../examples/scenarios/arizona_tomato.json).
 
 ## Try it — the LoRA adapter directly (research use)
 

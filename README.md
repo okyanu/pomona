@@ -30,6 +30,7 @@ cp .env.example .env
 ./scripts/up.sh
 ./scripts/sim.sh            # new terminal
 curl http://localhost:8080/health
+python3 examples/tomato_risk_quickstart.py   # real sensor JSON -> risk labels
 ```
 
 **Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
