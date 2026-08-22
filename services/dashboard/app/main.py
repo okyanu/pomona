@@ -398,16 +398,21 @@ DASHBOARD_HTML = r"""<!doctype html>
       --neutral: #8b949e; --neutral-bg: rgba(139, 148, 158, 0.15);
       --radius: 10px;
     }
-    body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      margin: 0; color: var(--text);
+      background:
+        radial-gradient(900px 320px at 15% -120px, rgba(63, 185, 80, 0.10), transparent),
+        var(--bg);
+    }
     main { max-width: 1100px; margin: 0 auto; padding: 32px 20px 48px; }
     header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
-    h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
+    h1 { margin: 0; font-size: 28px; letter-spacing: 0; display: flex; align-items: center; gap: 10px; }
     .status { color: var(--text-dim); font-size: 14px; }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
-    .metric { border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 18px; min-height: 84px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: border-color .15s ease; }
-    .metric:hover { border-color: #484f58; }
+    .metric { border: 1px solid var(--border); border-left: 3px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 18px; min-height: 84px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: border-color .15s ease, transform .15s ease; }
+    .metric:hover { border-color: #484f58; transform: translateY(-1px); }
     .label { color: var(--text-dim); font-size: 13px; }
-    .value { font-size: 26px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+    .value { font-size: 26px; font-weight: 700; margin-top: 10px; font-variant-numeric: tabular-nums; }
     section { border-top: 1px solid var(--border); padding-top: 22px; }
     section h2 { display: flex; align-items: center; gap: 10px; font-size: 18px; }
     section h2::before { content: ''; width: 4px; height: 18px; background: var(--accent); border-radius: 2px; display: inline-block; }
@@ -421,19 +426,24 @@ DASHBOARD_HTML = r"""<!doctype html>
     .badge.danger { background: var(--danger-bg); color: var(--danger); }
     .badge.neutral { background: var(--neutral-bg); color: var(--neutral); }
     .trend-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-    .trend-card { border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 14px; }
+    .trend-card { border: 1px solid var(--border); border-left: 3px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 14px; transition: transform .15s ease; }
+    .trend-card:hover { transform: translateY(-1px); }
     .trend-card svg { width: 100%; height: 56px; display: block; margin-top: 8px; }
+    .accent-temp { border-left-color: #f0883e; }
+    .accent-humidity { border-left-color: #58a6ff; }
+    .accent-ph { border-left-color: #a371f7; }
+    .accent-ec { border-left-color: #3fb950; }
     @media (max-width: 720px) { .grid, .trend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } .status { display: block; margin-top: 8px; } }
   </style>
 </head>
 <body>
 <main>
-  <header><h1>Pomona Control Center</h1><div class="status" id="status">Connecting to services...</div></header>
+  <header><h1>🌱 Pomona Control Center</h1><div class="status" id="status">Connecting to services...</div></header>
   <div class="grid">
-    <div class="metric"><div class="label">Air temperature</div><div class="value" id="air">--</div></div>
-    <div class="metric"><div class="label">Humidity</div><div class="value" id="humidity">--</div></div>
-    <div class="metric"><div class="label">pH</div><div class="value" id="ph">--</div></div>
-    <div class="metric"><div class="label">EC</div><div class="value" id="ec">--</div></div>
+    <div class="metric accent-temp"><div class="label">🌡️ Air temperature</div><div class="value" id="air">--</div></div>
+    <div class="metric accent-humidity"><div class="label">💧 Humidity</div><div class="value" id="humidity">--</div></div>
+    <div class="metric accent-ph"><div class="label">⚗️ pH</div><div class="value" id="ph">--</div></div>
+    <div class="metric accent-ec"><div class="label">⚡ EC</div><div class="value" id="ec">--</div></div>
   </div>
   <section><h2>Sensor trends</h2><div id="trends" class="empty">Loading...</div></section>
   <section><h2>Integrated guarded pipeline</h2><div id="pipeline" class="empty">Loading...</div></section>
@@ -498,10 +508,10 @@ async function refresh() {
   }
   const chronological = [...data.recent_events].reverse();
   $('trends').innerHTML = `<div class="trend-grid">
-    <div class="trend-card"><div class="label">Air temperature (°C)</div>${sparkline(chronological.map((e) => e.air_temperature_c), '#f0883e')}</div>
-    <div class="trend-card"><div class="label">Humidity (%)</div>${sparkline(chronological.map((e) => e.humidity_pct), '#58a6ff')}</div>
-    <div class="trend-card"><div class="label">pH</div>${sparkline(chronological.map((e) => e.ph), '#a371f7')}</div>
-    <div class="trend-card"><div class="label">EC (mS/cm)</div>${sparkline(chronological.map((e) => e.ec_ms_cm), '#3fb950')}</div>
+    <div class="trend-card accent-temp"><div class="label">🌡️ Air temperature (°C)</div>${sparkline(chronological.map((e) => e.air_temperature_c), '#f0883e')}</div>
+    <div class="trend-card accent-humidity"><div class="label">💧 Humidity (%)</div>${sparkline(chronological.map((e) => e.humidity_pct), '#58a6ff')}</div>
+    <div class="trend-card accent-ph"><div class="label">⚗️ pH</div>${sparkline(chronological.map((e) => e.ph), '#a371f7')}</div>
+    <div class="trend-card accent-ec"><div class="label">⚡ EC (mS/cm)</div>${sparkline(chronological.map((e) => e.ec_ms_cm), '#3fb950')}</div>
   </div>`;
   const pipelineResponse = await fetch('/api/pipeline');
   const pipeline = await pipelineResponse.json();
