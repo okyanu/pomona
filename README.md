@@ -16,7 +16,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 **[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
-![Pomona dashboard: live sensor readings, sensor trend charts, and a guarded risk pipeline showing a high-risk reading with a blocked action](docs/assets/dashboard-hero.png)
+![Pomona dashboard demo: a routine reading, then a high-risk nutrient reading that blocks an unsafe fertigation action, then the specialist breakdown](docs/assets/pomona-demo.gif)
 
 </div>
 
