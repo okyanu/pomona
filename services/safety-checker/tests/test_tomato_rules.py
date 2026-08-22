@@ -78,6 +78,20 @@ def test_missing_critical_data_requires_review():
     assert result["human_review_required"] is True
 
 
+def test_hydroponic_greenhouse_alias_matches_controlled_greenhouse():
+    # Dataset/schema naming drift: "hydroponic_greenhouse" and "hydroponic" must
+    # trigger the same low_ec threshold as "controlled_greenhouse".
+    reading = base_input()
+    reading["system_type"] = "hydroponic_greenhouse"
+    reading["ec_ms_cm"] = 0.6
+
+    result = derive_tomato_risk(reading)
+
+    assert "low_ec" in result["risk_labels"]
+    assert "nutrient_uptake_issue" in result["risk_labels"]
+    assert "autonomous_fertigation_change" in result["blocked_actions"]
+
+
 def test_actuator_conflict_blocks_direct_control():
     reading = base_input()
     reading["humidity_pct"] = 89.0

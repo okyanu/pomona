@@ -24,6 +24,11 @@ PESTICIDE_AND_DIAGNOSIS_BLOCKS = [
     "unsafe_chemical_recommendation",
 ]
 
+# Recirculating/no-substrate systems: covers naming drift between the
+# platform ("controlled_greenhouse"), the training dataset
+# ("hydroponic_greenhouse"), and the hardware event contract ("hydroponic").
+HYDROPONIC_SYSTEM_TYPES = {"controlled_greenhouse", "hydroponic_greenhouse", "hydroponic"}
+
 
 def add_unique(items: List[str], value: str) -> None:
     if value not in items:
@@ -92,7 +97,7 @@ def derive_tomato_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
         elif ec >= 4.5:
             add_unique(risks, "high_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
-        elif system_type == "controlled_greenhouse" and ec <= 0.8:
+        elif system_type in HYDROPONIC_SYSTEM_TYPES and ec <= 0.8:
             add_unique(risks, "low_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
         elif system_type == "greenhouse_substrate" and ec <= 0.05:
