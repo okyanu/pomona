@@ -185,6 +185,8 @@ result; real device testing remains a separate milestone.
 |---|---|---|
 | Static guarded demo ([Space](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)) | ✅ live | 3 preset scenarios verified against the platform's own deterministic logic |
 | Linked from HF Collection, README, model catalog, `llms.txt` | ✅ | — |
+| Mobile layout | ✅ | verified at 375×812; single-column, no overflow, readable |
+| Accessibility labels | ✅ | all form inputs now have `label for=` associations; preset group has `role="group"` |
 | Full platform playground (dashboard + all reasoners, not just tomato) | ⬜ | not started |
 
 The demo runs a client-side JavaScript port of the exact deterministic tomato
