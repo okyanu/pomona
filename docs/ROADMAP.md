@@ -21,6 +21,32 @@ Open edge AI for controlled agriculture.
 
 Product phases and release versions are separate. See [VERSIONING.md](./VERSIONING.md).
 
+## Phase 8 hardware design inspiration
+
+[OpenValve](https://github.com/fabiansteiner/OpenValve) is an open-hardware,
+3D-printable, bistable pinch valve designed for small greenhouse and
+irrigation systems, including gravity-fed water. It is noted here only as
+design inspiration for Phase 8 actuator hardware — Pomona has not integrated,
+purchased, bench tested, or adopted it, and there is no current plan to build
+an adapter for it.
+
+Whatever irrigation actuator hardware Pomona eventually targets in Phase 8,
+the same non-negotiable safety principles apply:
+
+- electrical isolation, default-safe (fail-closed) behavior, manual
+  close/override, command acknowledgement, and recovery after power or
+  network loss;
+- maximum open duration and flow limits, leak detection, stale-sensor
+  blocking, and an allowlisted irrigation-only command schema;
+- every proposed command routed through the deterministic safety checker,
+  with human approval required during hardware validation;
+- an advisory-only model-router: no LLM output may directly operate an
+  actuator;
+- no nutrient, fertilizer, pesticide, or other chemical dosing.
+
+OpenValve hardware is published under its own license; any future reference
+would link to the upstream design rather than copy it into this repository.
+
 ## Repos and releases
 
 | What | GitHub | Hugging Face |
@@ -47,6 +73,7 @@ Current best model set:
 | Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker remains final authority |
 | Actuator command gate `v0.1.1-hardcases` | Rejected | Local eval regression; do not use |
 | Actuator command gate `v0.1.2-correction` | Rejected | Independent-eval regression; do not use |
+| Nutrient / pH-EC `v0.1.1-correction` | Published | LoRA, GGUF, and MLX; use only through the deterministic guarded route |
 
 Next integration work:
 
@@ -60,7 +87,6 @@ POST /v1/actuator-command-gate/check
 Future model families:
 
 ```text
-nutrient / pH-EC reasoner
 strawberry risk reasoner
 lettuce risk reasoner
 aquaponic water chemistry reasoner
