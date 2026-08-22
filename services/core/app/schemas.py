@@ -20,6 +20,8 @@ class SensorEvent(BaseModel):
     ec_ms_cm: float = Field(..., ge=0.0, le=20.0)
     ph: float = Field(..., ge=0.0, le=14.0)
     soil_moisture_pct: float = Field(..., ge=0.0, le=100.0)
+    substrate_temperature_c: Optional[float] = Field(default=None, ge=-40.0, le=80.0)
+    substrate_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     timestamp: datetime = Field(default_factory=utc_now)
     source: Optional[str] = None
 

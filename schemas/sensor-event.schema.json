@@ -18,6 +18,8 @@
     "ec_ms_cm": {"type": "number", "minimum": 0, "maximum": 20},
     "ph": {"type": "number", "minimum": 0, "maximum": 14},
     "soil_moisture_pct": {"type": "number", "minimum": 0, "maximum": 100},
+    "substrate_temperature_c": {"type": ["number", "null"], "minimum": -40, "maximum": 80},
+    "substrate_moisture_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
     "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"], "maxLength": 64}
   }
