@@ -1,7 +1,8 @@
 # Pomona Tomato Risk Reasoner
 
 Pomona's first small-purpose reasoner: a compact LoRA adapter that reads a
-tomato greenhouse sensor reading and returns a bounded list of risk labels.
+tomato sensor reading from a substrate/soil greenhouse or a hydroponic
+(`controlled_greenhouse`) system and returns a bounded list of risk labels.
 
 ```text
 sensor JSON -> risk label JSON list -> deterministic safety guardrails -> dashboard/API output

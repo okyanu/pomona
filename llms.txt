@@ -1,6 +1,6 @@
 # Pomona
 
-> Open-source, local-first edge AI platform for controlled-agriculture greenhouses. MQTT sensor ingest, SQLite persistence, compact specialist reasoners, deterministic safety checks, and a read-only dashboard. Early alpha (`v0.1.0-alpha.1`) — not a production automation product.
+> Open-source, local-first edge AI platform for controlled agriculture — greenhouse and hydroponic systems. MQTT sensor ingest, SQLite persistence, compact specialist reasoners, deterministic safety checks, and a read-only dashboard. Early alpha (`v0.1.0-alpha.1`) — not a production automation product. A future aquaponic reasoner is planned but not yet built; see ROADMAP.
 
 Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic safety checker is always the final authority before any actuator or automation action. No model output ever directly controls hardware.
 
@@ -13,14 +13,14 @@ Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic saf
 
 ## Models and data (Hugging Face)
 - [Pomona Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9): all published models and the dataset, in one place
-- [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): published tomato greenhouse risk-label reasoner
+- [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): published tomato risk-label reasoner for substrate greenhouse and hydroponic systems
 - [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora): irrigation/moisture risk reasoner, release candidate
 - [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4): advisor LLM adapter
 - [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data): published greenhouse sensor dataset
 - [docs/TOMATO_RISK_REASONER.md](docs/TOMATO_RISK_REASONER.md): model card with a real, reproducible input/output example
 
 ## Try it
-- [Pomona Greenhouse Demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): live in-browser demo of the guarded tomato reasoner, no install, no login
+- [Pomona Greenhouse Demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): live in-browser demo of the guarded tomato reasoner for greenhouse and hydroponic systems, no install, no login
 - [examples/tomato_risk_quickstart.py](examples/tomato_risk_quickstart.py): standalone script, no extra dependencies, runs against a local `docker compose` stack
 - [examples/scenarios/](examples/scenarios/): real greenhouse sensor JSON scenarios (routine, high-risk, missing/stale data)
 

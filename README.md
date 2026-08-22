@@ -2,7 +2,7 @@
 
 # 🌱 Pomona
 
-**Open edge AI platform for agriculture** — MQTT ingest, reasoning, deterministic safety checks, and dashboards for the greenhouse.
+**Open edge AI platform for agriculture** — MQTT ingest, reasoning, deterministic safety checks, and dashboards for greenhouse and hydroponic systems.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform version](https://img.shields.io/badge/version-v0.1.0--alpha.1-orange.svg)](VERSION)
@@ -14,7 +14,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 [Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Wiki](https://github.com/Okyanus/pomona/wiki) · [Contribute](#-open-source--contribute)
 
-**[🌱 Try the guarded greenhouse demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
+**[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
 ![Pomona dashboard: live sensor readings, sensor trend charts, and a guarded risk pipeline showing a high-risk reading with a blocked action](docs/assets/dashboard-hero.png)
 
