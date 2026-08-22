@@ -388,22 +388,42 @@ DASHBOARD_HTML = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pomona Control Center</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #0d1117; color: #e6edf3; }
+    :root {
+      color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      --bg: #0d1117; --bg-card: #161b22; --border: #30363d; --border-soft: #21262d;
+      --text: #e6edf3; --text-dim: #8b949e; --accent: #3fb950;
+      --success: #3fb950; --success-bg: rgba(63, 185, 80, 0.15);
+      --warning: #d29922; --warning-bg: rgba(210, 153, 34, 0.15);
+      --danger: #f85149; --danger-bg: rgba(248, 81, 73, 0.15);
+      --neutral: #8b949e; --neutral-bg: rgba(139, 148, 158, 0.15);
+      --radius: 10px;
+    }
+    body { margin: 0; background: var(--bg); color: var(--text); }
     main { max-width: 1100px; margin: 0 auto; padding: 32px 20px 48px; }
-    header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid #30363d; padding-bottom: 20px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
     h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
-    .status { color: #8b949e; font-size: 14px; }
+    .status { color: var(--text-dim); font-size: 14px; }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
-    .metric { border: 1px solid #30363d; background: #161b22; padding: 18px; min-height: 84px; }
-    .label { color: #8b949e; font-size: 13px; }
+    .metric { border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 18px; min-height: 84px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: border-color .15s ease; }
+    .metric:hover { border-color: #484f58; }
+    .label { color: var(--text-dim); font-size: 13px; }
     .value { font-size: 26px; margin-top: 10px; font-variant-numeric: tabular-nums; }
-    section { border-top: 1px solid #30363d; padding-top: 22px; }
+    section { border-top: 1px solid var(--border); padding-top: 22px; }
+    section h2 { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+    section h2::before { content: ''; width: 4px; height: 18px; background: var(--accent); border-radius: 2px; display: inline-block; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #21262d; }
-    th { color: #8b949e; font-weight: 500; }
-    .empty { color: #8b949e; padding: 28px 0; }
-    @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } .status { display: block; margin-top: 8px; } }
+    th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid var(--border-soft); }
+    th { color: var(--text-dim); font-weight: 500; }
+    .empty { color: var(--text-dim); padding: 28px 0; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .badge.success { background: var(--success-bg); color: var(--success); }
+    .badge.warning { background: var(--warning-bg); color: var(--warning); }
+    .badge.danger { background: var(--danger-bg); color: var(--danger); }
+    .badge.neutral { background: var(--neutral-bg); color: var(--neutral); }
+    .trend-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .trend-card { border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 14px; }
+    .trend-card svg { width: 100%; height: 56px; display: block; margin-top: 8px; }
+    @media (max-width: 720px) { .grid, .trend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } .status { display: block; margin-top: 8px; } }
   </style>
 </head>
 <body>
@@ -415,6 +435,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div class="metric"><div class="label">pH</div><div class="value" id="ph">--</div></div>
     <div class="metric"><div class="label">EC</div><div class="value" id="ec">--</div></div>
   </div>
+  <section><h2>Sensor trends</h2><div id="trends" class="empty">Loading...</div></section>
   <section><h2>Integrated guarded pipeline</h2><div id="pipeline" class="empty">Loading...</div></section>
   <section><h2>Specialist results</h2><div id="specialists" class="empty">Loading...</div></section>
   <section><h2>Recent pipeline audit</h2><div id="audit" class="empty">Loading...</div></section>
@@ -439,6 +460,29 @@ DASHBOARD_HTML = r"""<!doctype html>
 <script>
 const $ = (id) => document.getElementById(id);
 const value = (x, suffix = '') => x === null || x === undefined ? '--' : `${x}${suffix}`;
+const badge = (text, severity = 'neutral') => `<span class="badge ${severity}">${text}</span>`;
+const riskSeverity = (level) => {
+  const l = (level || '').toLowerCase();
+  if (l.includes('high')) return 'danger';
+  if (l.includes('medium') || l.includes('moderate')) return 'warning';
+  return 'success';
+};
+const listSeverity = (list) => (list && list.length ? 'warning' : 'success');
+const boolSeverity = (flag) => (flag ? 'warning' : 'success');
+const sparkline = (values, color) => {
+  const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v));
+  if (nums.length < 2) return '<p class="status">Not enough data yet</p>';
+  const w = 280, h = 56, pad = 4;
+  const min = Math.min(...nums), max = Math.max(...nums);
+  const range = max - min || 1;
+  const step = (w - pad * 2) / (nums.length - 1);
+  const points = nums.map((v, i) => {
+    const x = pad + i * step;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg><p class="status">min ${min.toFixed(1)} · max ${max.toFixed(1)} · latest ${nums[nums.length - 1].toFixed(1)}</p>`;
+};
 let twinPreview = null;
 async function refresh() {
   const response = await fetch('/api/overview');
@@ -452,6 +496,13 @@ async function refresh() {
     $('ph').textContent = value(event.ph);
     $('ec').textContent = value(event.ec_ms_cm, ' mS/cm');
   }
+  const chronological = [...data.recent_events].reverse();
+  $('trends').innerHTML = `<div class="trend-grid">
+    <div class="trend-card"><div class="label">Air temperature (°C)</div>${sparkline(chronological.map((e) => e.air_temperature_c), '#f0883e')}</div>
+    <div class="trend-card"><div class="label">Humidity (%)</div>${sparkline(chronological.map((e) => e.humidity_pct), '#58a6ff')}</div>
+    <div class="trend-card"><div class="label">pH</div>${sparkline(chronological.map((e) => e.ph), '#a371f7')}</div>
+    <div class="trend-card"><div class="label">EC (mS/cm)</div>${sparkline(chronological.map((e) => e.ec_ms_cm), '#3fb950')}</div>
+  </div>`;
   const pipelineResponse = await fetch('/api/pipeline');
   const pipeline = await pipelineResponse.json();
   if (!pipeline.available) {
@@ -464,7 +515,9 @@ async function refresh() {
     const nutrient = result.nutrient_ph_ec || {};
     const crop = result.crop_risk || {};
     const safety = result.safety || {};
-    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${decision.risk_level || '--'}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${(quality.data_quality_labels || []).join(', ') || 'normal'}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${[...(water.irrigation_risk_labels || []), ...(nutrient.nutrient_risk_labels || [])].join(', ') || 'normal'}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${decision.human_review_required ? 'required' : 'not required'}</div></div></div><p class="status">Pipeline: ${result.pipeline_id || '--'} · Blocked actions: ${(decision.blocked_actions || []).join(', ') || 'none'}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
+    const waterNutrientLabels = [...(water.irrigation_risk_labels || []), ...(nutrient.nutrient_risk_labels || [])];
+    const blockedActions = decision.blocked_actions || [];
+    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${badge(decision.risk_level || '--', riskSeverity(decision.risk_level))}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${badge(waterNutrientLabels.join(', ') || 'normal', listSeverity(waterNutrientLabels))}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(decision.human_review_required ? 'required' : 'not required', boolSeverity(decision.human_review_required))}</div></div></div><p class="status">Pipeline: ${result.pipeline_id || '--'} · Blocked actions: ${badge(blockedActions.join(', ') || 'none', blockedActions.length ? 'danger' : 'success')}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
     const specialistRows = [
       ['Sensor quality', quality.data_quality_labels || [], quality.source || 'deterministic_rules', quality.human_review_required],
       ['Water / irrigation', water.irrigation_risk_labels || [], water.source || 'deterministic_rules', water.human_review_required],
@@ -472,7 +525,7 @@ async function refresh() {
       ['Crop risk', crop.risk_labels || [], crop.source || 'deterministic_rules', crop.human_review_required],
       ['Actuator safety', safety.safety_labels || [], safety.source || 'deterministic_safety_rules', safety.human_approval_required],
     ];
-    $('specialists').innerHTML = `<table><thead><tr><th>Specialist</th><th>Labels</th><th>Source</th><th>Review</th></tr></thead><tbody>${specialistRows.map(row => `<tr><td>${row[0]}</td><td>${row[1].join(', ') || 'normal'}</td><td>${row[2]}</td><td>${row[3] ? 'required' : 'not required'}</td></tr>`).join('')}</tbody></table><p class="status">Specialists advise independently; deterministic safety remains final authority. Dashboard view is read-only.</p>`;
+    $('specialists').innerHTML = `<table><thead><tr><th>Specialist</th><th>Labels</th><th>Source</th><th>Review</th></tr></thead><tbody>${specialistRows.map(row => `<tr><td>${row[0]}</td><td>${badge(row[1].join(', ') || 'normal', listSeverity(row[1]))}</td><td>${row[2]}</td><td>${badge(row[3] ? 'required' : 'not required', boolSeverity(row[3]))}</td></tr>`).join('')}</tbody></table><p class="status">Specialists advise independently; deterministic safety remains final authority. Dashboard view is read-only.</p>`;
   }
   const audit = await (await fetch('/api/audit')).json();
   if (!audit.available) {
@@ -480,7 +533,7 @@ async function refresh() {
   } else if (!(audit.result.events || []).length) {
     $('audit').textContent = 'No pipeline evaluations recorded yet.';
   } else {
-    $('audit').innerHTML = `<table><thead><tr><th>Time</th><th>Scenario</th><th>Risk</th><th>Review</th><th>Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${e.evaluated_at || '--'}</td><td>${e.scenario_id || '--'}</td><td>${e.risk_level || '--'}</td><td>${e.human_review_required ? 'required' : 'not required'}</td><td>${(e.blocked_actions || []).join(', ') || 'none'}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
+    $('audit').innerHTML = `<table><thead><tr><th>Time</th><th>Scenario</th><th>Risk</th><th>Review</th><th>Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${e.evaluated_at || '--'}</td><td>${e.scenario_id || '--'}</td><td>${badge(e.risk_level || '--', riskSeverity(e.risk_level))}</td><td>${badge(e.human_review_required ? 'required' : 'not required', boolSeverity(e.human_review_required))}</td><td>${badge((e.blocked_actions || []).join(', ') || 'none', (e.blocked_actions || []).length ? 'danger' : 'success')}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
   }
   const riskResponse = await fetch('/api/risk');
   const risk = await riskResponse.json();
@@ -491,7 +544,8 @@ async function refresh() {
     const quality = result.sensor_quality || {};
     const water = result.water_irrigation || {};
     const safety = result.actuator_safety || {};
-    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${(quality.data_quality_labels || []).join(', ') || 'normal'}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${(water.irrigation_risk_labels || []).join(', ') || 'normal'}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${safety.decision || '--'}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${result.human_review_required ? 'required' : 'not required'}</div></div></div><p class="status">Blocked actions: ${(result.blocked_actions || []).join(', ') || 'none'}</p>`;
+    const riskBlocked = result.blocked_actions || [];
+    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${badge((water.irrigation_risk_labels || []).join(', ') || 'normal', listSeverity(water.irrigation_risk_labels))}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${badge(safety.decision || '--', (safety.decision || '').toLowerCase() === 'allowed' ? 'success' : 'danger')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p class="status">Blocked actions: ${badge(riskBlocked.join(', ') || 'none', riskBlocked.length ? 'danger' : 'success')}</p>`;
   }
   const safetyResponse = await fetch('/api/safety');
   const safetyData = await safetyResponse.json();
@@ -499,17 +553,19 @@ async function refresh() {
     $('safety').textContent = safetyData.error || 'Safety triage unavailable';
   } else {
     const result = safetyData.result;
-    $('safety').innerHTML = `<div class="grid"><div class="metric"><div class="label">Decision</div><div class="value">${result.safety_labels?.includes('human_review_required') ? 'review' : 'allowed'}</div></div><div class="metric"><div class="label">Safety labels</div><div class="value">${(result.safety_labels || []).join(', ') || 'none'}</div></div><div class="metric"><div class="label">Blocked actions</div><div class="value">${(result.blocked_actions || []).join(', ') || 'none'}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${result.human_review_required ? 'required' : 'not required'}</div></div></div><p>${result.safe_alternative || 'Continue routine monitoring.'}</p><p class="status">Dashboard view is read-only. No action is executed.</p>`;
+    const safetyReview = result.safety_labels?.includes('human_review_required');
+    const safetyBlocked = result.blocked_actions || [];
+    $('safety').innerHTML = `<div class="grid"><div class="metric"><div class="label">Decision</div><div class="value">${badge(safetyReview ? 'review' : 'allowed', safetyReview ? 'warning' : 'success')}</div></div><div class="metric"><div class="label">Safety labels</div><div class="value">${badge((result.safety_labels || []).join(', ') || 'none', listSeverity(result.safety_labels))}</div></div><div class="metric"><div class="label">Blocked actions</div><div class="value">${badge(safetyBlocked.join(', ') || 'none', safetyBlocked.length ? 'danger' : 'success')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p>${result.safe_alternative || 'Continue routine monitoring.'}</p><p class="status">Dashboard view is read-only. No action is executed.</p>`;
   }
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
   $('events').innerHTML = `<table><thead><tr><th>Time</th><th>Farm</th><th>Zone</th><th>Crop</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${e.timestamp}</td><td>${e.farm_id}</td><td>${e.zone_id}</td><td>${e.crop}</td><td>${value(e.air_temperature_c, ' °C')}</td><td>${value(e.humidity_pct, ' %')}</td></tr>`).join('')}</tbody></table>`;
   const services = await (await fetch('/api/services')).json();
-  $('services').innerHTML = `<table><thead><tr><th>Service</th><th>Status</th><th>Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${name}</td><td>${item.available ? 'online' : 'offline'}</td><td>${item.available ? (item.health.service || '') : (item.error || '')}</td></tr>`).join('')}</tbody></table>`;
+  $('services').innerHTML = `<table><thead><tr><th>Service</th><th>Status</th><th>Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'online' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.available ? (item.health.service || '') : (item.error || '')}</td></tr>`).join('')}</tbody></table>`;
   const runtimes = await (await fetch('/api/runtimes')).json();
   if (!runtimes.available) {
     $('runtimes').textContent = runtimes.error || 'Runtime status unavailable';
   } else {
-    $('runtimes').innerHTML = `<table><thead><tr><th>Runtime</th><th>Status</th><th>Configured model</th><th>Models seen</th></tr></thead><tbody>${Object.entries(runtimes.result).map(([name, item]) => `<tr><td>${name}</td><td>${item.available ? 'available' : 'offline'}</td><td>${item.model || 'rules'}</td><td>${(item.models_seen || []).map(model => typeof model === 'string' ? model : (model.id || model.name || '')).filter(Boolean).join(', ') || (item.error || 'none')}</td></tr>`).join('')}</tbody></table>`;
+    $('runtimes').innerHTML = `<table><thead><tr><th>Runtime</th><th>Status</th><th>Configured model</th><th>Models seen</th></tr></thead><tbody>${Object.entries(runtimes.result).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'available' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.model || 'rules'}</td><td>${(item.models_seen || []).map(model => typeof model === 'string' ? model : (model.id || model.name || '')).filter(Boolean).join(', ') || (item.error || 'none')}</td></tr>`).join('')}</tbody></table>`;
   }
   const twin = twinPreview || await (await fetch('/api/digital-twin')).json();
   twinPreview = null;

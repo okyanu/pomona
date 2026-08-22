@@ -14,6 +14,8 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 [Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Wiki](https://github.com/Okyanus/pomona/wiki) · [Contribute](#-open-source--contribute)
 
+![Pomona dashboard: live sensor readings, sensor trend charts, and a guarded risk pipeline showing a high-risk reading with a blocked action](docs/assets/dashboard-hero.png)
+
 </div>
 
 ---
