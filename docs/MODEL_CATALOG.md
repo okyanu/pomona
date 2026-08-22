@@ -4,6 +4,9 @@ This is Pomona's GitHub-facing model card index. It records model family
 status, lineage, runtime formats, and safety boundaries. Weights are not stored
 in this repository.
 
+All published models and the dataset are also collected in one place on
+Hugging Face: [Pomona — Local AI for Safer Greenhouse Decision Support](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9).
+
 ## Current Families
 
 | Family | Version | Status | Canonical artifact | Runtime role |

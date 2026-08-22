@@ -105,6 +105,7 @@ Fork → branch → `make test` → open PR.
 |------|---------|
 | **[pomona](https://github.com/Okyanus/pomona)** (this) | Platform — run with Docker |
 | [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) | Agronomist ML training |
+| [HF Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9) | All published models + dataset in one place |
 | [HF agronomist](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Advisor LoRA weights |
 | [HF tomato reasoner](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato risk-label LoRA (v0.1.7) |
 | [HF water/irrigation reasoner](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | Moisture-risk LoRA release candidate (v0.1.8) |

@@ -12,6 +12,7 @@ Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic saf
 - [docs/MODEL_CATALOG.md](docs/MODEL_CATALOG.md): model families, publication status, safety boundaries
 
 ## Models and data (Hugging Face)
+- [Pomona Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9): all published models and the dataset, in one place
 - [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): published tomato greenhouse risk-label reasoner
 - [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora): irrigation/moisture risk reasoner, release candidate
 - [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4): advisor LLM adapter
