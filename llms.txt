@@ -20,6 +20,7 @@ Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic saf
 - [docs/TOMATO_RISK_REASONER.md](docs/TOMATO_RISK_REASONER.md): model card with a real, reproducible input/output example
 
 ## Try it
+- [Pomona Greenhouse Demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): live in-browser demo of the guarded tomato reasoner, no install, no login
 - [examples/tomato_risk_quickstart.py](examples/tomato_risk_quickstart.py): standalone script, no extra dependencies, runs against a local `docker compose` stack
 - [examples/scenarios/](examples/scenarios/): real greenhouse sensor JSON scenarios (routine, high-risk, missing/stale data)
 

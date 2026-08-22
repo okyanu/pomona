@@ -2,7 +2,7 @@
 
 Open edge AI for controlled agriculture.
 
-**Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **6 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
+**Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **7 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
 
 | # | Focus | Status |
 |---|--------|--------|
@@ -14,7 +14,7 @@ Open edge AI for controlled agriculture.
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
 | 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
 | 6 | Automation (suggestions) | ⬜ |
-| 7 | Public browser demo | ⬜ |
+| 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — `models/registry/` |
 | 10 | Train reasoner models | ⏳ partial — v0.1.7 LoRA on HF |

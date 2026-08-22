@@ -9,7 +9,7 @@ Living record of completed work. **Update when a phase completes** — see check
 | **Total phases** | 11 (Phase 0 – Phase 10) |
 | **Completed** | Phase 0 ✅, Phase 1 ✅ |
 | **Primary focus** | Phase 2 ⏳ |
-| **Active / partial** | Phases 2, 3, 4, 5, 9, 10 |
+| **Active / partial** | Phases 2, 3, 4, 5, 7, 9, 10 |
 | **Platform version** | `v0.1.0-alpha.1` |
 | **Canonical tracker** | [PHASES.md](./PHASES.md) |
 
@@ -172,6 +172,25 @@ See `private/planning/ROADMAP.full.md` for deliverables (local).
 The local Docker, MQTT simulation, backup/recovery, and pre-hardware safety
 checks are complete. This is still not a production or hardware validation
 result; real device testing remains a separate milestone.
+
+---
+
+## Phase 7 — Public browser demo ⏳ Partial
+
+**Goal:** Let people try Pomona from a browser without cloning or running Docker.
+
+### Current checkpoint (2026-08-22)
+
+| Deliverable | Status | Verification |
+|---|---|---|
+| Static guarded demo ([Space](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)) | ✅ live | 3 preset scenarios verified against the platform's own deterministic logic |
+| Linked from HF Collection, README, model catalog, `llms.txt` | ✅ | — |
+| Full platform playground (dashboard + all reasoners, not just tomato) | ⬜ | not started |
+
+The demo runs a client-side JavaScript port of the exact deterministic tomato
+rules in `services/model-router/app/tomato_reasoner.py`, kept free by using a
+static Hugging Face Space (Gradio/Docker Spaces require a paid tier). It will
+be extended to call the live model-router API once a public backend exists.
 
 ---
 

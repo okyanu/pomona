@@ -14,6 +14,8 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 [Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Wiki](https://github.com/Okyanus/pomona/wiki) · [Contribute](#-open-source--contribute)
 
+**[🌱 Try the guarded greenhouse demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
+
 ![Pomona dashboard: live sensor readings, sensor trend charts, and a guarded risk pipeline showing a high-risk reading with a blocked action](docs/assets/dashboard-hero.png)
 
 </div>
@@ -145,7 +147,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 
 ## 📊 Project phases
 
-**Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **6 active/partial** · **Phase 2 is the primary product focus**
+**Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **7 active/partial** · **Phase 2 is the primary product focus**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -156,7 +158,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |
 | 6 | Automation engine | ⬜ |
-| 7 | Public demo | ⬜ |
+| 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |
 | 10 | Fine-tune pipeline | ⏳ partial — builders, validators, Colab, clean eval |
