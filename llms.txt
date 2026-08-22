@@ -1,0 +1,32 @@
+# Pomona
+
+> Open-source, local-first edge AI platform for controlled-agriculture greenhouses. MQTT sensor ingest, SQLite persistence, compact specialist reasoners, deterministic safety checks, and a read-only dashboard. Early alpha (`v0.1.0-alpha.1`) — not a production automation product.
+
+Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic safety checker is always the final authority before any actuator or automation action. No model output ever directly controls hardware.
+
+## Start here
+- [README](README.md): quickstart (Docker Compose), architecture summary, project phase table
+- [docs/architecture.md](docs/architecture.md): full architecture and data flow
+- [docs/ROADMAP.md](docs/ROADMAP.md): phase status and model roadmap
+- [docs/PHASES.md](docs/PHASES.md): canonical phase-completion tracker
+- [docs/MODEL_CATALOG.md](docs/MODEL_CATALOG.md): model families, publication status, safety boundaries
+
+## Models and data (Hugging Face)
+- [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): published tomato greenhouse risk-label reasoner
+- [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora): irrigation/moisture risk reasoner, release candidate
+- [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4): advisor LLM adapter
+- [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data): published greenhouse sensor dataset
+- [docs/TOMATO_RISK_REASONER.md](docs/TOMATO_RISK_REASONER.md): model card with a real, reproducible input/output example
+
+## Try it
+- [examples/tomato_risk_quickstart.py](examples/tomato_risk_quickstart.py): standalone script, no extra dependencies, runs against a local `docker compose` stack
+- [examples/scenarios/](examples/scenarios/): real greenhouse sensor JSON scenarios (routine, high-risk, missing/stale data)
+
+## Contribute
+- [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md)
+- License: Apache-2.0 ([LICENSE](LICENSE))
+
+## Optional
+- [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md): detailed living status log
+- [docs/VERSIONING.md](docs/VERSIONING.md): platform vs. model versioning policy
+- [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm): sibling repo for advisor LLM training
