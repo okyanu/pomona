@@ -8,7 +8,7 @@ Open edge AI for controlled agriculture.
 |---|--------|--------|
 | 0 | Repo, docs, open source | ✅ |
 | 1 | Docker, core API, MQTT, simulator | ✅ |
-| 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; production hardening remains |
+| 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; optional sensor-ingestion API-key auth added; authentication elsewhere, signed device identity, and production observability remain |
 | 3 | Tomato reasoner | ⏳ partial — local Ollama/GGUF runtime is wired behind deterministic guarding; checkpoint quality still needs improvement |
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |

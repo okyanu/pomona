@@ -12,6 +12,7 @@ for module_name in list(sys.modules):
     if module_name == "app" or module_name.startswith("app."):
         del sys.modules[module_name]
 
+from app.config import settings
 from app.main import app
 from app.store import event_store
 
@@ -63,6 +64,47 @@ def test_ingest_and_list_sensor_event(client: TestClient):
     latest = client.get("/v1/sensors/events/latest")
     assert latest.status_code == 200
     assert latest.json()["ph"] == 6.2
+
+
+def _sensor_payload() -> dict:
+    return {
+        "device_id": "test-device",
+        "farm_id": "demo-farm",
+        "zone_id": "greenhouse-a",
+        "crop": "tomato",
+        "growth_stage": "flowering",
+        "air_temperature_c": 28.5,
+        "humidity_pct": 72.0,
+        "ec_ms_cm": 2.8,
+        "ph": 6.2,
+        "soil_moisture_pct": 45.0,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def test_ingest_rejects_missing_or_wrong_key_when_configured(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "api_key", "secret-key")
+
+    no_auth = client.post("/v1/sensors/events", json=_sensor_payload())
+    assert no_auth.status_code == 401
+
+    wrong_auth = client.post(
+        "/v1/sensors/events",
+        json=_sensor_payload(),
+        headers={"Authorization": "Bearer wrong-key"},
+    )
+    assert wrong_auth.status_code == 401
+
+
+def test_ingest_accepts_correct_key_when_configured(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "api_key", "secret-key")
+
+    response = client.post(
+        "/v1/sensors/events",
+        json=_sensor_payload(),
+        headers={"Authorization": "Bearer secret-key"},
+    )
+    assert response.status_code == 201
 
 
 @pytest.mark.parametrize(

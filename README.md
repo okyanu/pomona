@@ -153,7 +153,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 |-------|------|--------|
 | 0 | Project setup & open source | ✅ |
 | 1 | Local MVP (Docker, core, simulator) | ✅ |
-| 2 | Dashboard + database | ⏳ partial — local SQLite, dashboard, audit, Docker, simulation, and backup validation complete; production hardening remains |
+| 2 | Dashboard + database | ⏳ partial — local SQLite, dashboard, audit, Docker, simulation, and backup validation complete; optional sensor-ingestion auth added; broader hardening remains |
 | 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     mqtt_topic_pattern: str = "pomona/+/+/sensor/+/state"
     max_events: int = 500
     db_path: Path = Path("data/pomona.db")
+    api_key: str = ""
 
 
 settings = Settings()

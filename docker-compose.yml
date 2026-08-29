@@ -22,6 +22,7 @@ services:
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_TOPIC_PATTERN: ${MQTT_TOPIC_PATTERN:-pomona/+/+/sensor/+/state}
       DB_PATH: ${DB_PATH:-/app/data/pomona.db}
+      API_KEY: ${API_KEY:-}
     volumes:
       - core_data:/app/data
     depends_on:

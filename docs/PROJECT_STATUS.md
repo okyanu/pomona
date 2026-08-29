@@ -169,10 +169,13 @@ See `private/planning/ROADMAP.full.md` for deliverables (local).
 | Summary-only audit view | ✅ local | payload redaction test passes |
 | Backup and restore scripts | ✅ local | SQLite online-backup round-trip passes |
 | Docker Compose deployment smoke test | ✅ local | all six services healthy; benchmark assertions pass |
+| Optional sensor-ingestion API-key auth (2026-08-25) | ✅ local | `Authorization: Bearer <API_KEY>` required on `POST /v1/sensors/events` only when `API_KEY` is set; verified 401/201 against the live Docker stack; default (unset) behavior unchanged |
 
 The local Docker, MQTT simulation, backup/recovery, and pre-hardware safety
 checks are complete. This is still not a production or hardware validation
-result; real device testing remains a separate milestone.
+result; real device testing remains a separate milestone. Authentication
+exists only on core's ingestion endpoint so far — model-router,
+safety-checker, digital-twin, and dashboard remain unauthenticated.
 
 ---
 

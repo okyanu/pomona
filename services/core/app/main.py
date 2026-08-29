@@ -1,8 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 
+from app.auth import require_api_key
 from app.mqtt_client import mqtt_client
 from app.schemas import HealthResponse, SensorEvent, SensorEventListResponse
 from app.store import event_store
@@ -41,7 +42,12 @@ def health() -> HealthResponse:
     )
 
 
-@app.post("/v1/sensors/events", response_model=SensorEvent, status_code=201)
+@app.post(
+    "/v1/sensors/events",
+    response_model=SensorEvent,
+    status_code=201,
+    dependencies=[Depends(require_api_key)],
+)
 def ingest_sensor_event(event: SensorEvent) -> SensorEvent:
     event.source = event.source or "http"
     event_store.add(event)
