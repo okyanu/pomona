@@ -157,7 +157,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 | 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |
-| 6 | Automation engine | ⏳ partial — YAML rules, suggestions, and manual approve/reject; no dashboard integration yet |
+| 6 | Automation engine | ⏳ partial — YAML rules, suggestions, and manual approve/reject; [live API](https://automation-engine-fawn.vercel.app) deployed, no dashboard integration yet |
 | 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |

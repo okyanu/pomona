@@ -192,6 +192,7 @@ autonomous action.
 | `POST /v1/automation/evaluate` | ✅ | verified against a live Docker container |
 | Manual approve/reject workflow | ✅ | verified live: evaluate -> approve -> pending count drops |
 | Rules: high humidity/fungal fan suggestion, high/low EC alert, pH out-of-range alert, water-level check | ✅ | all 5 covered by tests |
+| Public deployment ([automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app)) | ✅ | live on Vercel, documentation-style landing page at `/` |
 | Dashboard integration (show pending suggestions, trigger evaluate) | ⬜ | not started |
 
 Suggestions are in-memory only (v0.1 scope, matching the platform's other

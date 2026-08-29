@@ -12,6 +12,7 @@ Apache-2.0 licensed. [Source →](https://github.com/Okyanus/pomona)
 | [Architecture](Architecture) | How data flows from sensor to dashboard |
 | [Model Status](Model-Status) | Which reasoner/advisor models are published and safe to use |
 | [Roadmap](Roadmap) | Phases, what's done, what's next |
+| [Dev Log](DevLog) | Dated notes on what changed and why |
 | [FAQ](FAQ) | Common questions |
 
 ## The short version
