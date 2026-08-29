@@ -22,9 +22,9 @@
 | **3** | Tomato greenhouse reasoner | ⏳ Partial — HF adapter + guarded local Ollama/GGUF runtime; model quality hardening pending |
 | **4** | Safety checker | ⏳ Partial — deterministic tomato and actuator gates implemented; full chain pending |
 | **5** | Agronomist LLM adapter | ⏳ Partial — HF adapter + model-router contract; live backend wiring pending |
-| **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; no dashboard integration yet |
+| **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; dashboard integration (evaluate, list, approve/reject) live in `services/dashboard` |
 | **7** | Public browser demo | ⏳ Partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
-| **8** | ESP32 / real devices | ⬜ Planned |
+| **8** | ESP32 / real devices | ⬜ Planned — see [EDGE_CONTROLLER_DESIGN_NOTES.md](./EDGE_CONTROLLER_DESIGN_NOTES.md) (exploratory, pre-implementation) |
 | **9** | Model registry standard | ⏳ Partial — public YAML registry and HF lifecycle metadata |
 | **10** | Fine-tune pipeline | ⏳ Partial — dataset builders, validators, Colab training, and clean evaluation |
 

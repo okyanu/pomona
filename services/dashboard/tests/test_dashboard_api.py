@@ -85,6 +85,192 @@ def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
     assert "source" not in FakeClient.last_payload["json"]["sensor"]
 
 
+def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
+    event = {
+        "farm_id": "demo-farm",
+        "zone_id": "greenhouse-a",
+        "crop": "tomato",
+        "timestamp": "2026-07-20T10:00:00Z",
+        "air_temperature_c": 33.0,
+        "humidity_pct": 80.0,
+        "ph": 5.2,
+        "ec_ms_cm": 3.8,
+        "soil_moisture_pct": 27.0,
+        "source": "mqtt",
+        "weather": {"t_mean_c": 29.2, "t_min_c": 25.6, "t_max_c": 34.8},
+        "zone_area_m2": 20,
+        "crop_kc": 1.15,
+        "npk_target": {"n_ppm": 150, "p_ppm": 50, "k_ppm": 200, "volume_liters": 100},
+    }
+
+    async def fake_overview():
+        return dashboard_main.OverviewResponse(
+            core_available=True,
+            latest_event=event,
+            recent_events=[event],
+        )
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"pipeline_id": "pipeline-test", "final_decision": {}}
+
+    class FakeClient:
+        last_payload = None
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path, json):
+            FakeClient.last_payload = json
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main, "overview", fake_overview)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    response = client.get("/api/pipeline")
+
+    assert response.status_code == 200
+    farm_context = FakeClient.last_payload["farm_context"]
+    assert farm_context["weather"] == event["weather"]
+    assert farm_context["zone_area_m2"] == 20
+    assert farm_context["crop_kc"] == 1.15
+    assert farm_context["npk_target"] == event["npk_target"]
+
+
+def test_automation_proxy_lists_suggestions(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"count": 1, "suggestions": [{"id": "sug-1", "status": "pending"}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, path):
+            assert path == "/v1/automation/suggestions"
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    response = client.get("/api/automation")
+    assert response.status_code == 200
+    assert response.json()["result"]["suggestions"][0]["id"] == "sug-1"
+
+
+def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatch):
+    async def fake_pipeline():
+        return dashboard_main.PipelineResponse(
+            available=True,
+            result={
+                "pipeline_id": "pipeline-test",
+                "sensor_quality": {"data_quality_labels": ["stale_reading"]},
+                "water_irrigation": {"irrigation_risk_labels": ["low_moisture"]},
+                "nutrient_ph_ec": {"nutrient_risk_labels": ["high_ec"]},
+                "crop_risk": {"risk_labels": []},
+                "final_decision": {"blocked_actions": ["direct_actuator_control"]},
+            },
+        )
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"suggestions": []}
+
+    class FakeClient:
+        last_payload = None
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path, json):
+            assert path == "/v1/automation/evaluate"
+            FakeClient.last_payload = json
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main, "pipeline", fake_pipeline)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    response = client.post("/api/automation/evaluate")
+
+    assert response.status_code == 200
+    payload = FakeClient.last_payload
+    assert set(payload["risk_labels"]) == {"stale_reading", "low_moisture", "high_ec"}
+    assert payload["blocked_actions"] == ["direct_actuator_control"]
+    assert payload["context"]["pipeline_id"] == "pipeline-test"
+
+
+def test_automation_evaluate_without_pipeline_result_is_unavailable(monkeypatch):
+    async def fake_pipeline():
+        return dashboard_main.PipelineResponse(available=False, error="No pipeline result.")
+
+    monkeypatch.setattr(dashboard_main, "pipeline", fake_pipeline)
+    response = client.post("/api/automation/evaluate")
+    assert response.status_code == 200
+    assert response.json()["available"] is False
+
+
+def test_automation_approve_and_reject_proxy(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "sug-1", "status": "approved"}
+
+    class FakeClient:
+        requested_paths = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path):
+            FakeClient.requested_paths.append(path)
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    approve = client.post("/api/automation/suggestions/sug-1/approve")
+    reject = client.post("/api/automation/suggestions/sug-2/reject")
+
+    assert approve.status_code == 200
+    assert reject.status_code == 200
+    assert FakeClient.requested_paths == [
+        "/v1/automation/suggestions/sug-1/approve",
+        "/v1/automation/suggestions/sug-2/reject",
+    ]
+
+
 def test_audit_proxy_returns_summary_only(monkeypatch):
     class FakeResponse:
         def raise_for_status(self):

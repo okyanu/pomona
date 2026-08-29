@@ -267,6 +267,7 @@ class PipelineEvaluateResponse(BaseModel):
     water_irrigation: Dict[str, Any]
     nutrient_ph_ec: Dict[str, Any]
     crop_risk: Dict[str, Any]
+    agronomy_calc: Optional[Dict[str, Any]] = None
     agronomist: Dict[str, Any]
     safety: Dict[str, Any]
     safety_triage: Dict[str, Any]

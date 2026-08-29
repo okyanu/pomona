@@ -8,6 +8,14 @@ from uuid import uuid4
 
 from app.actuator_gate import route_actuator_gate_reasoner
 from app.advisor import explain
+from app.agronomy_calc import (
+    NpkTarget,
+    WeatherInputs,
+    crop_evapotranspiration,
+    fertilizer_grams_for_target,
+    irrigation_volume_liters,
+    reference_et_penman_monteith,
+)
 from app.audit import write_pipeline_audit
 from app.config import settings
 from app.nutrient_ph_ec import route_nutrient_ph_ec_reasoner
@@ -35,6 +43,53 @@ def _combined_input(farm_context: dict[str, Any], sensor: dict[str, Any]) -> dic
     combined = dict(farm_context)
     combined.update(sensor)
     return combined
+
+
+def _agronomy_estimate(farm_context: dict[str, Any]) -> dict[str, Any] | None:
+    """Compute FAO-56 irrigation and NPK dosing estimates when farm_context
+    supplies the optional inputs they need (weather, zone area, crop
+    coefficient, and/or an NPK target). Returns None field-by-field when
+    the inputs for that estimate are absent, rather than guessing values
+    that would feed a safety-relevant pipeline.
+
+    This is advisory/informational only; it never sets risk labels or
+    blocked actions, and it is not required for the pipeline to run.
+    """
+    weather_data = farm_context.get("weather")
+    zone_area_m2 = farm_context.get("zone_area_m2")
+    crop_kc = farm_context.get("crop_kc")
+    npk_target_data = farm_context.get("npk_target")
+
+    irrigation_estimate = None
+    if weather_data and zone_area_m2 and crop_kc is not None:
+        try:
+            weather = WeatherInputs(**weather_data)
+            eto = reference_et_penman_monteith(weather)
+            etc = crop_evapotranspiration(eto, kc=crop_kc)
+            liters = irrigation_volume_liters(
+                etc,
+                area_m2=zone_area_m2,
+                irrigation_efficiency=farm_context.get("irrigation_efficiency", 0.9),
+            )
+            irrigation_estimate = {
+                "reference_et_mm_day": round(eto, 3),
+                "crop_et_mm_day": round(etc, 3),
+                "expected_irrigation_liters": round(liters, 2),
+            }
+        except (TypeError, ValueError):
+            irrigation_estimate = None
+
+    fertilizer_estimate = None
+    if npk_target_data:
+        try:
+            target = NpkTarget(**npk_target_data)
+            fertilizer_estimate = fertilizer_grams_for_target(target)
+        except (TypeError, ValueError):
+            fertilizer_estimate = None
+
+    if irrigation_estimate is None and fertilizer_estimate is None:
+        return None
+    return {"irrigation": irrigation_estimate, "fertilizer": fertilizer_estimate}
 
 
 async def evaluate_pipeline(
@@ -76,6 +131,7 @@ async def evaluate_pipeline(
         "pomona-nutrient-ph-ec-reasoner-v0.1",
         nutrient_backend,
     )
+    agronomy_calc = _agronomy_estimate(farm_context)
     crop_input = _combined_input(farm_context, sensor)
     tomato = derive_tomato_risk(crop_input) if farm_context.get("crop") == "tomato" else {
         "risk_labels": [],
@@ -147,6 +203,7 @@ async def evaluate_pipeline(
         "water_irrigation": water,
         "nutrient_ph_ec": nutrient,
         "crop_risk": tomato,
+        "agronomy_calc": agronomy_calc,
         "agronomist": {
             "backend": advisor["backend"],
             "explanation": advisor["explanation"],

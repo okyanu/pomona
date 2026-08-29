@@ -66,6 +66,56 @@ def test_ingest_and_list_sensor_event(client: TestClient):
     assert latest.json()["ph"] == 6.2
 
 
+def test_ingest_accepts_and_returns_optional_agronomy_calc_fields(client: TestClient):
+    payload = {
+        "device_id": "test-device",
+        "farm_id": "demo-farm",
+        "zone_id": "greenhouse-a",
+        "crop": "tomato",
+        "growth_stage": "flowering",
+        "air_temperature_c": 28.5,
+        "humidity_pct": 72.0,
+        "ec_ms_cm": 2.8,
+        "ph": 6.2,
+        "soil_moisture_pct": 45.0,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "weather": {
+            "t_mean_c": 29.2,
+            "t_min_c": 25.6,
+            "t_max_c": 34.8,
+            "rh_mean_pct": 66,
+            "wind_speed_2m_ms": 2.0,
+            "solar_radiation_mj_m2_day": 14.0,
+            "elevation_m": 2,
+        },
+        "zone_area_m2": 20,
+        "crop_kc": 1.15,
+        "npk_target": {"n_ppm": 150, "p_ppm": 50, "k_ppm": 200, "volume_liters": 100},
+    }
+
+    create = client.post("/v1/sensors/events", json=payload)
+    assert create.status_code == 201
+    body = create.json()
+    assert body["zone_area_m2"] == 20
+    assert body["crop_kc"] == 1.15
+    assert body["weather"]["t_mean_c"] == 29.2
+    assert body["npk_target"]["n_ppm"] == 150
+
+    latest = client.get("/v1/sensors/events/latest")
+    assert latest.status_code == 200
+    assert latest.json()["npk_target"]["k_ppm"] == 200
+
+
+def test_ingest_omits_optional_agronomy_calc_fields_when_absent(client: TestClient):
+    create = client.post("/v1/sensors/events", json=_sensor_payload())
+    assert create.status_code == 201
+    body = create.json()
+    assert body["weather"] is None
+    assert body["zone_area_m2"] is None
+    assert body["crop_kc"] is None
+    assert body["npk_target"] is None
+
+
 def _sensor_payload() -> dict:
     return {
         "device_id": "test-device",

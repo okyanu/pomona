@@ -84,6 +84,12 @@ class DigitalTwinResponse(BaseModel):
     error: Optional[str] = None
 
 
+class AutomationResponse(BaseModel):
+    available: bool
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 class DigitalTwinScenarioRequest(BaseModel):
     temperature_delta_c: float = Field(default=2.0, ge=-30.0, le=30.0)
     humidity_delta_pct: float = Field(default=5.0, ge=-100.0, le=100.0)
@@ -182,6 +188,13 @@ async def pipeline() -> PipelineResponse:
                         "crop": event.get("crop", "tomato"),
                         "system_type": event.get("system_type", "greenhouse_substrate"),
                         "zone_id": event.get("zone_id", "unknown"),
+                        # Optional inputs for the FAO-56/NPK calculator
+                        # (agronomy_calc); the pipeline skips the estimate
+                        # whenever any of these is absent.
+                        "weather": event.get("weather"),
+                        "zone_area_m2": event.get("zone_area_m2"),
+                        "crop_kc": event.get("crop_kc"),
+                        "npk_target": event.get("npk_target"),
                     },
                     "sensor": event,
                     "expected_fields": [
@@ -196,6 +209,79 @@ async def pipeline() -> PipelineResponse:
         return PipelineResponse(available=True, result=response.json())
     except Exception as exc:
         return PipelineResponse(available=False, error=f"Integrated pipeline unavailable: {exc}")
+
+
+@app.get("/api/automation", response_model=AutomationResponse)
+async def automation_suggestions() -> AutomationResponse:
+    """List automation suggestions. Read-only: never approves/rejects/evaluates."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=3.0) as client:
+            response = await client.get("/v1/automation/suggestions")
+            response.raise_for_status()
+        return AutomationResponse(available=True, result=response.json())
+    except Exception as exc:
+        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+
+
+@app.post("/api/automation/evaluate", response_model=AutomationResponse)
+async def automation_evaluate() -> AutomationResponse:
+    """Evaluate the latest pipeline's risk labels against automation rules.
+
+    This is an explicit, user-triggered action (a dashboard button), not part
+    of the 10s auto-refresh loop -- the automation engine creates a new
+    suggestion on every call with no dedupe, so calling it automatically on a
+    timer would spam duplicate suggestions for an unchanged reading.
+    """
+    pipeline_data = await pipeline()
+    if not pipeline_data.available or not pipeline_data.result:
+        return AutomationResponse(available=False, error="No pipeline result is available to evaluate.")
+
+    result = pipeline_data.result
+    risk_labels = list(dict.fromkeys([
+        *(result.get("sensor_quality") or {}).get("data_quality_labels", []),
+        *(result.get("water_irrigation") or {}).get("irrigation_risk_labels", []),
+        *(result.get("nutrient_ph_ec") or {}).get("nutrient_risk_labels", []),
+        *(result.get("crop_risk") or {}).get("risk_labels", []),
+    ]))
+    blocked_actions = (result.get("final_decision") or {}).get("blocked_actions", [])
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=5.0) as client:
+            response = await client.post(
+                "/v1/automation/evaluate",
+                json={
+                    "risk_labels": risk_labels,
+                    "blocked_actions": blocked_actions,
+                    "context": {"pipeline_id": result.get("pipeline_id")},
+                },
+            )
+            response.raise_for_status()
+        return AutomationResponse(available=True, result=response.json())
+    except Exception as exc:
+        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+
+
+@app.post("/api/automation/suggestions/{suggestion_id}/approve", response_model=AutomationResponse)
+async def automation_approve(suggestion_id: str) -> AutomationResponse:
+    """Record a human decision to approve a suggestion. No actuator is ever executed."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=3.0) as client:
+            response = await client.post(f"/v1/automation/suggestions/{suggestion_id}/approve")
+            response.raise_for_status()
+        return AutomationResponse(available=True, result=response.json())
+    except Exception as exc:
+        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+
+
+@app.post("/api/automation/suggestions/{suggestion_id}/reject", response_model=AutomationResponse)
+async def automation_reject(suggestion_id: str) -> AutomationResponse:
+    """Record a human decision to reject a suggestion."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=3.0) as client:
+            response = await client.post(f"/v1/automation/suggestions/{suggestion_id}/reject")
+            response.raise_for_status()
+        return AutomationResponse(available=True, result=response.json())
+    except Exception as exc:
+        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
 
 
 @app.get("/api/audit", response_model=AuditResponse)
@@ -451,9 +537,14 @@ DASHBOARD_HTML = r"""<!doctype html>
   <section><h2>Sensor trends</h2><div id="trends" class="empty">Loading...</div></section>
   <section><h2>Integrated guarded pipeline</h2><div id="pipeline" class="empty">Loading...</div></section>
   <section><h2>Specialist results</h2><div id="specialists" class="empty">Loading...</div></section>
+  <section><h2>Agronomy calculator (FAO-56 / NPK)</h2><div id="agronomy" class="empty">Loading...</div></section>
   <section><h2>Recent pipeline audit</h2><div id="audit" class="empty">Loading...</div></section>
   <section><h2>Guarded risk status</h2><div id="risk" class="empty">Loading...</div></section>
   <section><h2>Safety triage</h2><div id="safety" class="empty">Loading...</div></section>
+  <section><h2>Automation suggestions</h2>
+    <button id="automation-evaluate" type="button">Evaluate current risk</button>
+    <div id="automation" class="empty">Loading...</div>
+  </section>
   <section><h2>Service status</h2><div id="services" class="empty">Loading...</div></section>
   <section><h2>Local runtimes</h2><div id="runtimes" class="empty">Loading...</div></section>
   <section><h2>Digital Twin forecast preview</h2>
@@ -497,6 +588,36 @@ const sparkline = (values, color) => {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg><p class="status">min ${min.toFixed(1)} · max ${max.toFixed(1)} · latest ${nums[nums.length - 1].toFixed(1)}</p>`;
 };
 let twinPreview = null;
+async function renderAutomation() {
+  const automation = await (await fetch('/api/automation')).json();
+  if (!automation.available) {
+    $('automation').textContent = automation.error || 'Automation engine unavailable';
+    return;
+  }
+  const suggestions = automation.result.suggestions || [];
+  if (!suggestions.length) {
+    $('automation').innerHTML = `<p class="status">No suggestions yet. Click "Evaluate current risk" to check the latest reading against automation rules.</p>`;
+    return;
+  }
+  $('automation').innerHTML = `<table><thead><tr><th>Rule</th><th>Action</th><th>Message</th><th>Status</th><th></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${s.rule_id}</td><td>${s.action}</td><td>${s.message}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${s.id}">Approve</button> <button type="button" class="automation-reject" data-id="${s.id}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
+}
+document.body.addEventListener('click', async (event) => {
+  const target = event.target;
+  if (target.id === 'automation-evaluate') {
+    target.disabled = true;
+    try {
+      await fetch('/api/automation/evaluate', { method: 'POST' });
+      await renderAutomation();
+    } finally {
+      target.disabled = false;
+    }
+  } else if (target.classList.contains('automation-approve') || target.classList.contains('automation-reject')) {
+    const path = target.classList.contains('automation-approve') ? 'approve' : 'reject';
+    target.disabled = true;
+    await fetch(`/api/automation/suggestions/${target.dataset.id}/${path}`, { method: 'POST' });
+    await renderAutomation();
+  }
+});
 async function refresh() {
   const response = await fetch('/api/overview');
   const data = await response.json();
@@ -539,6 +660,20 @@ async function refresh() {
       ['Actuator safety', safety.safety_labels || [], safety.source || 'deterministic_safety_rules', safety.human_approval_required],
     ];
     $('specialists').innerHTML = `<table><thead><tr><th>Specialist</th><th>Labels</th><th>Source</th><th>Review</th></tr></thead><tbody>${specialistRows.map(row => `<tr><td>${row[0]}</td><td>${badge(row[1].join(', ') || 'normal', listSeverity(row[1]))}</td><td>${row[2]}</td><td>${badge(row[3] ? 'required' : 'not required', boolSeverity(row[3]))}</td></tr>`).join('')}</tbody></table><p class="status">Specialists advise independently; deterministic safety remains final authority. Dashboard view is read-only.</p>`;
+    const agronomy = result.agronomy_calc;
+    if (!agronomy) {
+      $('agronomy').innerHTML = `<p class="status">No estimate for the latest reading — zone weather, area, crop coefficient, or an NPK target were not supplied.</p>`;
+    } else {
+      const irrigation = agronomy.irrigation;
+      const fertilizer = agronomy.fertilizer;
+      const irrigationCards = irrigation
+        ? `<div class="metric"><div class="label">Reference ET (ETo)</div><div class="value">${value(irrigation.reference_et_mm_day, ' mm/day')}</div></div><div class="metric"><div class="label">Crop ET (ETc)</div><div class="value">${value(irrigation.crop_et_mm_day, ' mm/day')}</div></div><div class="metric"><div class="label">Expected irrigation</div><div class="value">${value(irrigation.expected_irrigation_liters, ' L/day')}</div></div>`
+        : '';
+      const fertilizerCards = fertilizer
+        ? `<div class="metric"><div class="label">Urea</div><div class="value">${value(fertilizer.urea_g, ' g')}</div></div><div class="metric"><div class="label">DAP</div><div class="value">${value(fertilizer.dap_g, ' g')}</div></div><div class="metric"><div class="label">SOP</div><div class="value">${value(fertilizer.sop_g, ' g')}</div></div>`
+        : '';
+      $('agronomy').innerHTML = `<div class="grid">${irrigationCards}${fertilizerCards}</div><p class="status">FAO-56 ET and NPK stoichiometry estimate for this zone. Advisory only — never affects risk labels or blocked actions.</p>`;
+    }
   }
   const audit = await (await fetch('/api/audit')).json();
   if (!audit.available) {
@@ -570,6 +705,7 @@ async function refresh() {
     const safetyBlocked = result.blocked_actions || [];
     $('safety').innerHTML = `<div class="grid"><div class="metric"><div class="label">Decision</div><div class="value">${badge(safetyReview ? 'review' : 'allowed', safetyReview ? 'warning' : 'success')}</div></div><div class="metric"><div class="label">Safety labels</div><div class="value">${badge((result.safety_labels || []).join(', ') || 'none', listSeverity(result.safety_labels))}</div></div><div class="metric"><div class="label">Blocked actions</div><div class="value">${badge(safetyBlocked.join(', ') || 'none', safetyBlocked.length ? 'danger' : 'success')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p>${result.safe_alternative || 'Continue routine monitoring.'}</p><p class="status">Dashboard view is read-only. No action is executed.</p>`;
   }
+  await renderAutomation();
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
   $('events').innerHTML = `<table><thead><tr><th>Time</th><th>Farm</th><th>Zone</th><th>Crop</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${e.timestamp}</td><td>${e.farm_id}</td><td>${e.zone_id}</td><td>${e.crop}</td><td>${value(e.air_temperature_c, ' °C')}</td><td>${value(e.humidity_pct, ' %')}</td></tr>`).join('')}</tbody></table>`;
   const services = await (await fetch('/api/services')).json();
