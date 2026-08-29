@@ -65,6 +65,7 @@ services:
       MODEL_ROUTER_URL: ${MODEL_ROUTER_URL:-http://model-router:8081}
       SAFETY_CHECKER_URL: ${SAFETY_CHECKER_URL:-http://safety-checker:8082}
       DIGITAL_TWIN_URL: ${DIGITAL_TWIN_URL:-http://digital-twin:8084}
+      AUTOMATION_ENGINE_URL: ${AUTOMATION_ENGINE_URL:-http://automation-engine:8085}
     depends_on:
       core:
         condition: service_started
@@ -75,6 +76,11 @@ services:
     build: ./services/digital-twin
     ports:
       - "8084:8084"
+
+  automation-engine:
+    build: ./services/automation-engine
+    ports:
+      - "8085:8085"
 
   safety-checker:
     build: ./services/safety-checker

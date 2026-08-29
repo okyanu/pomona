@@ -1,0 +1,43 @@
+# Pomona automation rules -- v0.1 scope.
+#
+# Every rule produces a SUGGESTION only. Suggestions are human-executable
+# recommendations (check something, adjust ventilation, review dosing) --
+# never a direct actuator or chemical command. See safety.forbidden_actions
+# below for the actions this engine will never suggest, no matter what a
+# rule's YAML says.
+
+rules:
+  - id: high_humidity_fan
+    match_any_labels: [fungal_pressure]
+    action: increase_ventilation
+    message: >-
+      Elevated humidity risk detected. Consider running ventilation or fans,
+      and inspect canopy for early fungal signs before any treatment.
+
+  - id: high_ec_alert
+    match_any_labels: [high_ec]
+    action: review_nutrient_dosing
+    message: >-
+      High EC detected. Review nutrient concentration logs and verify the
+      sensor manually before adjusting the feed.
+
+  - id: low_ec_alert
+    match_any_labels: [low_ec]
+    action: review_nutrient_dosing
+    message: >-
+      Low EC detected. Verify EC manually and review nutrient concentration
+      logs before adjusting the feed.
+
+  - id: ph_out_of_range
+    match_any_labels: [high_ph, low_ph]
+    action: check_water_dosing_system
+    message: >-
+      pH out of range. Check the water/dosing system and recalibrate the pH
+      probe if the reading does not match a manual measurement.
+
+  - id: water_level_check
+    match_any_labels: [water_level_risk]
+    action: check_irrigation_system
+    message: >-
+      Substrate moisture out of the expected range. Confirm with a second
+      reading and check the irrigation system for blockages or leaks.

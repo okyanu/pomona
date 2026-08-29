@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [core, model-router, dashboard, safety-checker, digital-twin]
+        service: [core, model-router, dashboard, safety-checker, digital-twin, automation-engine]
     steps:
       - uses: actions/checkout@v4
 

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     model_router_url: str = "http://localhost:8081"
     safety_checker_url: str = "http://localhost:8082"
     digital_twin_url: str = "http://localhost:8084"
+    automation_engine_url: str = "http://localhost:8085"
 
 
 settings = Settings()
@@ -247,6 +248,7 @@ async def service_status() -> ServiceStatusResponse:
         "model_router": settings.model_router_url,
         "safety_checker": settings.safety_checker_url,
         "digital_twin": settings.digital_twin_url,
+        "automation_engine": settings.automation_engine_url,
     }
     statuses: Dict[str, Dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=2.0) as client:

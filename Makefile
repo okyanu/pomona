@@ -64,6 +64,7 @@ commit-plan:
 test-local:
 	services/core/.venv/bin/python -m pytest services/core/tests services/dashboard/tests services/safety-checker/tests services/digital-twin/tests -q
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
+	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
 
 local-check: test-local local-validation
 

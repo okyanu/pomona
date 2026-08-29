@@ -5,8 +5,8 @@
 | | Count |
 |---|-------|
 | ✅ Completed | **2** (Phase 0, Phase 1) |
-| ⏳ Active / partial | **7** (Phases 2, 3, 4, 5, 7, 9, 10) |
-| ⬜ Remaining | **2** (Phases 6, 8) |
+| ⏳ Active / partial | **8** (Phases 2, 3, 4, 5, 6, 7, 9, 10) |
+| ⬜ Remaining | **1** (Phase 8) |
 
 > **Source of truth for phase status.** When a phase finishes, update this file first, then [ROADMAP.md](./ROADMAP.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](../README.md).
 
@@ -22,7 +22,7 @@
 | **3** | Tomato greenhouse reasoner | ⏳ Partial — HF adapter + guarded local Ollama/GGUF runtime; model quality hardening pending |
 | **4** | Safety checker | ⏳ Partial — deterministic tomato and actuator gates implemented; full chain pending |
 | **5** | Agronomist LLM adapter | ⏳ Partial — HF adapter + model-router contract; live backend wiring pending |
-| **6** | Automation engine | ⬜ Planned |
+| **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; no dashboard integration yet |
 | **7** | Public browser demo | ⏳ Partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
 | **8** | ESP32 / real devices | ⬜ Planned |
 | **9** | Model registry standard | ⏳ Partial — public YAML registry and HF lifecycle metadata |

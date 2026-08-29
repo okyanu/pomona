@@ -2,7 +2,7 @@
 
 Open edge AI for controlled agriculture.
 
-**Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **7 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
+**Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **8 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
 
 | # | Focus | Status |
 |---|--------|--------|
@@ -13,7 +13,7 @@ Open edge AI for controlled agriculture.
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
 | 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
-| 6 | Automation (suggestions) | ⬜ |
+| 6 | Automation (suggestions) | ⏳ partial — [services/automation-engine](../services/automation-engine/) live: YAML rules, suggestions, manual approve/reject; no dashboard integration yet |
 | 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — `models/registry/` |

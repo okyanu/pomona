@@ -9,7 +9,7 @@ Living record of completed work. **Update when a phase completes** — see check
 | **Total phases** | 11 (Phase 0 – Phase 10) |
 | **Completed** | Phase 0 ✅, Phase 1 ✅ |
 | **Primary focus** | Phase 2 ⏳ |
-| **Active / partial** | Phases 2, 3, 4, 5, 7, 9, 10 |
+| **Active / partial** | Phases 2, 3, 4, 5, 6, 7, 9, 10 |
 | **Platform version** | `v0.1.0-alpha.1` |
 | **Canonical tracker** | [PHASES.md](./PHASES.md) |
 
@@ -176,6 +176,30 @@ checks are complete. This is still not a production or hardware validation
 result; real device testing remains a separate milestone. Authentication
 exists only on core's ingestion endpoint so far — model-router,
 safety-checker, digital-twin, and dashboard remain unauthenticated.
+
+---
+
+## Phase 6 — Automation engine ⏳ Partial
+
+**Goal:** Move from recommendation to human-approved suggestion, never
+autonomous action.
+
+### Current checkpoint (2026-08-29)
+
+| Deliverable | Status | Verification |
+|---|---|---|
+| YAML automation rule format (`services/automation-engine/app/rules.yaml`) | ✅ | validated at startup; rejects forbidden actions and duplicate IDs |
+| `POST /v1/automation/evaluate` | ✅ | verified against a live Docker container |
+| Manual approve/reject workflow | ✅ | verified live: evaluate -> approve -> pending count drops |
+| Rules: high humidity/fungal fan suggestion, high/low EC alert, pH out-of-range alert, water-level check | ✅ | all 5 covered by tests |
+| Dashboard integration (show pending suggestions, trigger evaluate) | ⬜ | not started |
+
+Suggestions are in-memory only (v0.1 scope, matching the platform's other
+stateless specialist services) and there is no execution path from an
+approved suggestion to any actuator or hardware — approval only records a
+decision. `load_rules` refuses to start if any rule's action matches
+Pomona's forbidden actuator/chemical vocabulary, so a rules-file edit alone
+cannot make this service unsafe.
 
 ---
 

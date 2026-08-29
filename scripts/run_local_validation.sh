@@ -8,15 +8,17 @@ ROUTER_PORT="${ROUTER_PORT:-18081}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-13000}"
 SAFETY_PORT="${SAFETY_PORT:-18082}"
 DIGITAL_TWIN_PORT="${DIGITAL_TWIN_PORT:-18084}"
+AUTOMATION_ENGINE_PORT="${AUTOMATION_ENGINE_PORT:-18085}"
 PY_CORE="${PY_CORE:-${ROOT_DIR}/services/core/.venv/bin/python}"
 PY_ROUTER="${PY_ROUTER:-${ROOT_DIR}/services/model-router/.venv/bin/python}"
 PY_DASHBOARD="${PY_DASHBOARD:-${ROOT_DIR}/services/core/.venv/bin/python}"
 PY_SAFETY="${PY_SAFETY:-${ROOT_DIR}/services/core/.venv/bin/python}"
 PY_DIGITAL_TWIN="${PY_DIGITAL_TWIN:-${ROOT_DIR}/services/core/.venv/bin/python}"
+PY_AUTOMATION_ENGINE="${PY_AUTOMATION_ENGINE:-${ROOT_DIR}/services/automation-engine/.venv/bin/python}"
 TMP_DIR="$(mktemp -d /tmp/pomona-local-validation.XXXXXX)"
 DB_PATH="${TMP_DIR}/pomona.db"
 
-for python in "${PY_CORE}" "${PY_ROUTER}" "${PY_DASHBOARD}" "${PY_SAFETY}" "${PY_DIGITAL_TWIN}"; do
+for python in "${PY_CORE}" "${PY_ROUTER}" "${PY_DASHBOARD}" "${PY_SAFETY}" "${PY_DIGITAL_TWIN}" "${PY_AUTOMATION_ENGINE}"; do
   if [[ ! -x "${python}" ]]; then
     echo "Missing Python environment: ${python}" >&2
     exit 1
@@ -24,7 +26,7 @@ for python in "${PY_CORE}" "${PY_ROUTER}" "${PY_DASHBOARD}" "${PY_SAFETY}" "${PY
 done
 
 cleanup() {
-  kill "${CORE_PID:-}" "${ROUTER_PID:-}" "${DASHBOARD_PID:-}" "${SAFETY_PID:-}" "${DIGITAL_TWIN_PID:-}" 2>/dev/null || true
+  kill "${CORE_PID:-}" "${ROUTER_PID:-}" "${DASHBOARD_PID:-}" "${SAFETY_PID:-}" "${DIGITAL_TWIN_PID:-}" "${AUTOMATION_ENGINE_PID:-}" 2>/dev/null || true
   rm -rf "${TMP_DIR}"
 }
 trap cleanup EXIT
@@ -55,10 +57,16 @@ PYTHONPATH="${ROOT_DIR}/services/digital-twin" \
   --host 127.0.0.1 --port "${DIGITAL_TWIN_PORT}" >"${TMP_DIR}/digital-twin.log" 2>&1 &
 DIGITAL_TWIN_PID=$!
 
+PYTHONPATH="${ROOT_DIR}/services/automation-engine" \
+  "${PY_AUTOMATION_ENGINE}" -m uvicorn app.main:app --app-dir "${ROOT_DIR}/services/automation-engine" \
+  --host 127.0.0.1 --port "${AUTOMATION_ENGINE_PORT}" >"${TMP_DIR}/automation-engine.log" 2>&1 &
+AUTOMATION_ENGINE_PID=$!
+
 CORE_URL="http://127.0.0.1:${CORE_PORT}" \
 MODEL_ROUTER_URL="http://127.0.0.1:${ROUTER_PORT}" \
 SAFETY_CHECKER_URL="http://127.0.0.1:${SAFETY_PORT}" \
 DIGITAL_TWIN_URL="http://127.0.0.1:${DIGITAL_TWIN_PORT}" \
+AUTOMATION_ENGINE_URL="http://127.0.0.1:${AUTOMATION_ENGINE_PORT}" \
   "${PY_DASHBOARD}" -m uvicorn app.main:app --app-dir "${ROOT_DIR}/services/dashboard" \
   --host 127.0.0.1 --port "${DASHBOARD_PORT}" >"${TMP_DIR}/dashboard.log" 2>&1 &
 DASHBOARD_PID=$!
@@ -78,6 +86,7 @@ wait_for "http://127.0.0.1:${CORE_PORT}/health"
 wait_for "http://127.0.0.1:${ROUTER_PORT}/health"
 wait_for "http://127.0.0.1:${SAFETY_PORT}/health"
 wait_for "http://127.0.0.1:${DIGITAL_TWIN_PORT}/health"
+wait_for "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}/health"
 wait_for "http://127.0.0.1:${DASHBOARD_PORT}/health"
 
 curl -fsS -X POST "http://127.0.0.1:${CORE_PORT}/v1/sensors/events" \

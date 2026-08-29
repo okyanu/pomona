@@ -28,7 +28,7 @@ Devices / Simulator
 | **model-router** | Route tasks to models / rules | ✅ MVP |
 | **dashboard** | Live data and alerts | ⏳ Phase 2 |
 | **safety-checker** | Block unsafe recommendations | ⏳ Phase 4 |
-| **automation-engine** | YAML rules → suggestions | ⏳ Phase 6 |
+| **automation-engine** | YAML rules → suggestions | ⏳ Phase 6, partial |
 
 ## First MVP (running now)
 
