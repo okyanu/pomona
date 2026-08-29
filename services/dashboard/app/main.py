@@ -599,7 +599,7 @@ async function renderAutomation() {
     $('automation').innerHTML = `<p class="status">No suggestions yet. Click "Evaluate current risk" to check the latest reading against automation rules.</p>`;
     return;
   }
-  $('automation').innerHTML = `<table><thead><tr><th>Rule</th><th>Action</th><th>Message</th><th>Status</th><th></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${s.rule_id}</td><td>${s.action}</td><td>${s.message}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${s.id}">Approve</button> <button type="button" class="automation-reject" data-id="${s.id}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
+  $('automation').innerHTML = `<table><thead><tr><th scope="col">Rule</th><th scope="col">Action</th><th scope="col">Message</th><th scope="col">Status</th><th scope="col"></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${s.rule_id}</td><td>${s.action}</td><td>${s.message}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${s.id}">Approve</button> <button type="button" class="automation-reject" data-id="${s.id}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
 }
 document.body.addEventListener('click', async (event) => {
   const target = event.target;
@@ -659,7 +659,7 @@ async function refresh() {
       ['Crop risk', crop.risk_labels || [], crop.source || 'deterministic_rules', crop.human_review_required],
       ['Actuator safety', safety.safety_labels || [], safety.source || 'deterministic_safety_rules', safety.human_approval_required],
     ];
-    $('specialists').innerHTML = `<table><thead><tr><th>Specialist</th><th>Labels</th><th>Source</th><th>Review</th></tr></thead><tbody>${specialistRows.map(row => `<tr><td>${row[0]}</td><td>${badge(row[1].join(', ') || 'normal', listSeverity(row[1]))}</td><td>${row[2]}</td><td>${badge(row[3] ? 'required' : 'not required', boolSeverity(row[3]))}</td></tr>`).join('')}</tbody></table><p class="status">Specialists advise independently; deterministic safety remains final authority. Dashboard view is read-only.</p>`;
+    $('specialists').innerHTML = `<table><thead><tr><th scope="col">Specialist</th><th scope="col">Labels</th><th scope="col">Source</th><th scope="col">Review</th></tr></thead><tbody>${specialistRows.map(row => `<tr><td>${row[0]}</td><td>${badge(row[1].join(', ') || 'normal', listSeverity(row[1]))}</td><td>${row[2]}</td><td>${badge(row[3] ? 'required' : 'not required', boolSeverity(row[3]))}</td></tr>`).join('')}</tbody></table><p class="status">Specialists advise independently; deterministic safety remains final authority. Dashboard view is read-only.</p>`;
     const agronomy = result.agronomy_calc;
     if (!agronomy) {
       $('agronomy').innerHTML = `<p class="status">No estimate for the latest reading — zone weather, area, crop coefficient, or an NPK target were not supplied.</p>`;
@@ -681,7 +681,7 @@ async function refresh() {
   } else if (!(audit.result.events || []).length) {
     $('audit').textContent = 'No pipeline evaluations recorded yet.';
   } else {
-    $('audit').innerHTML = `<table><thead><tr><th>Time</th><th>Scenario</th><th>Risk</th><th>Review</th><th>Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${e.evaluated_at || '--'}</td><td>${e.scenario_id || '--'}</td><td>${badge(e.risk_level || '--', riskSeverity(e.risk_level))}</td><td>${badge(e.human_review_required ? 'required' : 'not required', boolSeverity(e.human_review_required))}</td><td>${badge((e.blocked_actions || []).join(', ') || 'none', (e.blocked_actions || []).length ? 'danger' : 'success')}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
+    $('audit').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Scenario</th><th scope="col">Risk</th><th scope="col">Review</th><th scope="col">Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${e.evaluated_at || '--'}</td><td>${e.scenario_id || '--'}</td><td>${badge(e.risk_level || '--', riskSeverity(e.risk_level))}</td><td>${badge(e.human_review_required ? 'required' : 'not required', boolSeverity(e.human_review_required))}</td><td>${badge((e.blocked_actions || []).join(', ') || 'none', (e.blocked_actions || []).length ? 'danger' : 'success')}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
   }
   const riskResponse = await fetch('/api/risk');
   const risk = await riskResponse.json();
@@ -707,14 +707,14 @@ async function refresh() {
   }
   await renderAutomation();
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
-  $('events').innerHTML = `<table><thead><tr><th>Time</th><th>Farm</th><th>Zone</th><th>Crop</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${e.timestamp}</td><td>${e.farm_id}</td><td>${e.zone_id}</td><td>${e.crop}</td><td>${value(e.air_temperature_c, ' °C')}</td><td>${value(e.humidity_pct, ' %')}</td></tr>`).join('')}</tbody></table>`;
+  $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${e.timestamp}</td><td>${e.farm_id}</td><td>${e.zone_id}</td><td>${e.crop}</td><td>${value(e.air_temperature_c, ' °C')}</td><td>${value(e.humidity_pct, ' %')}</td></tr>`).join('')}</tbody></table>`;
   const services = await (await fetch('/api/services')).json();
-  $('services').innerHTML = `<table><thead><tr><th>Service</th><th>Status</th><th>Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'online' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.available ? (item.health.service || '') : (item.error || '')}</td></tr>`).join('')}</tbody></table>`;
+  $('services').innerHTML = `<table><thead><tr><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'online' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.available ? (item.health.service || '') : (item.error || '')}</td></tr>`).join('')}</tbody></table>`;
   const runtimes = await (await fetch('/api/runtimes')).json();
   if (!runtimes.available) {
     $('runtimes').textContent = runtimes.error || 'Runtime status unavailable';
   } else {
-    $('runtimes').innerHTML = `<table><thead><tr><th>Runtime</th><th>Status</th><th>Configured model</th><th>Models seen</th></tr></thead><tbody>${Object.entries(runtimes.result).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'available' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.model || 'rules'}</td><td>${(item.models_seen || []).map(model => typeof model === 'string' ? model : (model.id || model.name || '')).filter(Boolean).join(', ') || (item.error || 'none')}</td></tr>`).join('')}</tbody></table>`;
+    $('runtimes').innerHTML = `<table><thead><tr><th scope="col">Runtime</th><th scope="col">Status</th><th scope="col">Configured model</th><th scope="col">Models seen</th></tr></thead><tbody>${Object.entries(runtimes.result).map(([name, item]) => `<tr><td>${name}</td><td>${badge(item.available ? 'available' : 'offline', item.available ? 'success' : 'danger')}</td><td>${item.model || 'rules'}</td><td>${(item.models_seen || []).map(model => typeof model === 'string' ? model : (model.id || model.name || '')).filter(Boolean).join(', ') || (item.error || 'none')}</td></tr>`).join('')}</tbody></table>`;
   }
   const twin = twinPreview || await (await fetch('/api/digital-twin')).json();
   twinPreview = null;
