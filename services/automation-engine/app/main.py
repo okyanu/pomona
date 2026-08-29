@@ -75,15 +75,48 @@ app = FastAPI(
 def landing() -> str:
     return """<!doctype html>
 <html>
-<head><title>Pomona Automation Engine</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem;">
+<head>
+<title>Pomona Automation Engine</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-width: 640px;
+    margin: 4rem auto;
+    padding: 0 1.25rem 4rem;
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.4rem; }
+  p.lede { color: #8a8578; margin-top: 0; }
+  .pill {
+    display: inline-block;
+    font-size: 0.78rem;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0.2rem 0.6rem;
+    opacity: 0.7;
+    margin-bottom: 1.5rem;
+  }
+  a {
+    display: block;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.5rem;
+    border: 1px solid #8a85781f;
+    border-radius: 4px;
+    text-decoration: none;
+    color: inherit;
+  }
+  a:hover { border-color: currentColor; }
+</style>
+</head>
+<body>
 <h1>Pomona Automation Engine</h1>
-<p>YAML-rule automation suggestions. Suggestions only &mdash; never direct actuator control.</p>
-<ul>
-<li><a href="/docs">API docs (Swagger UI)</a></li>
-<li><a href="/redoc">API reference (ReDoc)</a></li>
-<li><a href="/health">Health check</a></li>
-</ul>
+<p class="lede">YAML-rule automation suggestions &mdash; suggestions only, never direct actuator control.</p>
+<span class="pill">v0.1</span>
+<a href="/docs">/docs &nbsp;&rarr;&nbsp; Swagger UI</a>
+<a href="/redoc">/redoc &nbsp;&rarr;&nbsp; ReDoc reference</a>
+<a href="/health">/health &nbsp;&rarr;&nbsp; Health check</a>
 </body>
 </html>"""
 
