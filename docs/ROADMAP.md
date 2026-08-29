@@ -9,7 +9,7 @@ Open edge AI for controlled agriculture.
 | 0 | Repo, docs, open source | ✅ |
 | 1 | Docker, core API, MQTT, simulator | ✅ |
 | 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; production hardening remains |
-| 3 | Tomato reasoner | ⏳ partial — deterministic guarded route works; local LoRA wiring pending |
+| 3 | Tomato reasoner | ⏳ partial — local Ollama/GGUF runtime is wired behind deterministic guarding; checkpoint quality still needs improvement |
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
 | 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
@@ -20,6 +20,50 @@ Open edge AI for controlled agriculture.
 | 10 | Train reasoner models | ⏳ partial — v0.1.7 LoRA on HF |
 
 Product phases and release versions are separate. See [VERSIONING.md](./VERSIONING.md).
+
+## Key milestones
+
+Tracked two ways: what's **sustainable** (works without ongoing hand-holding)
+and what's still **manual toil** (needs a person, a script, or a decision
+every time). Closing the second list is how the first list stays true.
+
+### Sustainable — shipped and self-maintaining
+
+- Deterministic safety layer is the final authority everywhere; it's rule
+  code, not a model, so it doesn't drift or degrade over time.
+- 5 models + 1 dataset published on Hugging Face, bundled in one
+  [Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9).
+- Free, static public demo Space — no server to run, no paid tier, no
+  hosting bill.
+- CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs all five
+  Python service test suites on every push/PR.
+- `make local-check` verifies the platform without Docker — lowers the bar
+  for anyone else to confirm a change works.
+- First tagged GitHub release
+  ([`v0.1.0-alpha.1`](https://github.com/Okyanus/pomona/releases/tag/v0.1.0-alpha.1)).
+
+### Manual toil — real, current, tracked here so it doesn't get lost
+
+- Keep the combined local and per-service CI suites aligned as new services
+  and shared contracts are added. The current local baseline is 75 passing
+  tests (`make test-local`) across all five Python services.
+- `scripts/run_local_validation.sh` didn't start the `digital-twin` service,
+  so the dashboard's new digital-twin health check always failed
+  `make local-check` — fixed by starting it alongside the other four
+  services in that script.
+- Tomato, water/irrigation, and nutrient/pH-EC now have guarded local Ollama
+  runtime paths with schema-constrained decoding, but sensor quality, safety
+  triage, and actuator gate still use deterministic fallback in the
+  platform. The tomato v0.1.7 GGUF also remains below standalone quality
+  (0.60 F1 on the 15-case golden smoke suite), so deterministic rules must
+  remain authoritative — `hybrid_guarded` mode validates model output but
+  intentionally discards it in favor of rules; only `model_only` (evaluation)
+  surfaces raw model output.
+- One maintainer, one set of GitHub/HF credentials. No documented
+  continuity or handoff process if that becomes unavailable.
+- Naming drift between the dataset, hardware contract, and deployed code
+  (e.g. today's `hydroponic` / `hydroponic_greenhouse` / `controlled_greenhouse`
+  fix) isn't caught automatically — only manual review finds it.
 
 ## Phase 8 hardware design inspiration
 
