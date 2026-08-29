@@ -132,8 +132,10 @@ Endpoint status:
 ```text
 services/model-router:
   done: POST /v1/reasoners/sensor-quality
-  done: POST /v1/reasoners/tomato-risk
-  next: POST /v1/reasoners/safety-triage
+  done: POST /v1/reasoners/tomato-risk (rules + guarded/model-only local Ollama GGUF)
+  done: POST /v1/reasoners/water-irrigation-risk (guarded local runtime supported)
+  done: POST /v1/reasoners/safety-triage (deterministic fallback; model runtime pending)
+  next: improve tomato model-only quality and wire the remaining specialist runtimes
 
 services/safety-checker:
   keep as deterministic final authority: POST /v1/actuator-command-gate/check
@@ -142,7 +144,6 @@ services/safety-checker:
 Future models after platform integration:
 
 ```text
-water / irrigation risk reasoner
 nutrient / pH-EC reasoner
 crop-specific reasoners
 digital twin scenario reasoner

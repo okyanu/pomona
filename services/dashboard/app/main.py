@@ -246,6 +246,7 @@ async def service_status() -> ServiceStatusResponse:
         "core": settings.core_url,
         "model_router": settings.model_router_url,
         "safety_checker": settings.safety_checker_url,
+        "digital_twin": settings.digital_twin_url,
     }
     statuses: Dict[str, Dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=2.0) as client:

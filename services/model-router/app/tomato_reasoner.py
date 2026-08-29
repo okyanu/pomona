@@ -7,7 +7,36 @@ rules so downstream services can integrate against the final response shape.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
+
+from app.backends.chat_json import ollama_chat_json_array
+from app.config import settings
+
+
+ALLOWED_RISK_LABELS = {
+    "high_ph",
+    "low_ph",
+    "high_ec",
+    "low_ec",
+    "heat_stress",
+    "cold_stress",
+    "fungal_pressure",
+    "nutrient_uptake_issue",
+    "sensor_anomaly",
+    "missing_critical_data",
+    "water_level_risk",
+    "actuator_conflict",
+}
+OUTPUT_SCHEMA: Dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string", "enum": sorted(ALLOWED_RISK_LABELS)},
+    "uniqueItems": True,
+}
+SYSTEM_PROMPT = """You are Pomona, a narrow tomato greenhouse risk-label classifier.
+Return only a valid JSON list containing allowed risk labels.
+If the packet is normal, return []. Never return advice, actuator commands, or text outside the JSON list.
+Use only labels supported directly by the supplied sensor values."""
 
 
 ALLOWED_BLOCKED_ACTIONS = {
@@ -163,21 +192,87 @@ def derive_tomato_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def route_tomato_reasoner(
+def _validate_model_labels(output: List[Any]) -> List[str]:
+    if not all(isinstance(item, str) for item in output):
+        raise ValueError("model output labels must all be strings")
+    unknown = set(output) - ALLOWED_RISK_LABELS
+    if unknown:
+        raise ValueError(f"model output used labels outside the allowlist: {', '.join(sorted(unknown))}")
+    return list(dict.fromkeys(output))
+
+
+def _blocked_actions_for_labels(labels: List[str]) -> List[str]:
+    blocked: List[str] = []
+    if any(label in labels for label in ("high_ph", "low_ph", "high_ec", "low_ec", "nutrient_uptake_issue")):
+        add_unique(blocked, "autonomous_fertigation_change")
+    if any(label in labels for label in ("heat_stress", "cold_stress", "water_level_risk", "actuator_conflict")):
+        add_unique(blocked, "direct_actuator_control")
+    if "fungal_pressure" in labels:
+        for action in PESTICIDE_AND_DIAGNOSIS_BLOCKS:
+            add_unique(blocked, action)
+    return blocked
+
+
+async def _runtime_labels(input_data: Dict[str, Any], backend: str) -> List[str]:
+    if backend != "ollama":
+        raise ValueError(f"unsupported tomato reasoner backend: {backend}")
+    prompt = "Classify this tomato greenhouse packet:\n" + json.dumps(
+        input_data,
+        sort_keys=True,
+        default=str,
+    )
+    output = await ollama_chat_json_array(
+        settings.ollama_host,
+        settings.tomato_risk_ollama_model,
+        SYSTEM_PROMPT,
+        prompt,
+        OUTPUT_SCHEMA,
+    )
+    return _validate_model_labels(output)
+
+
+async def route_tomato_reasoner(
     input_data: Dict[str, Any],
     mode: str,
     model_id: str,
+    backend: str,
 ) -> Dict[str, Any]:
     selected = mode.strip().lower()
+    selected_backend = backend.strip().lower()
+    rules = derive_tomato_risk(input_data)
+    result = dict(rules)
+    source = "deterministic_rules"
+    fallback_reason: Optional[str] = None
 
-    if selected == "model_only":
-        raise NotImplementedError("Local LoRA inference is not wired into model-router yet.")
+    if selected != "rules_only" and selected_backend != "rules":
+        try:
+            labels = await _runtime_labels(input_data, selected_backend)
+            source = selected_backend if selected == "model_only" else f"{selected_backend}_guarded"
+            if selected == "model_only":
+                # Evaluation mode exposes model labels, while deterministic
+                # safety fields remain populated so this endpoint never
+                # becomes an actuator authorization path.
+                result["risk_labels"] = labels
+                result["blocked_actions"] = list(
+                    dict.fromkeys([*result["blocked_actions"], *_blocked_actions_for_labels(labels)])
+                )
+                result["human_review_required"] = bool(labels or result["blocked_actions"])
+        except Exception as exc:
+            if selected == "model_only":
+                raise RuntimeError(f"{selected_backend} inference failed: {exc}") from exc
+            fallback_reason = (
+                f"{selected_backend} unavailable or invalid; used deterministic rules: {exc}"
+            )
+    elif selected == "model_only":
+        raise NotImplementedError("model_only requires a configured tomato runtime backend")
+    elif selected == "hybrid_guarded":
+        fallback_reason = "Tomato runtime is disabled; used deterministic rules fallback."
 
-    result = derive_tomato_risk(input_data)
     result["model_id"] = model_id
     result["mode"] = "rules_only" if selected == "rules_only" else "hybrid_guarded"
-    result["source"] = "deterministic_rules"
-    result["fallback_reason"] = None
-    if selected == "hybrid_guarded":
-        result["fallback_reason"] = "LoRA runtime is not configured yet; used deterministic rules fallback."
+    if selected == "model_only":
+        result["mode"] = "model_only"
+    result["backend"] = selected_backend
+    result["source"] = source
+    result["fallback_reason"] = fallback_reason
     return result

@@ -126,6 +126,39 @@ def test_dashboard_html_exposes_specialist_results_and_read_only_warning():
     assert "deterministic safety remains final authority" in html
 
 
+def test_service_status_includes_digital_twin(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "ok"}
+
+    class FakeClient:
+        requested_urls = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            self.requested_urls.append(url)
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    response = client.get("/api/services")
+
+    assert response.status_code == 200
+    assert response.json()["services"]["digital_twin"]["available"] is True
+    assert f"{dashboard_main.settings.digital_twin_url}/health" in FakeClient.requested_urls
+
+
 def test_digital_twin_proxy_is_forecast_only(monkeypatch):
     event = {
         "farm_id": "demo-farm",

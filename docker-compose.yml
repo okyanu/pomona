@@ -43,7 +43,9 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-ai-pomona-agronomist-gemma4}
       REASONER_BACKEND: ${REASONER_BACKEND:-rules}
+      TOMATO_RISK_OLLAMA_MODEL: ${TOMATO_RISK_OLLAMA_MODEL:-pomona-tomato-risk:v0.1.7-local}
       WATER_IRRIGATION_OLLAMA_MODEL: ${WATER_IRRIGATION_OLLAMA_MODEL:-pomona-water-irrigation:v0.1.8}
+      NUTRIENT_PH_EC_OLLAMA_MODEL: ${NUTRIENT_PH_EC_OLLAMA_MODEL:-pomona-nutrient-ph-ec:v0.1.1}
       MLX_HOST: ${MLX_HOST:-http://host.docker.internal:8083}
       WATER_IRRIGATION_MLX_MODEL: ${WATER_IRRIGATION_MLX_MODEL:-}
     volumes:

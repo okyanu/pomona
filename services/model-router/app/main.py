@@ -94,11 +94,13 @@ class TomatoRiskReasonerRequest(BaseModel):
     input: Dict[str, Any] = Field(..., description="Normalized Pomona tomato greenhouse input.")
     model_id: Optional[str] = None
     mode: Literal["rules_only", "hybrid_guarded", "model_only"] = "hybrid_guarded"
+    backend: Optional[str] = None
 
 
 class TomatoRiskReasonerResponse(BaseModel):
     model_id: str
     mode: str
+    backend: str
     source: str
     risk_labels: List[str]
     missing_data: List[str]
@@ -207,11 +209,13 @@ class NutrientPhEcReasonerRequest(BaseModel):
     input: Dict[str, Any] = Field(..., description="Normalized hydroponic or substrate pH/EC input.")
     model_id: Optional[str] = None
     mode: Literal["rules_only", "hybrid_guarded", "model_only"] = "hybrid_guarded"
+    backend: Optional[Literal["rules", "ollama"]] = None
 
 
 class NutrientPhEcReasonerResponse(BaseModel):
     model_id: str
     mode: str
+    backend: str
     source: str
     nutrient_risk_labels: List[str]
     missing_fields: List[str]
@@ -380,16 +384,19 @@ def sensor_quality_reasoner(request: SensorQualityReasonerRequest) -> SensorQual
 
 
 @app.post("/v1/reasoners/tomato-risk", response_model=TomatoRiskReasonerResponse)
-def tomato_risk_reasoner(request: TomatoRiskReasonerRequest) -> TomatoRiskReasonerResponse:
+async def tomato_risk_reasoner(request: TomatoRiskReasonerRequest) -> TomatoRiskReasonerResponse:
     model_id = request.model_id or "pomona-tomato-risk-reasoner-v0.1.7"
     model = get_model(model_id)
     if not model:
         raise HTTPException(status_code=404, detail=f"Model not registered: {model_id}")
 
     try:
-        result = route_tomato_reasoner(request.input, request.mode, model_id)
+        backend = request.backend or settings.reasoner_backend
+        result = await route_tomato_reasoner(request.input, request.mode, model_id, backend)
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     logger.info(
         "tomato reasoner mode=%s crop=%s risks=%s review=%s",
@@ -521,16 +528,24 @@ def safety_triage_reasoner(
 
 
 @app.post("/v1/reasoners/nutrient-ph-ec", response_model=NutrientPhEcReasonerResponse)
-def nutrient_ph_ec_reasoner(
+async def nutrient_ph_ec_reasoner(
     request: NutrientPhEcReasonerRequest,
 ) -> NutrientPhEcReasonerResponse:
     model_id = request.model_id or "pomona-nutrient-ph-ec-reasoner-v0.1"
     try:
-        result = route_nutrient_ph_ec_reasoner(request.input, request.mode, model_id)
+        backend = request.backend or settings.reasoner_backend
+        result = await route_nutrient_ph_ec_reasoner(
+            request.input,
+            request.mode,
+            model_id,
+            backend,
+        )
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return NutrientPhEcReasonerResponse(**result)
 
 

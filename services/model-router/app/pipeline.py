@@ -69,10 +69,12 @@ async def evaluate_pipeline(
         water_backend,
         "pomona-water-irrigation-risk-reasoner-v0.1",
     )
-    nutrient = route_nutrient_ph_ec_reasoner(
+    nutrient_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
+    nutrient = await route_nutrient_ph_ec_reasoner(
         specialist_input,
         specialist_mode,
         "pomona-nutrient-ph-ec-reasoner-v0.1",
+        nutrient_backend,
     )
     crop_input = _combined_input(farm_context, sensor)
     tomato = derive_tomato_risk(crop_input) if farm_context.get("crop") == "tomato" else {

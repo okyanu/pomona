@@ -37,6 +37,45 @@ def test_forecast_is_bounded_and_not_a_command():
     assert response.status_code == 200
     body = response.json()
     assert body["mode"] == "forecast_only"
+    assert body["model_id"] == "pomona-digital-twin-linear-v0"
+    assert body["baseline"]["air_temperature_c"] == 24.0
+    assert body["scenario"]["irrigation_duration_min"] == 30.0
+    assert body["horizon_minutes"] == 60
+    assert body["generated_at"].endswith("Z")
     assert len(body["trajectory"]) == 4
     assert body["trajectory"][-1]["humidity_pct"] == 100.0
     assert "Never execute" in body["safety_note"]
+
+
+def test_scenario_rejects_unknown_or_unbounded_changes():
+    unknown = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={
+            "state": {"air_temperature_c": 24.0},
+            "scenario": {"open_valve": True},
+        },
+    )
+    assert unknown.status_code == 422
+
+    unbounded = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={
+            "state": {"humidity_pct": 70.0},
+            "scenario": {"irrigation_duration_min": 241},
+        },
+    )
+    assert unbounded.status_code == 422
+
+
+def test_state_requires_a_supported_valid_measurement():
+    missing = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={"state": {"crop": "tomato"}, "scenario": {}},
+    )
+    assert missing.status_code == 422
+
+    invalid = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={"state": {"humidity_pct": 140.0}, "scenario": {}},
+    )
+    assert invalid.status_code == 422

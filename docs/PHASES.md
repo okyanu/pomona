@@ -19,7 +19,7 @@
 | **0** | Project setup & open source | ✅ Done |
 | **1** | Local MVP (Docker, core, simulator) | ✅ Done |
 | **2** | Dashboard + database | ⏳ **In progress** |
-| **3** | Tomato greenhouse reasoner | ⏳ Partial — HF adapter + deterministic/API route; runtime LoRA wiring pending |
+| **3** | Tomato greenhouse reasoner | ⏳ Partial — HF adapter + guarded local Ollama/GGUF runtime; model quality hardening pending |
 | **4** | Safety checker | ⏳ Partial — deterministic tomato and actuator gates implemented; full chain pending |
 | **5** | Agronomist LLM adapter | ⏳ Partial — HF adapter + model-router contract; live backend wiring pending |
 | **6** | Automation engine | ⬜ Planned |

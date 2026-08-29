@@ -149,8 +149,8 @@ Modes:
 | Mode | Status |
 |------|--------|
 | `rules_only` | Uses deterministic tomato rules now |
-| `hybrid_guarded` | Falls back to deterministic rules until local LoRA inference is wired |
-| `model_only` | Returns `501` until local LoRA inference is wired |
+| `hybrid_guarded` | Uses a configured local runtime where supported, validates its output, and keeps deterministic rules authoritative; otherwise falls back to rules |
+| `model_only` | Evaluation-only local output where supported; returns `501` when that specialist has no configured runtime |
 
 ## Run locally
 

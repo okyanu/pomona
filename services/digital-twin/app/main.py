@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -11,11 +12,48 @@ class HealthResponse(BaseModel):
     service: str
 
 
+class GreenhouseState(BaseModel):
+    """Validated sensor state while preserving contextual event metadata."""
+
+    model_config = ConfigDict(extra="allow")
+
+    air_temperature_c: Optional[float] = Field(default=None, ge=-40.0, le=80.0)
+    humidity_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    soil_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    substrate_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    root_zone_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+
+    @model_validator(mode="after")
+    def require_supported_measurement(self) -> "GreenhouseState":
+        supported = (
+            self.air_temperature_c,
+            self.humidity_pct,
+            self.soil_moisture_pct,
+            self.substrate_moisture_pct,
+            self.root_zone_moisture_pct,
+        )
+        if all(value is None for value in supported):
+            raise ValueError("state must include at least one supported greenhouse measurement")
+        return self
+
+
+class ScenarioParameters(BaseModel):
+    """Allowlisted, bounded forecast parameters; never actuator commands."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    temperature_delta_c: float = Field(default=0.0, ge=-30.0, le=30.0)
+    humidity_delta_pct: float = Field(default=0.0, ge=-100.0, le=100.0)
+    moisture_delta_pct: float = Field(default=0.0, ge=-100.0, le=100.0)
+    irrigation_duration_min: float = Field(default=0.0, ge=0.0, le=240.0)
+    ventilation_pct: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
 class ScenarioRequest(BaseModel):
-    state: Dict[str, Any] = Field(..., description="Current normalized sensor state.")
-    scenario: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Forecast-only changes such as temperature_delta_c or irrigation_duration_min.",
+    state: GreenhouseState = Field(..., description="Current normalized sensor state.")
+    scenario: ScenarioParameters = Field(
+        default_factory=ScenarioParameters,
+        description="Allowlisted forecast-only changes; these are not actuator commands.",
     )
     horizon_steps: int = Field(default=6, ge=1, le=48)
     step_minutes: int = Field(default=15, ge=1, le=1440)
@@ -23,6 +61,11 @@ class ScenarioRequest(BaseModel):
 
 class ScenarioResponse(BaseModel):
     mode: str
+    model_id: str
+    generated_at: datetime
+    baseline: Dict[str, Any]
+    scenario: Dict[str, float]
+    horizon_minutes: int
     safety_note: str
     assumptions: List[str]
     trajectory: List[Dict[str, Any]]
@@ -46,13 +89,13 @@ def number(value: Any, fallback: float) -> float:
 
 @app.post("/v1/digital-twin/scenarios/simulate", response_model=ScenarioResponse)
 def simulate(request: ScenarioRequest) -> ScenarioResponse:
-    state = dict(request.state)
+    state = request.state.model_dump(exclude_none=True)
     scenario = request.scenario
-    temperature_delta = number(scenario.get("temperature_delta_c"), 0.0)
-    humidity_delta = number(scenario.get("humidity_delta_pct"), 0.0)
-    moisture_delta = number(scenario.get("moisture_delta_pct"), 0.0)
-    irrigation_duration = number(scenario.get("irrigation_duration_min"), 0.0)
-    ventilation = number(scenario.get("ventilation_pct"), 0.0)
+    temperature_delta = scenario.temperature_delta_c
+    humidity_delta = scenario.humidity_delta_pct
+    moisture_delta = scenario.moisture_delta_pct
+    irrigation_duration = scenario.irrigation_duration_min
+    ventilation = scenario.ventilation_pct
     trajectory: List[Dict[str, Any]] = []
     assumptions = [
         "This is a bounded forecast, not a measurement or actuator command.",
@@ -80,6 +123,11 @@ def simulate(request: ScenarioRequest) -> ScenarioResponse:
 
     return ScenarioResponse(
         mode="forecast_only",
+        model_id="pomona-digital-twin-linear-v0",
+        generated_at=datetime.now(timezone.utc),
+        baseline=state,
+        scenario=scenario.model_dump(),
+        horizon_minutes=request.horizon_steps * request.step_minutes,
         safety_note="Never execute this trajectory directly. Validate with live sensors and the safety checker; human approval is required for operational changes.",
         assumptions=assumptions,
         trajectory=trajectory,

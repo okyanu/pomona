@@ -32,6 +32,34 @@ REQUIRED_OUTPUT_FIELDS = {
     "human_review_required",
     "rationale",
 }
+OUTPUT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "irrigation_risk_labels": {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(ALLOWED_LABELS)},
+        },
+        "missing_fields": {"type": "array", "items": {"type": "string"}},
+        "suspect_fields": {"type": "array", "items": {"type": "string"}},
+        "safe_next_checks": {"type": "array", "items": {"type": "string"}},
+        "blocked_actions": {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(ALLOWED_BLOCKED_ACTIONS)},
+        },
+        "human_review_required": {"type": "boolean"},
+        "rationale": {"type": "string", "minLength": 1},
+    },
+    "required": [
+        "irrigation_risk_labels",
+        "missing_fields",
+        "suspect_fields",
+        "safe_next_checks",
+        "blocked_actions",
+        "human_review_required",
+        "rationale",
+    ],
+    "additionalProperties": False,
+}
 SYSTEM_PROMPT = """You are Pomona Water Irrigation Risk Reasoner, a narrow farm moisture-risk classifier.
 Return only one valid JSON object with exactly these keys:
 - irrigation_risk_labels: list of allowed irrigation risk labels
@@ -179,6 +207,7 @@ async def _runtime_output(input_data: Dict[str, Any], backend: str) -> Dict[str,
             settings.water_irrigation_ollama_model,
             SYSTEM_PROMPT,
             prompt,
+            output_schema=OUTPUT_SCHEMA,
         )
     elif backend == "mlx":
         output = await openai_compatible_chat_json(

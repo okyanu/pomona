@@ -234,7 +234,40 @@ def test_tomato_risk_reasoner_model_only_is_not_wired_yet():
     )
 
     assert response.status_code == 501
-    assert "LoRA inference" in response.json()["detail"]
+    assert "requires a configured" in response.json()["detail"]
+
+
+def test_tomato_risk_reasoner_model_only_uses_guarded_ollama_contract(monkeypatch):
+    async def fungal_pressure(*args, **kwargs):
+        return ["fungal_pressure"]
+
+    monkeypatch.setattr("app.tomato_reasoner.ollama_chat_json_array", fungal_pressure)
+    response = client.post(
+        "/v1/reasoners/tomato-risk",
+        json={
+            "mode": "model_only",
+            "backend": "ollama",
+            "input": {
+                "system_type": "controlled_greenhouse",
+                "crop": "tomato",
+                "growth_stage": "fruiting",
+                "air_temperature_c": 24.0,
+                "humidity_pct": 68.0,
+                "ph": 6.2,
+                "ec_ms_cm": 2.4,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "model_only"
+    assert body["backend"] == "ollama"
+    assert body["source"] == "ollama"
+    assert body["risk_labels"] == ["fungal_pressure"]
+    assert "direct_pesticide_dosage" in body["blocked_actions"]
+    assert "definitive_disease_diagnosis" in body["blocked_actions"]
+    assert body["human_review_required"] is True
 
 
 def test_water_irrigation_reasoner_rules_only():
@@ -529,6 +562,101 @@ def test_nutrient_ph_ec_reasoner_model_only_is_not_wired():
     assert response.status_code == 501
 
 
+def test_nutrient_ph_ec_hybrid_drops_model_false_positive(monkeypatch):
+    async def false_positive(*args, **kwargs):
+        return {
+            "nutrient_risk_labels": ["high_ph", "nutrient_uptake_issue"],
+            "missing_fields": [],
+            "safe_next_checks": ["repeat pH measurement with a calibrated meter"],
+            "blocked_actions": ["autonomous_fertigation_change"],
+            "human_review_required": True,
+            "rationale": "Model-only false positive.",
+        }
+
+    monkeypatch.setattr("app.nutrient_ph_ec.ollama_chat_json", false_positive)
+    response = client.post(
+        "/v1/reasoners/nutrient-ph-ec",
+        json={
+            "mode": "hybrid_guarded",
+            "backend": "ollama",
+            "input": {
+                "farm_context": {"system_type": "controlled_greenhouse", "crop": "tomato"},
+                "sensor": {"ph": 6.2, "ec_ms_cm": 2.4},
+                "expected_fields": ["ph", "ec_ms_cm"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "ollama_guarded"
+    assert body["nutrient_risk_labels"] == []
+    assert body["blocked_actions"] == []
+    assert body["human_review_required"] is False
+
+
+def test_nutrient_ph_ec_model_only_uses_validated_ollama_output(monkeypatch):
+    async def high_ph(*args, **kwargs):
+        return {
+            "nutrient_risk_labels": ["high_ph", "nutrient_uptake_issue"],
+            "missing_fields": [],
+            "safe_next_checks": ["repeat pH measurement with a calibrated meter"],
+            "blocked_actions": ["autonomous_fertigation_change"],
+            "human_review_required": True,
+            "rationale": "High pH needs manual verification.",
+        }
+
+    monkeypatch.setattr("app.nutrient_ph_ec.ollama_chat_json", high_ph)
+    response = client.post(
+        "/v1/reasoners/nutrient-ph-ec",
+        json={
+            "mode": "model_only",
+            "backend": "ollama",
+            "input": {
+                "farm_context": {"system_type": "controlled_greenhouse", "crop": "tomato"},
+                "sensor": {"ph": 7.4, "ec_ms_cm": 2.4},
+                "expected_fields": ["ph", "ec_ms_cm"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "ollama"
+    assert body["nutrient_risk_labels"] == ["high_ph", "nutrient_uptake_issue"]
+    assert body["blocked_actions"] == ["autonomous_fertigation_change"]
+    assert body["human_review_required"] is True
+
+
+def test_nutrient_ph_ec_rejects_schema_valid_but_inconsistent_model_output(monkeypatch):
+    async def inconsistent(*args, **kwargs):
+        return {
+            "nutrient_risk_labels": ["nutrient_uptake_issue"],
+            "missing_fields": ["ph", "ec_ms_cm"],
+            "safe_next_checks": ["verify pH and EC manually"],
+            "blocked_actions": ["autonomous_fertigation_change"],
+            "human_review_required": False,
+            "rationale": "Internally inconsistent model response.",
+        }
+
+    monkeypatch.setattr("app.nutrient_ph_ec.ollama_chat_json", inconsistent)
+    response = client.post(
+        "/v1/reasoners/nutrient-ph-ec",
+        json={
+            "mode": "model_only",
+            "backend": "ollama",
+            "input": {
+                "farm_context": {"system_type": "controlled_greenhouse", "crop": "tomato"},
+                "sensor": {"ph": 6.2, "ec_ms_cm": 2.4},
+                "expected_fields": ["ph", "ec_ms_cm"],
+            },
+        },
+    )
+
+    assert response.status_code == 503
+    assert "must require human review" in response.json()["detail"]
+
+
 def test_shared_reasoner_chain_normal_packet():
     response = client.post(
         "/v1/reasoners/shared-chain",
@@ -644,8 +772,24 @@ def test_pipeline_uses_configured_guarded_water_backend(monkeypatch):
             "fallback_reason": None,
         }
 
+    async def configured_nutrient_backend(input_data, mode, model_id, backend):
+        return {
+            "nutrient_risk_labels": [],
+            "missing_fields": [],
+            "safe_next_checks": ["continue routine nutrient monitoring"],
+            "blocked_actions": [],
+            "human_review_required": False,
+            "rationale": "Guarded runtime normal result.",
+            "model_id": model_id,
+            "mode": mode,
+            "backend": backend,
+            "source": "ollama_guarded",
+            "fallback_reason": None,
+        }
+
     monkeypatch.setattr("app.pipeline.settings.reasoner_backend", "ollama")
     monkeypatch.setattr("app.pipeline.route_water_irrigation_reasoner", configured_backend)
+    monkeypatch.setattr("app.pipeline.route_nutrient_ph_ec_reasoner", configured_nutrient_backend)
     response = client.post(
         "/v1/pipeline/evaluate",
         json={
