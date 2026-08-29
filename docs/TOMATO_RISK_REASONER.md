@@ -32,10 +32,20 @@ sensor JSON -> risk label JSON list -> deterministic safety guardrails -> dashbo
 
 ## Try it — guarded platform route (works today)
 
-This is the path Pomona actually runs right now. LoRA inference is not yet
-wired into the platform runtime, so `hybrid_guarded` mode falls back to the
-deterministic tomato rules and says so explicitly in `fallback_reason` — this
-card will update the moment that changes.
+The default, out-of-the-box path below runs deterministic rules only —
+`REASONER_BACKEND=rules` is the safe default, so `hybrid_guarded` falls back
+to the rules and says so explicitly in `fallback_reason`.
+
+Local Ollama inference *is* wired into the runtime (schema-constrained JSON
+decoding, output validated against the same safety invariants as the
+rules), but it's off unless you explicitly set `REASONER_BACKEND=ollama` and
+have `pomona-tomato-risk:v0.1.7-local` built and running in Ollama locally
+— see [LOCAL_MODEL_RUNTIMES.md](LOCAL_MODEL_RUNTIMES.md). Even then,
+`hybrid_guarded` validates the model's output but deliberately keeps
+deterministic rules as the final answer; only `model_only` mode (evaluation
+only) surfaces raw model output. The current local Ollama build scores 0.60
+label F1 on the 15-case golden smoke suite, well below the rules' 1.0 — a
+reason deterministic rules stay authoritative, not a reason to skip trying it.
 
 ```bash
 git clone https://github.com/Okyanus/pomona.git
@@ -74,6 +84,10 @@ Real output from this exact request:
 
 ```json
 {
+  "model_id": "pomona-tomato-risk-reasoner-v0.1.7",
+  "mode": "hybrid_guarded",
+  "backend": "rules",
+  "source": "deterministic_rules",
   "risk_labels": ["low_ph", "heat_stress", "nutrient_uptake_issue"],
   "missing_data": [],
   "safe_next_checks": [
@@ -82,10 +96,7 @@ Real output from this exact request:
   ],
   "blocked_actions": ["autonomous_fertigation_change", "direct_actuator_control"],
   "human_review_required": true,
-  "model_id": "pomona-tomato-risk-reasoner-v0.1.7",
-  "mode": "hybrid_guarded",
-  "source": "deterministic_rules",
-  "fallback_reason": "LoRA runtime is not configured yet; used deterministic rules fallback."
+  "fallback_reason": "Tomato runtime is disabled; used deterministic rules fallback."
 }
 ```
 
@@ -126,10 +137,13 @@ Full metadata: [models/registry/tomato-risk-reasoner-v0.1.7.yaml](../models/regi
 
 ## Limitations
 
-- Model-only inference is not yet wired into the Pomona runtime; today's
-  guarded route is deterministic rules, not the LoRA.
+- Local Ollama inference is wired but off by default; `model_only` mode
+  (evaluation only) currently scores 0.60 label F1 on the 15-case golden
+  smoke suite, so `hybrid_guarded` still discards model output in favor of
+  deterministic rules.
 - Evaluated on rule-derived and staged data, not independent field trials.
-- Tomato greenhouse only — not validated for other crops or systems.
+- Tomato greenhouse or hydroponic (`greenhouse_substrate` /
+  `controlled_greenhouse`) only — not validated for other crops or systems.
 - Rationale/explanation wording is not exact-matched against any reference;
   only the label and blocked-action outputs are scored.
 
