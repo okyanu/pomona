@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -68,6 +69,23 @@ app = FastAPI(
     version="0.1.0",
     description="YAML-rule automation suggestions. Suggestions only -- never direct actuator control.",
 )
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def landing() -> str:
+    return """<!doctype html>
+<html>
+<head><title>Pomona Automation Engine</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem;">
+<h1>Pomona Automation Engine</h1>
+<p>YAML-rule automation suggestions. Suggestions only &mdash; never direct actuator control.</p>
+<ul>
+<li><a href="/docs">API docs (Swagger UI)</a></li>
+<li><a href="/redoc">API reference (ReDoc)</a></li>
+<li><a href="/health">Health check</a></li>
+</ul>
+</body>
+</html>"""
 
 
 @app.get("/health", response_model=HealthResponse)
