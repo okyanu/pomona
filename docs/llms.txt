@@ -6,6 +6,8 @@ Pomona's hard rule: an LLM or reasoner may advise, but it never directly control
 
 Canonical documentation: https://okyanu.github.io/pomona/
 Source repository: https://github.com/okyanu/pomona
+Hugging Face profile: https://huggingface.co/Okyanus
+Live automation API: https://automation-engine-fawn.vercel.app
 License: Apache-2.0
 
 ## Start here
@@ -20,6 +22,7 @@ License: Apache-2.0
 ## Try Pomona
 
 - [Guarded browser demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): public greenhouse and hydroponic scenarios, with no installation or login
+- [Live automation API](https://automation-engine-fawn.vercel.app): suggestion-only service with interactive API documentation
 - [Docker quickstart](https://github.com/okyanu/pomona#-quickstart-any-os--docker): run the local platform stack
 - [Example scenarios](https://github.com/okyanu/pomona/tree/main/examples/scenarios): routine, high-risk, missing-data, and stale-data sensor inputs
 - [Tomato risk quickstart](https://github.com/okyanu/pomona/blob/main/examples/tomato_risk_quickstart.py): standalone example against a local stack

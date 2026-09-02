@@ -12,7 +12,7 @@
 
 Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE).
 
-[Website](https://okyanu.github.io/pomona/) · [Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Contribute](#-open-source--contribute)
+[Website](https://okyanu.github.io/pomona/) · [GitHub](https://github.com/okyanu/pomona) · [Hugging Face](https://huggingface.co/Okyanus) · [Automation API](https://automation-engine-fawn.vercel.app) · [Quickstart](#-quickstart-any-os--docker) · [Contribute](#-open-source--contribute)
 
 **[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
@@ -107,7 +107,10 @@ Fork → branch → `make test` → open PR.
 
 | Repo | Purpose |
 |------|---------|
+| **[Pomona website](https://okyanu.github.io/pomona/)** | Main documentation, architecture, roadmap, and guides |
 | **[pomona](https://github.com/Okyanus/pomona)** (this) | Platform — run with Docker |
+| **[Automation API](https://automation-engine-fawn.vercel.app)** | Live suggestion-only automation service and API documentation |
+| **[Okyanus on Hugging Face](https://huggingface.co/Okyanus)** | Models, datasets, collection, and browser demo |
 | [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) | Agronomist ML training |
 | [HF Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9) | All published models + dataset in one place |
 | [HF agronomist](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Advisor LoRA weights |

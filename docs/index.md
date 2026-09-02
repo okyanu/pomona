@@ -67,6 +67,47 @@ Sensor / Simulator → MQTT → Pomona Core → SQLite → Model Router
 
 </div>
 
+## Pomona ecosystem
+
+Each public surface has one clear job. Use the documentation as the main hub,
+then move to the code, models, or live API without losing context.
+
+<div class="grid cards" markdown>
+
+-   :material-book-open-page-variant-outline:{ .lg .middle } **Documentation**
+
+    ---
+
+    Guides, architecture, safety boundaries, project status, and roadmap.
+
+    [:octicons-arrow-right-24: Browse the website](https://okyanu.github.io/pomona/)
+
+-   :fontawesome-brands-github:{ .lg .middle } **Source and community**
+
+    ---
+
+    Platform source, Docker quickstart, issues, discussions, and contributions.
+
+    [:octicons-arrow-right-24: Open GitHub](https://github.com/okyanu/pomona)
+
+-   :simple-huggingface:{ .lg .middle } **Models, data, and demo**
+
+    ---
+
+    Published reasoners, the greenhouse dataset, collection, and browser demo.
+
+    [:octicons-arrow-right-24: Open Hugging Face](https://huggingface.co/Okyanus)
+
+-   :material-api:{ .lg .middle } **Live automation API**
+
+    ---
+
+    Explore the suggestion-only automation service and its guarded API endpoints.
+
+    [:octicons-arrow-right-24: Open the service](https://automation-engine-fawn.vercel.app)
+
+</div>
+
 ## What works today
 
 | Capability | Current state |

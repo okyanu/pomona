@@ -233,7 +233,7 @@ LANDING_PAGE = """<!doctype html>
   .rails li::before { content: "\\00d7"; position: absolute; left: 0; color: var(--danger); font-weight: 600; }
   .rails .fine { margin-top: 0.9rem; margin-bottom: 0; font-family: var(--serif); font-size: 0.86rem; color: var(--ink-soft); }
 
-  .project-links { display: flex; gap: 0.6rem; margin-bottom: 1.5rem; }
+  .project-links { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.5rem; }
   .project-links a {
     font-family: var(--mono);
     font-size: 0.82rem;
@@ -338,8 +338,9 @@ LANDING_PAGE = """<!doctype html>
     <h2>Part of Pomona</h2>
     <p class="lede" style="font-size:0.95rem;color:var(--ink-soft);">This engine only consumes risk labels &mdash; the reasoners that produce them are fine-tuned models published separately.</p>
     <div class="project-links">
-      <a href="https://github.com/okyanu/pomona">GitHub &#8599;</a>
-      <a href="https://huggingface.co/Okyanus">Hugging Face &#8599;</a>
+      <a href="https://okyanu.github.io/pomona/">Documentation &#8599;</a>
+      <a href="https://github.com/okyanu/pomona">Source on GitHub &#8599;</a>
+      <a href="https://huggingface.co/Okyanus">Models on Hugging Face &#8599;</a>
     </div>
   </section>
 

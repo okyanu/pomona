@@ -103,3 +103,6 @@ extra:
     - icon: simple/huggingface
       link: https://huggingface.co/Okyanus
       name: Pomona models on Hugging Face
+    - icon: material/api
+      link: https://automation-engine-fawn.vercel.app
+      name: Pomona Automation API
