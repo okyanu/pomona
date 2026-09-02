@@ -1,6 +1,8 @@
 ---
 title: Open edge AI for agriculture
 description: Pomona connects greenhouse sensors, compact AI reasoners, deterministic safety checks, human-approved automation suggestions, and a local dashboard.
+hide:
+  - toc
 ---
 
 <section class="pomona-hero">
