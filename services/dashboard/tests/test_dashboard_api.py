@@ -312,6 +312,24 @@ def test_dashboard_html_exposes_specialist_results_and_read_only_warning():
     assert "deterministic safety remains final authority" in html
 
 
+def test_dashboard_html_table_headers_use_scope_col():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    expected_headers = [
+        '<th scope="col">Specialist</th>',
+        '<th scope="col">Time</th>',
+        '<th scope="col">Rule</th>',
+        '<th scope="col">Farm</th>',
+        '<th scope="col">Service</th>',
+        '<th scope="col">Runtime</th>',
+    ]
+    for header in expected_headers:
+        assert header in html
+    assert "<th>" not in html
+
+
 def test_service_status_includes_digital_twin(monkeypatch):
     class FakeResponse:
         def raise_for_status(self):
