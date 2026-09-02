@@ -12,7 +12,7 @@
 
 Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE).
 
-[Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Wiki](https://github.com/Okyanus/pomona/wiki) · [Contribute](#-open-source--contribute)
+[Website](https://okyanu.github.io/pomona/) · [Quickstart](#-quickstart-any-os--docker) · [Architecture](#-architecture) · [Model status](#-model-status) · [Phases](#-project-phases) · [Contribute](#-open-source--contribute)
 
 **[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
@@ -97,7 +97,7 @@ More detail: **[docs/architecture.md](docs/architecture.md)**
 | **Code of conduct** | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
 | **Current work** | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
 | **Roadmap** | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| **Wiki** | [Project wiki →](https://github.com/Okyanus/pomona/wiki) |
+| **Website** | [Project documentation →](https://okyanu.github.io/pomona/) |
 
 **Good first contributions:** dashboard (Phase 2), tests, docs, simulators, crop templates.
 

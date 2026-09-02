@@ -1,0 +1,107 @@
+:root {
+  --pomona-green: #2e7d4f;
+  --pomona-deep: #123524;
+  --pomona-gold: #f5b942;
+}
+
+.md-header {
+  background: linear-gradient(90deg, var(--pomona-deep), var(--pomona-green));
+}
+
+.pomona-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
+  gap: 2.4rem;
+  align-items: center;
+  margin: 1rem 0 2.5rem;
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+  border: 1px solid color-mix(in srgb, var(--pomona-green) 35%, transparent);
+  border-radius: 1.2rem;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(123, 216, 143, 0.2), transparent 34%),
+    linear-gradient(145deg, rgba(18, 53, 36, 0.98), rgba(24, 88, 55, 0.94));
+  color: #fff;
+  overflow: hidden;
+}
+
+.pomona-hero h1 {
+  margin: 0 0 0.7rem;
+  color: #fff;
+  font-size: clamp(2.2rem, 6vw, 4.2rem);
+  line-height: 1;
+}
+
+.pomona-hero .tagline {
+  margin: 0 0 1rem;
+  color: #dff5e5;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+}
+
+.pomona-hero .status {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 1.3rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 0.78rem;
+}
+
+.pomona-hero .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.pomona-button {
+  display: inline-block;
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 0.55rem;
+  color: #fff !important;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.pomona-button.primary {
+  border-color: var(--pomona-gold);
+  background: var(--pomona-gold);
+  color: #2d260f !important;
+}
+
+.pomona-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.pomona-hero img {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.8rem;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.28);
+}
+
+.grid.cards > ul > li {
+  border-radius: 0.8rem;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.grid.cards > ul > li:hover {
+  border-color: var(--pomona-green);
+  transform: translateY(-2px);
+}
+
+.safety-rule {
+  padding: 1rem 1.2rem;
+  border-left: 0.25rem solid var(--pomona-gold);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--pomona-gold) 12%, transparent);
+}
+
+@media screen and (max-width: 760px) {
+  .pomona-hero {
+    grid-template-columns: 1fr;
+  }
+}
