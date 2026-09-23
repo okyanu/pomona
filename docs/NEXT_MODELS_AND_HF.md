@@ -7,8 +7,9 @@ authorization. Weights stay on Hugging Face; platform code stays on GitHub.
 
 1. **Sensor-quality training notebook** — render prompts from raw JSONL
    (`scripts/datasets/sensor_quality_contract.render_prompt`), not from
-   `datasets.load_dataset` rows. Then one combined retrain (omitted keys +
-   graded pH + temporal labels if you choose to teach them).
+   `datasets.load_dataset` rows. **Local Colab notebooks updated 2026-09-23**
+   (pilot, boundary, prepared-train). Then one combined retrain (omitted keys +
+   graded pH + temporal labels if you choose to teach them) — owner GPU step.
 2. **Evaluate unpublished SQI adapters** on the frozen 2026-09-16 reviewed
    bundle / neutral holdout before any HF publish. Deterministic rules remain
    the live gate until a model beats them on stuck/baseline cases.
