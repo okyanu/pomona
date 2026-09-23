@@ -662,7 +662,7 @@ def test_shared_reasoner_chain_normal_packet():
         "/v1/reasoners/shared-chain",
         json={
             "farm_context": {"crop": "tomato", "system_type": "greenhouse_substrate", "zone_id": "a"},
-            "sensor": {"air_temperature_c": 24.0, "humidity_pct": 68.0, "ph": 6.2, "ec_ms_cm": 0.18, "substrate_moisture_pct": 52.0, "substrate_temperature_c": 23.0},
+            "sensor": {"air_temperature_c": 24.0, "humidity_pct": 68.0, "ph": 6.2, "ec_ms_cm": 0.18, "substrate_moisture_pct": 52.0, "substrate_temperature_c": 23.0, "timestamp": datetime.now(timezone.utc).isoformat()},
             "expected_fields": ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "substrate_moisture_pct"],
             "mode": "rules_only",
         },
@@ -739,7 +739,7 @@ def test_pipeline_evaluate_normal_leafy_greens_is_routine():
         json={
             "scenario_id": "test-lettuce-normal",
             "farm_context": {"crop": "lettuce", "system_type": "hydroponic", "zone_id": "rack-1"},
-            "sensor": {"air_temperature_c": 21.0, "humidity_pct": 64.0, "ph": 6.1, "ec_ms_cm": 1.8, "water_temperature_c": 20.0},
+            "sensor": {"air_temperature_c": 21.0, "humidity_pct": 64.0, "ph": 6.1, "ec_ms_cm": 1.8, "water_temperature_c": 20.0, "timestamp": datetime.now(timezone.utc).isoformat()},
             "expected_fields": ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "water_temperature_c"],
             "proposed_command": {"action_type": "continue_monitoring"},
         },

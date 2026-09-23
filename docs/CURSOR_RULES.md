@@ -1,6 +1,6 @@
 # Cursor / AI development rules
 
-**Primary guide:** [AGENTS.md](../AGENTS.md) at repo root (Cursor, Claude, Codex).
+**Primary guide:** [AGENTS.md](https://github.com/okyanu/pomona/blob/main/AGENTS.md) at repo root (Cursor, Claude, Codex).
 
 This file adds Cursor-specific notes. Keep it short — details live in AGENTS.md.
 
@@ -31,4 +31,4 @@ make publish-check | publish-github
 - Update `docs/PROJECT_STATUS.md` (public)
 - Optionally update `private/DAILY_LOG.md` (local)
 
-See [AGENTS.md](../AGENTS.md) for architecture, safety, and coding rules.
+See [AGENTS.md](https://github.com/okyanu/pomona/blob/main/AGENTS.md) for architecture, safety, and coding rules.

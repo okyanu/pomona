@@ -57,7 +57,7 @@ python3 examples/tomato_risk_quickstart.py
 ```
 
 That script sends the committed
-[examples/scenarios/arizona_tomato.json](../examples/scenarios/arizona_tomato.json)
+[examples/scenarios/arizona_tomato.json](https://github.com/okyanu/pomona/blob/main/examples/scenarios/arizona_tomato.json)
 scenario to `POST /v1/reasoners/tomato-risk` with no extra dependencies and no
 files under `private/`. The equivalent raw request:
 
@@ -133,7 +133,7 @@ guarded platform route above, since that route is deterministic rules today.
 
 Hybrid scores are measured on rule-derived evaluation data. They show the
 guardrail integration works — not that the model is a complete agronomist.
-Full metadata: [models/registry/tomato-risk-reasoner-v0.1.7.yaml](../models/registry/tomato-risk-reasoner-v0.1.7.yaml).
+Full metadata: [models/registry/tomato-risk-reasoner-v0.1.7.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml).
 
 ## Limitations
 

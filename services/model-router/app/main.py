@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.advisor import explain
 from app.actuator_gate import route_actuator_gate_reasoner
@@ -114,6 +114,23 @@ class SensorQualityReasonerRequest(BaseModel):
     input: Dict[str, Any] = Field(..., description="Normalized Pomona sensor-quality input.")
     model_id: Optional[str] = None
     mode: Literal["rules_only", "hybrid_guarded", "model_only"] = "hybrid_guarded"
+
+    @field_validator("input")
+    @classmethod
+    def validate_input_shape(cls, value):
+        for key in ("sensor", "farm_context"):
+            if key in value and not isinstance(value[key], dict):
+                raise ValueError(f"{key} must be an object")
+        fields = value.get("expected_fields", [])
+        if not isinstance(fields, list) or any(not isinstance(field, str) for field in fields):
+            raise ValueError("expected_fields must be a list of field names")
+        history = value.get("history")
+        if history is not None:
+            if not isinstance(history, list) or any(
+                item is not None and not isinstance(item, dict) for item in history
+            ):
+                raise ValueError("history must be a list of sensor objects")
+        return value
 
 
 class SensorQualityReasonerResponse(BaseModel):
@@ -250,10 +267,23 @@ class PipelineEvaluateRequest(BaseModel):
     farm_context: Dict[str, Any] = Field(..., description="Farm, crop, system, and zone context.")
     sensor: Dict[str, Any] = Field(..., description="Latest normalized sensor packet.")
     expected_fields: List[str] = Field(default_factory=list)
+    history: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Prior sensor packets oldest-first for temporal SQI checks.",
+    )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
     mode: Literal["rules_only", "hybrid_guarded"] = "hybrid_guarded"
     scenario_id: Optional[str] = None
+
+    @field_validator("history")
+    @classmethod
+    def validate_history(cls, value):
+        if value is None:
+            return value
+        if any(item is not None and not isinstance(item, dict) for item in value):
+            raise ValueError("history must be a list of sensor objects")
+        return value
 
 
 class PipelineEvaluateResponse(BaseModel):
@@ -581,6 +611,7 @@ async def evaluate_pomona_pipeline(request: PipelineEvaluateRequest) -> Pipeline
         request.actor,
         request.mode,
         request.scenario_id,
+        history=request.history,
     )
     logger.info(
         "pipeline id=%s scenario=%s risk=%s review=%s",

@@ -13,7 +13,7 @@ Open edge AI for controlled agriculture.
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
 | 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
-| 6 | Automation (suggestions) | ⏳ partial — [services/automation-engine](../services/automation-engine/) live: YAML rules, suggestions, manual approve/reject; deployed at [automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app); no dashboard integration yet |
+| 6 | Automation (suggestions) | ⏳ partial — [services/automation-engine](https://github.com/okyanu/pomona/tree/main/services/automation-engine) live: YAML rules, suggestions, manual approve/reject; deployed at [automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app); dashboard integration and bounded SQLite history available locally |
 | 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — `models/registry/` |
@@ -35,7 +35,7 @@ every time). Closing the second list is how the first list stays true.
   [Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9).
 - Free, static public demo Space — no server to run, no paid tier, no
   hosting bill.
-- CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs all five
+- CI ([`.github/workflows/ci.yml`](https://github.com/okyanu/pomona/blob/main/.github/workflows/ci.yml)) runs all six
   Python service test suites on every push/PR.
 - `make local-check` verifies the platform without Docker — lowers the bar
   for anyone else to confirm a change works.
@@ -45,8 +45,8 @@ every time). Closing the second list is how the first list stays true.
 ### Manual toil — real, current, tracked here so it doesn't get lost
 
 - Keep the combined local and per-service CI suites aligned as new services
-  and shared contracts are added. The current local baseline is 75 passing
-  tests (`make test-local`) across all five Python services.
+  and shared contracts are added. Run `make test-local` to verify the current
+  baseline across all six Python services.
 - `scripts/run_local_validation.sh` didn't start the `digital-twin` service,
   so the dashboard's new digital-twin health check always failed
   `make local-check` — fixed by starting it alongside the other four
@@ -97,10 +97,10 @@ would link to the upstream design rather than copy it into this repository.
 |------|--------|--------------|
 | Platform (this repo) | [Okyanus/pomona](https://github.com/Okyanus/pomona) | — |
 | Agronomist training | [Okyanus/pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) | [ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
-| Tomato risk reasoner | [registry YAML](../models/registry/tomato-risk-reasoner-v0.1.7.yaml) | [pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) |
-| Water/irrigation reasoner | [registry YAML](../models/registry/water-irrigation-risk-reasoner-v0.1.yaml) | [pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) |
-| Actuator command gate | [registry YAML](../models/registry/actuator-command-gate-reasoner-v0.1.yaml) | [pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) — research preview |
-| Greenhouse sensor dataset | [datasets/pomona-tomato-risk-v0.1/](../datasets/pomona-tomato-risk-v0.1/) | [greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) |
+| Tomato risk reasoner | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml) | [pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) |
+| Water/irrigation reasoner | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/water-irrigation-risk-reasoner-v0.1.yaml) | [pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) |
+| Actuator command gate | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/actuator-command-gate-reasoner-v0.1.yaml) | [pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) — research preview |
+| Greenhouse sensor dataset | [datasets/pomona-tomato-risk-v0.1/](https://github.com/okyanu/pomona/tree/main/datasets/pomona-tomato-risk-v0.1) | [greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) |
 
 ## Small Reasoner Roadmap
 

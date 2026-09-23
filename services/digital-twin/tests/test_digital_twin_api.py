@@ -38,13 +38,45 @@ def test_forecast_is_bounded_and_not_a_command():
     body = response.json()
     assert body["mode"] == "forecast_only"
     assert body["model_id"] == "pomona-digital-twin-linear-v0"
+    assert body["parameter_version"] == "linear-v0-defaults"
     assert body["baseline"]["air_temperature_c"] == 24.0
     assert body["scenario"]["irrigation_duration_min"] == 30.0
     assert body["horizon_minutes"] == 60
     assert body["generated_at"].endswith("Z")
     assert len(body["trajectory"]) == 4
     assert body["trajectory"][-1]["humidity_pct"] == 100.0
+    assert body["trajectory"][-1]["quality"] == "forecast"
     assert "Never execute" in body["safety_note"]
+    assert any("advisory only" in item for item in body["assumptions"])
+    assert body["soft_estimates"]
+    assert body["soft_estimates"][0]["quality"] == "estimated"
+    assert body["soft_estimates"][0]["name"] == "vapor_pressure_deficit_kpa"
+
+
+def test_soft_estimate_marks_missing_moisture_proxy():
+    response = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={"state": {"air_temperature_c": 24.0, "humidity_pct": 70.0}, "scenario": {}},
+    )
+    assert response.status_code == 200
+    names = {item["name"] for item in response.json()["soft_estimates"]}
+    assert "estimated_root_zone_moisture_pct" in names
+    assert "vapor_pressure_deficit_kpa" in names
+
+
+def test_refuses_forecast_when_sensor_quality_requires_review():
+    response = client.post(
+        "/v1/digital-twin/scenarios/simulate",
+        json={
+            "state": {"air_temperature_c": 24.0},
+            "scenario": {},
+            "sensor_quality": {
+                "data_quality_labels": ["stuck_value"],
+                "human_review_required": True,
+            },
+        },
+    )
+    assert response.status_code == 409
 
 
 def test_scenario_rejects_unknown_or_unbounded_changes():

@@ -64,5 +64,5 @@ sensor packet -> specialist model -> schema/label validation
   -> deterministic Pomona safety rules -> human approval -> optional automation
 ```
 
-See the [model registry](../models/registry/README.md) and
+See the [model registry](https://github.com/okyanu/pomona/blob/main/models/registry/README.md) and
 [LOCAL_MODEL_RUNTIMES.md](LOCAL_MODEL_RUNTIMES.md).

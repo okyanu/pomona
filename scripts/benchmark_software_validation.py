@@ -96,7 +96,7 @@ def main() -> int:
             final_decision = body.get("final_decision", {}) if parsed else {}
             blocked = final_decision.get("blocked_actions") if isinstance(final_decision, dict) else None
             review = final_decision.get("human_review_required") if isinstance(final_decision, dict) else None
-            blocked_ok = isinstance(blocked, list)
+            blocked_ok = isinstance(blocked, list) and all(isinstance(action, str) for action in blocked)
             review_ok = isinstance(review, bool)
             expected_review_ok = review == expectations["human_review_required"] if "human_review_required" in expectations else True
             expected_blocked_ok = bool(blocked) == expectations["blocked_actions_nonempty"] if "blocked_actions_nonempty" in expectations else True
@@ -114,11 +114,12 @@ def main() -> int:
             }
             if parsed and required_fields:
                 result["pipeline_id"] = body.get("pipeline_id")
-            if not (status == 200 and parsed and required_fields and blocked_ok and review_ok and expected_review_ok and expected_blocked_ok):
+            result["passed"] = bool(status == 200 and parsed and required_fields and blocked_ok and review_ok and expected_review_ok and expected_blocked_ok)
+            if not result["passed"]:
                 result["response"] = body
             results.append(result)
 
-    successful = [item for item in results if item["status"] == 200]
+    successful = [item for item in results if item["passed"]]
     report = {
         "benchmark_name": "pomona-software-validation-v0.1",
         "test_date_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -157,7 +158,7 @@ def main() -> int:
     output_path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({key: value for key, value in report.items() if key not in {"results", "limitations"}}, indent=2))
     print(f"Benchmark report: {output_path}")
-    return 0 if len(successful) == len(results) and report["valid_json_rate"] == 1.0 and report["required_fields_present_rate"] == 1.0 else 1
+    return 0 if len(successful) == len(results) else 1
 
 
 if __name__ == "__main__":

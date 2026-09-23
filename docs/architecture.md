@@ -9,13 +9,13 @@ Devices / Simulator
        ↓ MQTT
   Pomona Core          ← ingest + API (✅ today)
        ↓
-  Model Router         ← advisor / reasoner (✅ stub today)
+  Model Router         ← deterministic specialists + optional guarded models
        ↓
-  Safety Checker       ← filter unsafe output (planned)
+  Safety Checker       ← deterministic blocking and human-review flags
        ↓
-  Automation Engine    ← suggested actions only (planned)
+  Automation Engine    ← suggestions + recorded decisions, no execution
        ↓
-  Dashboard            ← UI (planned)
+  Dashboard            ← monitoring, forecast previews, manual decisions
 ```
 
 **Rule:** The LLM advises — it never directly controls actuators.
@@ -26,9 +26,15 @@ Devices / Simulator
 |---------|------|--------|
 | **core** | Sensor ingest, storage, REST API | ✅ MVP |
 | **model-router** | Route tasks to models / rules | ✅ MVP |
-| **dashboard** | Live data and alerts | ⏳ Phase 2 |
-| **safety-checker** | Block unsafe recommendations | ⏳ Phase 4 |
+| **dashboard** | Monitoring, previews, manual suggestion decisions | ⏳ Implemented locally; Phase 2 partial |
+| **safety-checker** | Block unsafe recommendations | ⏳ Deterministic checks implemented; Phase 4 partial |
 | **automation-engine** | YAML rules → suggestions | ⏳ Phase 6, partial |
+| **digital-twin** | Illustrative forecast scenarios, not hardware commands | ⏳ Local preview |
+
+Core uses SQLite for sensor events. Automation uses a separate SQLite file
+on a named volume in Docker Compose, with bounded history retention. Neither
+the model nor a recorded approval has a hardware execution path. Local
+operation does not provide authenticated reviewer identity.
 
 ## First MVP (running now)
 

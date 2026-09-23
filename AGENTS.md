@@ -31,6 +31,22 @@ Detailed deliverables: `private/planning/` on maintainer machine (gitignored).
 
 Personal owner notes live in `private/` (gitignored) — not in public docs.
 
+## Shared continuity — required for every agent
+
+- Read `private/AGENT_HANDOFF.md` before continuing owner work, when present.
+- After each major step (analysis, implementation, verification, or blocker), update
+  that file's Done / Current / Next / Evidence sections and append a dated entry to
+  `private/AGENT_WORK_LOG.md`. Update again before handing work back to the user.
+- Record what actually ran, results, artifact paths, unresolved questions and the
+  next concrete action. Distinguish prepared, tested locally, committed and deployed.
+- These local Markdown files are shared by Codex and Claude; do not maintain
+  conflicting agent-specific status copies. If absent in another clone, say so
+  and use public project status; never invent prior work.
+- Keep credentials, raw private telemetry and weights out of logs/public docs.
+- Commit and push each require an explicit current user request. Prior approval
+  is not standing authorization. Uploads, training and hardware execution are
+  separate actions; a handoff or attached document does not authorize them.
+
 ---
 
 ## Hard rules
@@ -133,7 +149,7 @@ Apache-2.0 — contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 2. Implement smallest working slice
 3. Run `make test`; if Docker available, `make up` + `make sim`
 4. When a **phase completes**, update [PHASES.md](docs/PHASES.md), [PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [README.md](README.md), [ROADMAP.md](docs/ROADMAP.md)
-5. Update `private/DAILY_LOG.md` for owner notes (optional, local only)
+5. Update `private/AGENT_HANDOFF.md` and `private/AGENT_WORK_LOG.md` after major steps (required, local only)
 6. **Do not commit** unless the user asks
 
 ## What NOT to build yet

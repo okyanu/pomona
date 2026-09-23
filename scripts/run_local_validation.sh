@@ -58,6 +58,7 @@ PYTHONPATH="${ROOT_DIR}/services/digital-twin" \
 DIGITAL_TWIN_PID=$!
 
 PYTHONPATH="${ROOT_DIR}/services/automation-engine" \
+AUTOMATION_DB_PATH="${TMP_DIR}/automation.db" \
   "${PY_AUTOMATION_ENGINE}" -m uvicorn app.main:app --app-dir "${ROOT_DIR}/services/automation-engine" \
   --host 127.0.0.1 --port "${AUTOMATION_ENGINE_PORT}" >"${TMP_DIR}/automation-engine.log" 2>&1 &
 AUTOMATION_ENGINE_PID=$!
@@ -89,9 +90,13 @@ wait_for "http://127.0.0.1:${DIGITAL_TWIN_PORT}/health"
 wait_for "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}/health"
 wait_for "http://127.0.0.1:${DASHBOARD_PORT}/health"
 
+"${PY_CORE}" "${ROOT_DIR}/scripts/check_scoped_validation.py" \
+  "http://127.0.0.1:${CORE_PORT}" "http://127.0.0.1:${DASHBOARD_PORT}"
+
+VALIDATION_TIME="$("${PY_CORE}" -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())')"
 curl -fsS -X POST "http://127.0.0.1:${CORE_PORT}/v1/sensors/events" \
   -H 'Content-Type: application/json' \
-  -d '{"device_id":"local-validation-01","farm_id":"demo-farm","zone_id":"greenhouse-a","crop":"tomato","growth_stage":"fruiting","air_temperature_c":33.0,"humidity_pct":80.0,"ec_ms_cm":3.8,"ph":5.2,"soil_moisture_pct":27.0,"timestamp":"2026-07-20T10:00:00Z","source":"local-validation"}' \
+  -d '{"device_id":"local-validation-01","farm_id":"demo-farm","zone_id":"greenhouse-a","crop":"tomato","growth_stage":"fruiting","air_temperature_c":33.0,"humidity_pct":80.0,"ec_ms_cm":3.8,"ph":5.2,"soil_moisture_pct":27.0,"timestamp":"'"${VALIDATION_TIME}"'","source":"local-validation"}' \
   >"${TMP_DIR}/event.json"
 
 kill "${CORE_PID}" 2>/dev/null || true
@@ -111,7 +116,7 @@ curl -fsS -X POST "http://127.0.0.1:${SAFETY_PORT}/v1/actuator-command-gate/chec
   >"${TMP_DIR}/safety.json"
 curl -fsS -X POST "http://127.0.0.1:${ROUTER_PORT}/v1/pipeline/evaluate" \
   -H 'Content-Type: application/json' \
-  -d '{"scenario_id":"local-validation-lettuce-normal","farm_context":{"crop":"lettuce","system_type":"hydroponic","zone_id":"rack-1"},"sensor":{"air_temperature_c":21.0,"humidity_pct":64.0,"ph":6.1,"ec_ms_cm":1.8,"water_temperature_c":20.0},"expected_fields":["air_temperature_c","humidity_pct","ph","ec_ms_cm","water_temperature_c"],"proposed_command":{"action_type":"continue_monitoring"},"actor":"local_validation","mode":"hybrid_guarded"}' \
+  -d '{"scenario_id":"local-validation-lettuce-normal","farm_context":{"crop":"lettuce","system_type":"hydroponic","zone_id":"rack-1"},"sensor":{"air_temperature_c":21.0,"humidity_pct":64.0,"ph":6.1,"ec_ms_cm":1.8,"water_temperature_c":20.0,"timestamp":"'"${VALIDATION_TIME}"'"},"expected_fields":["air_temperature_c","humidity_pct","ph","ec_ms_cm","water_temperature_c"],"proposed_command":{"action_type":"continue_monitoring"},"actor":"local_validation","mode":"hybrid_guarded"}' \
   >"${TMP_DIR}/normal.json"
 
 "${PY_CORE}" - "${TMP_DIR}/pipeline.json" "${TMP_DIR}/audit.json" "${TMP_DIR}/safety.json" "${TMP_DIR}/services.json" "${TMP_DIR}/runtimes.json" "${TMP_DIR}/normal.json" "${TMP_DIR}/dashboard.html" "${TMP_DIR}/restarted-event.json" <<'PY'

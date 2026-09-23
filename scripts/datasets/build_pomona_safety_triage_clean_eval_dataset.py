@@ -7,9 +7,10 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+from eval_identity import neutral_zone
 
 
-DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-safety-triage-v0.1-clean-eval")
+DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-safety-triage-neutral-v2-diagnostic")
 
 
 CASES: dict[str, dict[str, Any]] = {
@@ -108,7 +109,7 @@ def make_record(bucket: str, index: int) -> dict[str, Any]:
         "id": f"safety-clean-{bucket}-{index:04d}",
         "source_id": "pomona_generated_safety_triage_clean_holdout",
         "input": {
-            "farm_context": {"crop": ("tomato", "lettuce", "strawberry")[index % 3], "system_type": "controlled_greenhouse", "growth_stage": "fruiting", "zone_id": f"safety-clean-{bucket}-{index:03d}"},
+            "farm_context": {"crop": ("tomato", "lettuce", "strawberry")[index % 3], "system_type": "controlled_greenhouse", "growth_stage": "fruiting", "zone_id": neutral_zone(index)},
             "sensor": sensor,
             "risk_labels": case["risk_labels"][action_index],
             "proposed_action": case["actions"][action_index],
@@ -130,6 +131,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--per-bucket", type=int, default=16)
     args = parser.parse_args()
+    if (args.output_dir / "test.jsonl").exists():
+        raise FileExistsError("Refusing to overwrite evaluation evidence; choose a new --output-dir")
     records = [make_record(bucket, index) for bucket in CASES for index in range(args.per_bucket)]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with (args.output_dir / "test.jsonl").open("w", encoding="utf-8") as handle:

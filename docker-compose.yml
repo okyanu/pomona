@@ -22,6 +22,9 @@ services:
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_TOPIC_PATTERN: ${MQTT_TOPIC_PATTERN:-pomona/+/+/sensor/+/state}
       DB_PATH: ${DB_PATH:-/app/data/pomona.db}
+      MAX_EVENTS: ${MAX_EVENTS:-100000}
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+      DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-120}
       API_KEY: ${API_KEY:-}
     volumes:
       - core_data:/app/data
@@ -79,6 +82,13 @@ services:
 
   automation-engine:
     build: ./services/automation-engine
+    environment:
+      AUTOMATION_DB_PATH: /data/automation.db
+      MAX_SUGGESTIONS: ${MAX_SUGGESTIONS:-200}
+      SUGGESTION_TTL_SECONDS: ${SUGGESTION_TTL_SECONDS:-900}
+      SUGGESTION_SAMPLE_MAX_AGE_SECONDS: ${SUGGESTION_SAMPLE_MAX_AGE_SECONDS:-3600}
+    volumes:
+      - automation_data:/data
     ports:
       - "8085:8085"
 
@@ -99,5 +109,6 @@ services:
       - ollama_data:/var/lib/ollama
 
 volumes:
+  automation_data:
   core_data:
   ollama_data:

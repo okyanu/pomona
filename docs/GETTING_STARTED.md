@@ -42,7 +42,7 @@ docker compose up -d mqtt
 
 ## Contribute
 
-Open source under Apache-2.0. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+Open source under Apache-2.0. See [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md).
 
 ## Related repos
 

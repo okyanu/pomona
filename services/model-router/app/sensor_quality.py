@@ -8,6 +8,7 @@ confidence when required fields are missing, implausible, stale, or conflicting.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Dict, List, Optional
 
 
@@ -22,6 +23,30 @@ FIELD_LABELS = {
     "soil_moisture_pct": "missing_moisture",
 }
 
+# Exact stuck/flatline applies to fields that normally show small sample-to-sample
+# change. Quantized probes (pH/EC) are excluded so legitimate plateaus stay quiet.
+STUCK_FIELDS = (
+    "air_temperature_c",
+    "water_temperature_c",
+    "substrate_temperature_c",
+    "humidity_pct",
+    "substrate_moisture_pct",
+    "soil_moisture_pct",
+)
+# Chemical probes: compare recent value to the stream startup baseline.
+BASELINE_DRIFT_FIELDS = ("ph", "ec_ms_cm")
+STUCK_WINDOW = 3
+STUCK_EPSILON = 1e-9
+BASELINE_DRIFT_THRESHOLDS = {"ph": 0.35, "ec_ms_cm": 0.4}
+FLATLINE_EPSILON = {
+    "air_temperature_c": 0.05,
+    "water_temperature_c": 0.05,
+    "substrate_temperature_c": 0.05,
+    "humidity_pct": 0.25,
+    "substrate_moisture_pct": 0.25,
+    "soil_moisture_pct": 0.25,
+}
+
 
 def add_unique(items: List[str], value: str) -> None:
     if value not in items:
@@ -32,10 +57,11 @@ def numeric(value: Any) -> Optional[float]:
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return float(value) if math.isfinite(value) else None
     if isinstance(value, str):
         try:
-            return float(value)
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) else None
         except ValueError:
             return None
     return None
@@ -50,7 +76,7 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
+        return None
     return parsed.astimezone(timezone.utc)
 
 
@@ -64,17 +90,100 @@ def stale_timestamp(sensor: Dict[str, Any], now: Optional[datetime]) -> bool:
     return age_seconds > 60 * 60
 
 
+def _series_values(history: List[Dict[str, Any]], sensor: Dict[str, Any], field: str) -> List[float]:
+    values: List[float] = []
+    for packet in [*history, sensor]:
+        if not isinstance(packet, dict):
+            continue
+        parsed = numeric(packet.get(field))
+        if parsed is not None:
+            values.append(parsed)
+    return values
+
+
+def apply_temporal_checks(
+    sensor: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    labels: List[str],
+    suspect_fields: List[str],
+    checks: List[str],
+) -> None:
+    """Stuck / flatline / startup-baseline drift using prior packets (oldest first)."""
+    if not history:
+        return
+
+    for field in STUCK_FIELDS:
+        values = _series_values(history, sensor, field)
+        if len(values) < STUCK_WINDOW + 1:
+            continue
+        prior = values[:-STUCK_WINDOW]
+        # Legitimate long plateaus never varied; require prior motion before stuck/flatline.
+        if not prior or max(prior) - min(prior) <= STUCK_EPSILON:
+            continue
+        window = values[-STUCK_WINDOW:]
+        span = max(window) - min(window)
+        if span <= STUCK_EPSILON:
+            add_unique(labels, "stuck_value")
+            add_unique(suspect_fields, field)
+            checks.append(f"inspect {field}: identical readings across {STUCK_WINDOW} fresh samples")
+        elif span <= FLATLINE_EPSILON.get(field, 0.0):
+            add_unique(labels, "flatline_possible")
+            add_unique(suspect_fields, field)
+            checks.append(f"inspect {field}: near-zero variance may indicate a stuck or clipped probe")
+
+    baseline_packet = next((packet for packet in history if isinstance(packet, dict)), None)
+    if baseline_packet is None:
+        return
+    for field in BASELINE_DRIFT_FIELDS:
+        baseline = numeric(baseline_packet.get(field))
+        current = numeric(sensor.get(field))
+        if baseline is None or current is None:
+            continue
+        threshold = BASELINE_DRIFT_THRESHOLDS[field]
+        if abs(current - baseline) < threshold:
+            continue
+        # Require a short sustained walk away from startup, not a single spike.
+        recent = _series_values(history[-(STUCK_WINDOW - 1):], sensor, field)
+        if len(recent) < STUCK_WINDOW:
+            continue
+        if all(abs(value - baseline) >= threshold * 0.5 for value in recent):
+            add_unique(labels, "baseline_drift_possible")
+            add_unique(suspect_fields, field)
+            checks.append(
+                f"recalibrate or verify {field}: reading drifted from stream startup baseline"
+            )
+
+
 def derive_sensor_quality(
     farm_context: Dict[str, Any],
     sensor: Dict[str, Any],
     expected_fields: List[str],
     *,
     now: Optional[datetime] = None,
+    history: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     labels: List[str] = []
     missing_fields: List[str] = []
     suspect_fields: List[str] = []
     checks: List[str] = []
+
+    if (not isinstance(farm_context, dict) or not isinstance(sensor, dict)
+            or not isinstance(expected_fields, list)
+            or any(not isinstance(field, str) for field in expected_fields)):
+        return {
+            "data_quality_labels": ["insufficient_context"], "missing_fields": [],
+            "suspect_fields": [], "safe_next_checks": ["provide valid context, sensor object and field-name list"],
+            "human_review_required": True, "rationale": "Malformed sensor-quality input requires review.",
+        }
+
+    if history is not None and (
+        not isinstance(history, list) or any(item is not None and not isinstance(item, dict) for item in history)
+    ):
+        return {
+            "data_quality_labels": ["insufficient_context"], "missing_fields": [],
+            "suspect_fields": [], "safe_next_checks": ["provide history as a list of prior sensor objects"],
+            "human_review_required": True, "rationale": "Malformed sensor-quality history requires review.",
+        }
 
     if not farm_context.get("crop") or not farm_context.get("system_type") or not expected_fields:
         add_unique(labels, "insufficient_context")
@@ -84,6 +193,26 @@ def derive_sensor_quality(
         if sensor.get(field) is None:
             add_unique(missing_fields, field)
             add_unique(labels, FIELD_LABELS.get(field, "insufficient_context"))
+
+    numeric_fields = set(FIELD_LABELS) | {"previous_ph", "backup_air_temperature_c", "temperature_f"}
+    for field in numeric_fields | set(expected_fields):
+        if field in numeric_fields and field in sensor and sensor[field] is not None and numeric(sensor[field]) is None:
+            add_unique(labels, "insufficient_context")
+            add_unique(suspect_fields, field)
+            checks.append(f"verify {field}: expected a finite numeric reading, not a boolean or invalid value")
+        elif field in expected_fields and field not in FIELD_LABELS:
+            add_unique(labels, "insufficient_context")
+            checks.append(f"define a supported sensor-quality contract for {field}")
+
+    sampled = parse_timestamp(sensor.get("timestamp"))
+    if sampled is None:
+        add_unique(labels, "insufficient_context")
+        add_unique(suspect_fields, "timestamp")
+        checks.append("provide a valid timezone-aware sample timestamp")
+    elif now is not None and (sampled - now.replace(tzinfo=now.tzinfo or timezone.utc)).total_seconds() > 60:
+        add_unique(labels, "insufficient_context")
+        add_unique(suspect_fields, "timestamp")
+        checks.append("verify device clock: sample timestamp is more than 60 seconds in the future")
 
     ph = numeric(sensor.get("ph"))
     previous_ph = numeric(sensor.get("previous_ph"))
@@ -136,6 +265,8 @@ def derive_sensor_quality(
         add_unique(suspect_fields, "timestamp")
         checks.append("confirm the latest telemetry timestamp before using this packet")
 
+    apply_temporal_checks(sensor, list(history or []), labels, suspect_fields, checks)
+
     if not checks:
         checks.append("continue routine monitoring")
 
@@ -166,11 +297,13 @@ def route_sensor_quality_reasoner(
     if selected == "model_only":
         raise NotImplementedError("Local LoRA inference is not wired into model-router yet.")
 
+    history = input_data.get("history")
     result = derive_sensor_quality(
         input_data.get("farm_context") or {},
         input_data.get("sensor") or {},
-        list(input_data.get("expected_fields") or []),
+        input_data.get("expected_fields") or [],
         now=now or datetime.now(timezone.utc),
+        history=history if isinstance(history, list) else None,
     )
     result["model_id"] = model_id
     result["mode"] = "rules_only" if selected == "rules_only" else "hybrid_guarded"

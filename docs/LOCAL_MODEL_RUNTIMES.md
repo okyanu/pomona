@@ -96,11 +96,11 @@ high-moisture and anomaly labels, and human-review decisions. It was not
 published. Detailed evaluation reports remain private under
 `private/colab/outputs/`.
 
-## Nutrient / pH-EC v0.1.1 Local Candidate
+## Nutrient / pH-EC v0.1.1 Guarded Runtime
 
-The accepted local Nutrient/pH-EC candidate is still unpublished. Prepare
-deployment conversions only after keeping the independent 140-case adapter
-evaluation as the reference baseline:
+The v0.1.1 LoRA, GGUF, and MLX artifacts are published as guarded experimental
+runtime formats. Keep the independent 140-case adapter evaluation as the
+reference baseline when preparing any new conversion:
 
 ```bash
 LLAMA_CPP_DIR=~/Desktop/llama.cpp \

@@ -11,7 +11,7 @@ How to publish Pomona safely and run it anywhere.
 | Model registry YAML + HF links | `.env`, tokens, `private/` |
 | CI workflow | `*.safetensors`, `*.pt`, raw datasets |
 
-See [`.gitignore`](../.gitignore) for the full list.
+See [`.gitignore`](https://github.com/okyanu/pomona/blob/main/.gitignore) for the full list.
 
 ## Publishing
 

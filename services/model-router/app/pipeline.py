@@ -100,16 +100,19 @@ async def evaluate_pipeline(
     actor: str,
     mode: str,
     scenario_id: str | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Evaluate all deterministic specialists, then apply the final gate."""
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
     fields = expected_fields or DEFAULT_EXPECTED_FIELDS
-    specialist_input = {
+    specialist_input: dict[str, Any] = {
         "farm_context": farm_context,
         "sensor": sensor,
         "expected_fields": fields,
     }
+    if history:
+        specialist_input["history"] = history
     specialist_mode = "hybrid_guarded" if mode == "hybrid_guarded" else "rules_only"
     quality = route_sensor_quality_reasoner(
         specialist_input,
@@ -198,7 +201,12 @@ async def evaluate_pipeline(
         "scenario_id": scenario_id,
         "mode": mode,
         "source": "deterministic_guarded_pipeline",
-        "input": {"farm_context": farm_context, "sensor": sensor, "expected_fields": fields},
+        "input": {
+            "farm_context": farm_context,
+            "sensor": sensor,
+            "expected_fields": fields,
+            "history_frames": len(history or []),
+        },
         "sensor_quality": quality,
         "water_irrigation": water,
         "nutrient_ph_ec": nutrient,

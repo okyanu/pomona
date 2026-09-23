@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -49,6 +49,15 @@ class ScenarioParameters(BaseModel):
     ventilation_pct: float = Field(default=0.0, ge=0.0, le=100.0)
 
 
+class SensorQualityGate(BaseModel):
+    """Optional upstream sensor-quality summary. Twin fails closed on review flags."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data_quality_labels: List[str] = Field(default_factory=list)
+    human_review_required: bool = False
+
+
 class ScenarioRequest(BaseModel):
     state: GreenhouseState = Field(..., description="Current normalized sensor state.")
     scenario: ScenarioParameters = Field(
@@ -57,11 +66,14 @@ class ScenarioRequest(BaseModel):
     )
     horizon_steps: int = Field(default=6, ge=1, le=48)
     step_minutes: int = Field(default=15, ge=1, le=1440)
+    parameter_version: str = Field(default="linear-v0-defaults", min_length=1, max_length=64)
+    sensor_quality: Optional[SensorQualityGate] = None
 
 
 class ScenarioResponse(BaseModel):
     mode: str
     model_id: str
+    parameter_version: str
     generated_at: datetime
     baseline: Dict[str, Any]
     scenario: Dict[str, float]
@@ -69,6 +81,46 @@ class ScenarioResponse(BaseModel):
     safety_note: str
     assumptions: List[str]
     trajectory: List[Dict[str, Any]]
+    soft_estimates: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def soft_estimates_from_state(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Advisory soft sensors for quantities not directly commanded or measured every step."""
+    estimates: List[Dict[str, Any]] = []
+    temperature = state.get("air_temperature_c")
+    humidity = state.get("humidity_pct")
+    moisture = next(
+        (state.get(key) for key in ("substrate_moisture_pct", "soil_moisture_pct", "root_zone_moisture_pct") if state.get(key) is not None),
+        None,
+    )
+    if isinstance(temperature, (int, float)) and isinstance(humidity, (int, float)) and not isinstance(temperature, bool):
+        # Magnus approximation for vapor-pressure deficit (kPa); advisory only.
+        es = 0.6108 * (2.718281828 ** ((17.27 * temperature) / (temperature + 237.3)))
+        ea = es * (humidity / 100.0)
+        vpd = round(max(0.0, es - ea), 3)
+        estimates.append(
+            {
+                "name": "vapor_pressure_deficit_kpa",
+                "value": vpd,
+                "quality": "estimated",
+                "method": "magnus_vpd_v0",
+                "human_review_required": False,
+            }
+        )
+    if moisture is None and isinstance(humidity, (int, float)) and not isinstance(humidity, bool):
+        # Crude moisture proxy when no root-zone sensor is present — never stored as raw truth.
+        proxy = round(max(0.0, min(100.0, humidity * 0.55)), 2)
+        estimates.append(
+            {
+                "name": "estimated_root_zone_moisture_pct",
+                "value": proxy,
+                "quality": "estimated",
+                "method": "humidity_proxy_v0",
+                "human_review_required": True,
+                "note": "Unmeasured moisture estimated from humidity; confirm with a probe before acting.",
+            }
+        )
+    return estimates
 
 
 app = FastAPI(
@@ -89,6 +141,14 @@ def number(value: Any, fallback: float) -> float:
 
 @app.post("/v1/digital-twin/scenarios/simulate", response_model=ScenarioResponse)
 def simulate(request: ScenarioRequest) -> ScenarioResponse:
+    if request.sensor_quality and (
+        request.sensor_quality.human_review_required or request.sensor_quality.data_quality_labels
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Sensor quality requires review; refusing forecast until telemetry is trustworthy.",
+        )
+
     state = request.state.model_dump(exclude_none=True)
     scenario = request.scenario
     temperature_delta = scenario.temperature_delta_c
@@ -97,11 +157,16 @@ def simulate(request: ScenarioRequest) -> ScenarioResponse:
     irrigation_duration = scenario.irrigation_duration_min
     ventilation = scenario.ventilation_pct
     trajectory: List[Dict[str, Any]] = []
+    soft_estimates = soft_estimates_from_state(state)
     assumptions = [
         "This is a bounded forecast, not a measurement or actuator command.",
         "Temperature, humidity, and moisture changes are linear approximations.",
         "Real sensor feedback must be checked before any operational decision.",
+        f"Parameter snapshot: {request.parameter_version}.",
+        "No RPC/MPC actuator path; advisory only.",
     ]
+    if soft_estimates:
+        assumptions.append("Soft estimates are labeled quality=estimated and are not raw sensor events.")
     if irrigation_duration:
         assumptions.append("Irrigation effect is represented as a moisture trend only.")
     if ventilation:
@@ -119,11 +184,13 @@ def simulate(request: ScenarioRequest) -> ScenarioResponse:
             predicted[moisture_key] = round(max(0.0, min(100.0, number(state.get(moisture_key), 0.0) + (moisture_delta + irrigation_duration * 0.2) * fraction)), 2)
         predicted["step"] = step
         predicted["minutes_from_now"] = step * request.step_minutes
+        predicted["quality"] = "forecast"
         trajectory.append(predicted)
 
     return ScenarioResponse(
         mode="forecast_only",
         model_id="pomona-digital-twin-linear-v0",
+        parameter_version=request.parameter_version,
         generated_at=datetime.now(timezone.utc),
         baseline=state,
         scenario=scenario.model_dump(),
@@ -131,4 +198,5 @@ def simulate(request: ScenarioRequest) -> ScenarioResponse:
         safety_note="Never execute this trajectory directly. Validate with live sensors and the safety checker; human approval is required for operational changes.",
         assumptions=assumptions,
         trajectory=trajectory,
+        soft_estimates=soft_estimates,
     )

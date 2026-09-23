@@ -1,4 +1,7 @@
 from pathlib import Path
+from typing import Optional
+
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,7 +12,11 @@ class Settings(BaseSettings):
     automation_engine_host: str = "0.0.0.0"
     automation_engine_port: int = 8085
     rules_path: Path = Path(__file__).parent / "rules.yaml"
-    max_suggestions: int = 200
+    max_suggestions: int = Field(default=200, ge=1)
+    suggestion_ttl_seconds: int = Field(default=900, ge=1)
+    suggestion_sample_max_age_seconds: int = Field(default=3600, ge=1)
+    # Unset stays ephemeral for serverless/demo deployments; Compose sets a volume path.
+    automation_db_path: Optional[Path] = None
 
 
 settings = Settings()

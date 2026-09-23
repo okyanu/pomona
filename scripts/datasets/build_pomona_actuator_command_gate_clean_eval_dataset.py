@@ -8,9 +8,10 @@ import importlib.util
 import json
 from pathlib import Path
 from typing import Any
+from eval_identity import neutral_zone
 
 
-DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-actuator-command-gate-v0.1-clean-eval")
+DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-actuator-command-gate-neutral-v2-diagnostic")
 RULES_PATH = Path("services/safety-checker/app/actuator_gate_rules.py")
 
 
@@ -54,7 +55,7 @@ def make_input(bucket: str, index: int) -> dict[str, Any]:
     elif bucket in {"chemical", "diagnosis"}:
         risk_labels = ["fungal_pressure"]
     return {
-        "farm_context": {"crop": ("tomato", "lettuce", "strawberry")[index % 3], "system_type": "controlled_greenhouse", "zone_id": f"gate-clean-{bucket}-{index:03d}"},
+        "farm_context": {"crop": ("tomato", "lettuce", "strawberry")[index % 3], "system_type": "controlled_greenhouse", "zone_id": neutral_zone(index)},
         "sensor": {"air_temperature_c": round(19.5 + (index % 10) * 1.2, 1), "humidity_pct": round(49.0 + (index % 9) * 4.3, 1), "ph": round(5.5 + (index % 7) * 0.25, 2), "ec_ms_cm": round(1.1 + (index % 8) * 0.36, 2), "substrate_moisture_pct": round(31.0 + (index % 10) * 3.1, 1)},
         "sensor_quality": quality,
         "risk_labels": risk_labels,
@@ -68,6 +69,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--per-bucket", type=int, default=14)
     args = parser.parse_args()
+    if (args.output_dir / "test.jsonl").exists():
+        raise FileExistsError("Refusing to overwrite evaluation evidence; choose a new --output-dir")
     derive = load_rules()
     records = []
     for bucket in COMMANDS:

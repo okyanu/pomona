@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from build_pomona_water_irrigation_realderived_dataset import derive_output, write_jsonl
+from eval_identity import neutral_zone
 from build_pomona_water_irrigation_v0_1_4_edgefix_dataset import force_exact_output
 
 
-DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-water-irrigation-risk-v0.1.6-clean-eval")
+DEFAULT_OUTPUT_DIR = Path("datasets/processed/pomona-water-irrigation-neutral-v2-diagnostic")
 CROPS = ("tomato", "lettuce", "strawberry", "cucumber")
 
 
@@ -29,7 +30,7 @@ def make_input(bucket: str, index: int) -> dict[str, Any]:
     farm_context = {
         "crop": CROPS[index % len(CROPS)],
         "system_type": system_type,
-        "zone_id": f"clean-holdout-{bucket}-{index:03d}",
+        "zone_id": neutral_zone(index),
     }
 
     if bucket == "normal":
@@ -82,6 +83,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--per-bucket", type=int, default=24)
     args = parser.parse_args()
+    if (args.output_dir / "test.jsonl").exists():
+        raise FileExistsError("Refusing to overwrite evaluation evidence; choose a new --output-dir")
 
     buckets = (
         "normal",
@@ -98,7 +101,7 @@ def main() -> int:
         "records": len(records),
         "per_bucket": args.per_bucket,
         "buckets": list(buckets),
-        "purpose": "Leakage-free holdout evaluation for the v0.1.6 schema-order adapter.",
+        "purpose": "Neutral-ID diagnostic revision; not an untouched or field-validated release holdout.",
     }
     (args.output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"

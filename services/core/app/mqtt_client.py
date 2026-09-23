@@ -8,7 +8,7 @@ except ModuleNotFoundError:
     mqtt = None  # type: ignore[assignment]
 
 from app.config import settings
-from app.schemas import SensorEvent
+from app.schemas import SensorEvent, SensorObservation
 from app.store import event_store
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ class MqttIngestClient:
 
         self.connected = True
         client.subscribe(settings.mqtt_topic_pattern)
+        client.subscribe(settings.mqtt_observation_topic_pattern)
         logger.info(
             "MQTT connected to %s:%s, subscribed to %s",
             settings.mqtt_host,
@@ -54,6 +55,17 @@ class MqttIngestClient:
     ) -> None:
         try:
             payload = json.loads(message.payload.decode("utf-8"))
+            parts = message.topic.split("/")
+            if (len(parts) != 6 or parts[0] != "pomona" or parts[3] != "sensor"
+                    or parts[5] not in {"state", "observation"} or not isinstance(payload, dict)):
+                raise ValueError("Unsupported MQTT topic or payload")
+            if any(payload.get(key) != parts[index] for key, index in
+                   (("farm_id", 1), ("zone_id", 2), ("device_id", 4))):
+                raise ValueError("MQTT topic identity does not match payload")
+            payload["mqtt_retained"] = bool(getattr(message, "retain", False))
+            if parts[5] == "observation":
+                event_store.add_observation(SensorObservation.model_validate(payload))
+                return
             event = SensorEvent.model_validate(payload)
             event.source = event.source or "mqtt"
             self._on_event(event)

@@ -22,11 +22,11 @@ number. See [VERSIONING.md](./VERSIONING.md).
 | Asset | GitHub (source of truth) | Hugging Face (release) | Status |
 |-------|--------------------------|------------------------|--------|
 | Platform stack | [Okyanus/pomona](https://github.com/Okyanus/pomona) | — | Active |
-| Tomato risk reasoner v0.1.7 LoRA | [models/registry/tomato-risk-reasoner-v0.1.7.yaml](../models/registry/tomato-risk-reasoner-v0.1.7.yaml) + [docs/TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | **Published — do not republish unless you ship a new adapter version** |
-| Water/irrigation reasoner v0.1.8 LoRA | [models/registry/water-irrigation-risk-reasoner-v0.1.yaml](../models/registry/water-irrigation-risk-reasoner-v0.1.yaml) + [docs/WATER_IRRIGATION_RISK_REASONER.md](./WATER_IRRIGATION_RISK_REASONER.md) | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | **Published release candidate — advisory only** |
-| Actuator command gate v0.1 LoRA | [models/registry/actuator-command-gate-reasoner-v0.1.yaml](../models/registry/actuator-command-gate-reasoner-v0.1.yaml) + [docs/ACTUATOR_COMMAND_GATE_REASONER.md](./ACTUATOR_COMMAND_GATE_REASONER.md) | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | **Published research preview — below standalone gate; deterministic checker required** |
-| Greenhouse sensor dataset | [datasets/pomona-tomato-risk-v0.1/](../datasets/pomona-tomato-risk-v0.1/) pipeline scaffold | [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) | Published dataset; do not republish from this repo unless you are doing a planned dataset release |
-| Agronomist advisor LoRA | [models/registry/agronomist-gemma4.yaml](../models/registry/agronomist-gemma4.yaml) | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Separate ML repo publish flow |
+| Tomato risk reasoner v0.1.7 LoRA | [models/registry/tomato-risk-reasoner-v0.1.7.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml) + [docs/TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | **Published — do not republish unless you ship a new adapter version** |
+| Water/irrigation reasoner v0.1.8 LoRA | [models/registry/water-irrigation-risk-reasoner-v0.1.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/water-irrigation-risk-reasoner-v0.1.yaml) + [docs/WATER_IRRIGATION_RISK_REASONER.md](./WATER_IRRIGATION_RISK_REASONER.md) | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | **Published release candidate — advisory only** |
+| Actuator command gate v0.1 LoRA | [models/registry/actuator-command-gate-reasoner-v0.1.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/actuator-command-gate-reasoner-v0.1.yaml) + [docs/ACTUATOR_COMMAND_GATE_REASONER.md](./ACTUATOR_COMMAND_GATE_REASONER.md) | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | **Published research preview — below standalone gate; deterministic checker required** |
+| Greenhouse sensor dataset | [datasets/pomona-tomato-risk-v0.1/](https://github.com/okyanu/pomona/tree/main/datasets/pomona-tomato-risk-v0.1) pipeline scaffold | [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) | Published dataset; do not republish from this repo unless you are doing a planned dataset release |
+| Agronomist advisor LoRA | [models/registry/agronomist-gemma4.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/agronomist-gemma4.yaml) | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Separate ML repo publish flow |
 
 ---
 
@@ -104,13 +104,13 @@ HF model:   Okyanus/ai-pomona-agronomist-gemma4              ← advisor weights
 
 | Script | Purpose | When to run |
 |--------|---------|-------------|
-| [`scripts/publish/check.sh`](../scripts/publish/check.sh) | Block secrets and large files | Before any GitHub push |
-| [`scripts/publish/github.sh`](../scripts/publish/github.sh) | Push platform to GitHub | Platform code/doc changes |
-| [`scripts/huggingface/publish_tomato_reasoner_to_hf.sh`](../scripts/huggingface/publish_tomato_reasoner_to_hf.sh) | Upload tomato LoRA adapter | **New adapter version only** |
-| [`scripts/huggingface/publish_water_irrigation_reasoner_to_hf.sh`](../scripts/huggingface/publish_water_irrigation_reasoner_to_hf.sh) | Upload water/irrigation LoRA adapter | Release-candidate updates only |
-| [`scripts/huggingface/publish_actuator_command_gate_reasoner_to_hf.sh`](../scripts/huggingface/publish_actuator_command_gate_reasoner_to_hf.sh) | Upload actuator-gate LoRA adapter | Research-preview updates only |
-| [`scripts/huggingface/publish_dataset_to_hf.sh`](../scripts/huggingface/publish_dataset_to_hf.sh) | Copy validated JSONL to HF dataset checkout | Dataset/schema changes |
-| [`scripts/publish/huggingface.sh`](../scripts/publish/huggingface.sh) | Agronomist weights (ML repo wrapper) | Agronomist model updates |
+| [`scripts/publish/check.sh`](https://github.com/okyanu/pomona/blob/main/scripts/publish/check.sh) | Block secrets and large files | Before any GitHub push |
+| [`scripts/publish/github.sh`](https://github.com/okyanu/pomona/blob/main/scripts/publish/github.sh) | Push platform to GitHub | Platform code/doc changes |
+| [`scripts/huggingface/publish_tomato_reasoner_to_hf.sh`](https://github.com/okyanu/pomona/blob/main/scripts/huggingface/publish_tomato_reasoner_to_hf.sh) | Upload tomato LoRA adapter | **New adapter version only** |
+| [`scripts/huggingface/publish_water_irrigation_reasoner_to_hf.sh`](https://github.com/okyanu/pomona/blob/main/scripts/huggingface/publish_water_irrigation_reasoner_to_hf.sh) | Upload water/irrigation LoRA adapter | Release-candidate updates only |
+| [`scripts/huggingface/publish_actuator_command_gate_reasoner_to_hf.sh`](https://github.com/okyanu/pomona/blob/main/scripts/huggingface/publish_actuator_command_gate_reasoner_to_hf.sh) | Upload actuator-gate LoRA adapter | Research-preview updates only |
+| [`scripts/huggingface/publish_dataset_to_hf.sh`](https://github.com/okyanu/pomona/blob/main/scripts/huggingface/publish_dataset_to_hf.sh) | Copy validated JSONL to HF dataset checkout | Dataset/schema changes |
+| [`scripts/publish/huggingface.sh`](https://github.com/okyanu/pomona/blob/main/scripts/publish/huggingface.sh) | Agronomist weights (ML repo wrapper) | Agronomist model updates |
 
 ### Platform → GitHub
 

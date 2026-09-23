@@ -62,9 +62,18 @@ commit-plan:
 	$(PYTHON) scripts/publish/commit_plan.py
 
 test-local:
+	services/model-router/.venv/bin/python -m pytest scripts/datasets/tests -q
 	services/core/.venv/bin/python -m pytest services/core/tests services/dashboard/tests services/safety-checker/tests services/digital-twin/tests -q
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
+
+.PHONY: demo-local
+.PHONY: fault-replay
+fault-replay:
+	services/model-router/.venv/bin/python scripts/benchmark_sensor_fault_replay.py
+
+demo-local:
+	services/model-router/.venv/bin/python scripts/demo_local.py
 
 local-check: test-local local-validation
 
@@ -86,7 +95,7 @@ test:
 
 test-docker:
 	docker compose run --rm --no-deps core python3 -m pip install pytest httpx -q && \
-	docker compose run --rm --no-deps -e PYTHONPATH=/app core python3 -m pytest /app/tests/ -v || true
+	docker compose run --rm --no-deps -e PYTHONPATH=/app core python3 -m pytest /app/tests/ -v
 
 publish-check:
 	chmod +x scripts/publish/*.sh && ./scripts/publish/check.sh

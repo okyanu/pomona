@@ -16,7 +16,7 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 - `PATCH`: backward-compatible fixes and documentation corrections.
 - `alpha.N`, `beta.N`, `rc.N`: maturity before a stable release.
 
-The canonical human-readable version is in [`VERSION`](../VERSION). Python uses
+The canonical human-readable version is in [`VERSION`](https://github.com/okyanu/pomona/blob/main/VERSION). Python uses
 the equivalent PEP 440 form in `pyproject.toml`.
 
 Current platform release:

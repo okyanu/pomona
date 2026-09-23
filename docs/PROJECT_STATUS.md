@@ -15,6 +15,11 @@ Living record of completed work. **Update when a phase completes** — see check
 
 Agents: read [PHASES.md](./PHASES.md) before starting work.
 
+Local checkpoint (2026-09-16): validation, MQTT reliability, suggestion expiry
+and evaluation hygiene are implemented and unit-tested. See
+[reliability hardening](./RELIABILITY_HARDENING.md) for limits and outstanding
+checks. This checkpoint does not complete a phase or approve a model release.
+
 ---
 
 ## Phase 0 — Positioning and repo setup ✅
@@ -134,6 +139,7 @@ services/model-router:
   done: POST /v1/reasoners/sensor-quality
   done: POST /v1/reasoners/tomato-risk (rules + guarded/model-only local Ollama GGUF)
   done: POST /v1/reasoners/water-irrigation-risk (guarded local runtime supported)
+  done: POST /v1/reasoners/nutrient-ph-ec (schema and semantic validation + guarded local Ollama runtime)
   done: POST /v1/reasoners/safety-triage (deterministic fallback; model runtime pending)
   next: improve tomato model-only quality and wire the remaining specialist runtimes
 
@@ -154,6 +160,17 @@ No model weights are committed to GitHub. Local adapters stay under `private/` a
 ---
 
 ## Phase 2 — Dashboard ⏳ In progress
+
+### Local zone-monitoring checkpoint (2026-09-05)
+
+Farm/zone URL selection, device last-seen/quality panel, scoped 100-record
+history pages and CSV downloads are implemented locally. Scope follows the
+guarded views and suggestion evaluation; cross-zone review requests are rejected
+when scoped. Legacy unscoped audit summaries are hidden rather than mislabeled.
+Partial sensor observations remain monitoring-only, with no state fusion or
+actuator execution. Regression tests cover scope forwarding, history parameters,
+cross-zone suggestion filtering, escaped rendering, and outage recovery.
+Simulator soak and physical sensor trials are still pending.
 
 **Goal:** Web UI + SQLite persistence.
 
@@ -193,10 +210,17 @@ autonomous action.
 | Manual approve/reject workflow | ✅ | verified live: evaluate -> approve -> pending count drops |
 | Rules: high humidity/fungal fan suggestion, high/low EC alert, pH out-of-range alert, water-level check | ✅ | all 5 covered by tests |
 | Public deployment ([automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app)) | ✅ | live on Vercel, documentation-style landing page at `/` |
-| Dashboard integration (show pending suggestions, trigger evaluate) | ⬜ | not started |
+| Dashboard integration (evaluate, list, approve/reject) | ✅ local | proxy and JavaScript regression tests |
+| SQLite suggestion history (2026-09-05 local checkpoint) | ✅ local | reopen recovery, retention, first-decision-wins tests; named Compose volume |
+| Request feedback and reviewer labels | ✅ local | busy buttons, visible failures; reviewer labels are self-reported, not verified |
 
-Suggestions are in-memory only (v0.1 scope, matching the platform's other
-stateless specialist services) and there is no execution path from an
+Local Compose stores suggestions and decisions in SQLite. Host/pip users
+enable persistence with `AUTOMATION_DB_PATH`; without it, storage remains
+ephemeral (including the existing serverless demo). The latest 200 completed
+decisions are retained by default; pending suggestions are not pruned and can
+grow until reviewed. This is not an unlimited
+audit archive. These local changes do not update public deployments until
+explicitly published. There is no execution path from an
 approved suggestion to any actuator or hardware — approval only records a
 decision. `load_rules` refuses to start if any rule's action matches
 Pomona's forbidden actuator/chemical vocabulary, so a rules-file edit alone
@@ -230,7 +254,7 @@ be extended to call the live model-router API once a public backend exists.
 1. [PHASES.md](./PHASES.md) — status table + completed count
 2. [ROADMAP.md](./ROADMAP.md) — status column
 3. [PROJECT_STATUS.md](./PROJECT_STATUS.md) — deliverables section (this file)
-4. [README.md](../README.md) — "Project phases" table
+4. [README.md](https://github.com/okyanu/pomona/blob/main/README.md) — "Project phases" table
 5. `private/DAILY_LOG.md` — optional (local)
 
 ---
@@ -248,5 +272,5 @@ be extended to call the live model-router API once a public backend exists.
 - Read `AGENTS.md` and `docs/CURSOR_RULES.md` before coding
 - Add `/health` to every new service
 - Return JSON from every API endpoint
-- Update [PHASES.md](./PHASES.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](../README.md) when a phase completes
+- Update [PHASES.md](./PHASES.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](https://github.com/okyanu/pomona/blob/main/README.md) when a phase completes
 - Owner notes go in `private/` (gitignored)

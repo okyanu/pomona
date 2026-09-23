@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-node@v4
+        if: matrix.service == 'dashboard'
+        with:
+          node-version: '22'
+
       - name: Install dependencies
         run: |
           pip install -r services/${{ matrix.service }}/requirements.txt pytest httpx pyyaml
@@ -25,3 +30,7 @@ jobs:
       - name: Run tests
         working-directory: services/${{ matrix.service }}
         run: PYTHONPATH=. pytest tests/ -v
+
+      - name: Dataset contract and evaluation hygiene
+        if: matrix.service == 'model-router'
+        run: python -m pytest scripts/datasets/tests -q

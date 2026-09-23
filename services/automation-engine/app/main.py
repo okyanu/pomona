@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.rules import InvalidRuleError, evaluate_rules, load_rules
 from app.store import suggestion_store
+from app.advice_cards import suggestions_to_advice_cards
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +39,7 @@ class HealthResponse(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
+    event_id: Optional[str] = Field(default=None, min_length=1, max_length=256)
     risk_labels: List[str] = Field(default_factory=list)
     blocked_actions: List[str] = Field(default_factory=list)
     context: Dict[str, Any] = Field(default_factory=dict)
@@ -52,7 +54,14 @@ class Suggestion(BaseModel):
     requires_approval: bool
     status: str
     created_at: str
+    expires_at: Optional[str] = None
     decided_at: Optional[str] = None
+    reviewer: Optional[str] = None
+
+
+class DecisionRequest(BaseModel):
+    # Self-reported label, not an authenticated identity.
+    reviewer: Optional[str] = Field(default=None, max_length=80)
 
 
 class EvaluateResponse(BaseModel):
@@ -62,6 +71,27 @@ class EvaluateResponse(BaseModel):
 class SuggestionListResponse(BaseModel):
     count: int
     suggestions: List[Suggestion]
+
+
+class AdviceCard(BaseModel):
+    card_id: Optional[str] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    opportunity: str
+    title: str
+    summary: str
+    severity: str
+    evidence: Dict[str, Any]
+    safe_next_checks: List[str]
+    blocked_actions: List[str]
+    suggestion_id: Optional[str] = None
+    human_review_required: bool
+    status: str
+
+
+class AdviceCardListResponse(BaseModel):
+    count: int
+    cards: List[AdviceCard]
 
 
 app = FastAPI(
@@ -345,7 +375,7 @@ LANDING_PAGE = """<!doctype html>
   </section>
 
   <footer>
-    Suggestions live in process memory only &mdash; restarting the service clears them.
+    __STORAGE_NOTE__
   </footer>
 </main>
 </body>
@@ -354,7 +384,10 @@ LANDING_PAGE = """<!doctype html>
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def landing() -> str:
-    return LANDING_PAGE.replace("__RULES_LOADED__", str(len(RULES)))
+    note = ("Local SQLite history enabled; the most recent suggestions are retained."
+            if settings.automation_db_path else
+            "Ephemeral demo storage: restarting the service clears suggestions.")
+    return LANDING_PAGE.replace("__RULES_LOADED__", str(len(RULES))).replace("__STORAGE_NOTE__", note)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -372,6 +405,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
             action=rule["action"],
             message=rule["message"],
             context=request.context,
+            event_id=request.event_id,
         )
         created.append(suggestion)
 
@@ -385,24 +419,39 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 
 @app.get("/v1/automation/suggestions", response_model=SuggestionListResponse)
 def list_suggestions(status: Optional[str] = Query(default=None)) -> SuggestionListResponse:
-    if status is not None and status not in {"pending", "approved", "rejected"}:
-        raise HTTPException(status_code=422, detail="status must be pending, approved, or rejected")
+    if status is not None and status not in {"pending", "approved", "rejected", "expired"}:
+        raise HTTPException(status_code=422, detail="status must be pending, approved, rejected, or expired")
     suggestions = suggestion_store.list(status=status)
     return SuggestionListResponse(count=len(suggestions), suggestions=suggestions)
 
 
+@app.get("/v1/automation/advice-cards", response_model=AdviceCardListResponse)
+def list_advice_cards(status: Optional[str] = Query(default=None)) -> AdviceCardListResponse:
+    """CottonBot-style advice cards wrapping suggestions. HITL only; no actuators."""
+    if status is not None and status not in {"pending", "approved", "rejected", "expired", "superseded"}:
+        raise HTTPException(
+            status_code=422,
+            detail="status must be pending, approved, rejected, expired, or superseded",
+        )
+    suggestions = suggestion_store.list(status=None if status in {None, "superseded"} else status)
+    cards = suggestions_to_advice_cards(suggestions, status=status)
+    return AdviceCardListResponse(count=len(cards), cards=cards)
+
+
 @app.post("/v1/automation/suggestions/{suggestion_id}/approve", response_model=Suggestion)
-def approve_suggestion(suggestion_id: str) -> Suggestion:
-    suggestion = suggestion_store.decide(suggestion_id, "approved")
+def approve_suggestion(suggestion_id: str, decision: Optional[DecisionRequest] = None) -> Suggestion:
+    suggestion = suggestion_store.decide(suggestion_id, "approved", decision.reviewer if decision else None)
     if not suggestion:
         raise HTTPException(status_code=404, detail="Suggestion not found")
+    if suggestion["status"] == "expired":
+        raise HTTPException(status_code=409, detail="Suggestion expired; evaluate a fresh sensor reading")
     logger.info("suggestion approved id=%s action=%s", suggestion_id, suggestion["action"])
     return Suggestion(**suggestion)
 
 
 @app.post("/v1/automation/suggestions/{suggestion_id}/reject", response_model=Suggestion)
-def reject_suggestion(suggestion_id: str) -> Suggestion:
-    suggestion = suggestion_store.decide(suggestion_id, "rejected")
+def reject_suggestion(suggestion_id: str, decision: Optional[DecisionRequest] = None) -> Suggestion:
+    suggestion = suggestion_store.decide(suggestion_id, "rejected", decision.reviewer if decision else None)
     if not suggestion:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     logger.info("suggestion rejected id=%s action=%s", suggestion_id, suggestion["action"])

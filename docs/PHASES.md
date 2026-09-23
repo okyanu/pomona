@@ -8,7 +8,7 @@
 | ⏳ Active / partial | **8** (Phases 2, 3, 4, 5, 6, 7, 9, 10) |
 | ⬜ Remaining | **1** (Phase 8) |
 
-> **Source of truth for phase status.** When a phase finishes, update this file first, then [ROADMAP.md](./ROADMAP.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](../README.md).
+> **Source of truth for phase status.** When a phase finishes, update this file first, then [ROADMAP.md](./ROADMAP.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](https://github.com/okyanu/pomona/blob/main/README.md).
 
 ---
 
@@ -41,8 +41,13 @@ Phase 2 is partially implemented locally, with its local Docker validation
 checkpoint complete:
 
 - Core persists sensor events in SQLite and survives a service restart.
-- The read-only dashboard shows readings, guarded pipeline output, audit summaries,
+- The dashboard monitoring views show readings, guarded pipeline output, audit summaries,
   service status, and runtime status.
+- Local automation history persists on a separate Compose volume. Manual
+  decisions record an optional unverified reviewer label and a timestamp;
+  they never execute hardware. `MAX_SUGGESTIONS` bounds history retention.
+- `make demo-local` runs three offline tomato scenarios using the actual rules,
+  without a server, model downloads, persistent suggestions, or approvals.
 - `make local-check` runs the service tests and the temporary-state four-service
   validation runner.
 - `make docker-config` validates Compose syntax, and the local Docker Compose

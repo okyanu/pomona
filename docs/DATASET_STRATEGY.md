@@ -54,7 +54,7 @@ scripts/huggingface/publish_dataset_to_hf.sh    copy to HF checkout
 4. Run `python3 scripts/datasets/validate_pomona_dataset.py`.
 5. Run `./scripts/huggingface/publish_dataset_to_hf.sh`.
 
-Practical copy-paste commands: [datasets/README.md](../datasets/README.md).
+Practical copy-paste commands: [datasets/README.md](https://github.com/okyanu/pomona/blob/main/datasets/README.md).
 
 ## Label design
 

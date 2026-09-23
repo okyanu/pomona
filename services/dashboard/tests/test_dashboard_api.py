@@ -1,4 +1,5 @@
 import sys
+import subprocess
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -17,6 +18,66 @@ import app.main as dashboard_main
 
 
 client = TestClient(dashboard_main.app)
+
+
+def test_scope_is_forwarded_and_does_not_leak_between_requests(monkeypatch):
+    calls = []
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path, params=None):
+            calls.append((path, dict(params or {})))
+            scope = params or {}
+            event = {"farm_id": scope.get("farm_id", "default"), "zone_id": scope.get("zone_id", "default"), "air_temperature_c": 24}
+            return dashboard_main.httpx.Response(200, json={"events": [event], "devices": [], "observations": []}, request=dashboard_main.httpx.Request("GET", "http://core" + path))
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    for zone in ("a", "b"):
+        query = {"farm_id": "farm", "zone_id": zone}
+        assert client.get("/api/overview", params=query).json()["latest_event"]["zone_id"] == zone
+        assert calls[-1][1] == {"farm_id": "farm", "zone_id": zone, "limit": 20}
+        assert client.get("/api/devices", params=query).json()["available"]
+        assert calls[-1][1] == query
+        assert client.get("/api/history", params={**query, "kind": "observations", "offset": 100}).json()["available"]
+        assert calls[-1] == ("/v1/sensors/observations", {**query, "limit": 100, "offset": 100})
+        assert client.get("/api/history/export.csv", params=query).status_code == 200
+        assert calls[-1][1] == {**query, "kind": "events", "limit": 100, "offset": 0}
+    client.get("/api/overview")
+    assert calls[-1][1] == {"limit": 20}
+    assert client.get("/api/overview?farm_id=only").status_code == 422
+    assert client.get("/api/history?offset=-1").status_code == 422
+    assert client.get("/api/history?kind=secret").status_code == 422
+
+
+def test_scoped_suggestions_hide_other_zones_and_reject_cross_zone_decision(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path):
+            rows = [{"id": z, "context": {"farm_id": "farm", "zone_id": z}} for z in ("a", "b")]
+            rows.append({"id": "legacy", "context": {}})
+            return dashboard_main.httpx.Response(200, json={"suggestions": rows}, request=dashboard_main.httpx.Request("GET", "http://automation" + path))
+        async def post(self, *args, **kwargs):
+            raise AssertionError("Cross-zone request must not reach automation")
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    query = {"farm_id": "farm", "zone_id": "a"}
+    result = client.get("/api/automation", params=query).json()["result"]
+    assert [s["id"] for s in result["suggestions"]] == ["a"]
+    assert client.post("/api/automation/suggestions/b/approve", params=query).status_code == 404
+    assert client.post("/api/automation/suggestions/legacy/reject", params=query).status_code == 404
+    assert not client.get("/api/audit", params=query).json()["available"]
+
+
+def test_dashboard_javascript_escapes_untrusted_values():
+    """Execute the served script with hostile API fixtures, without a server."""
+    html = client.get("/").text
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("check_rendering.cjs"))],
+        input=script, text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
@@ -129,6 +190,13 @@ def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
+        async def get(self, path, params=None):
+            return dashboard_main.httpx.Response(
+                200,
+                json={"events": [event, {**event, "air_temperature_c": 23.5}], "count": 2},
+                request=dashboard_main.httpx.Request("GET", "http://core" + path),
+            )
+
         async def post(self, path, json):
             FakeClient.last_payload = json
             return FakeResponse()
@@ -144,6 +212,8 @@ def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
     assert farm_context["zone_area_m2"] == 20
     assert farm_context["crop_kc"] == 1.15
     assert farm_context["npk_target"] == event["npk_target"]
+    assert isinstance(FakeClient.last_payload.get("history"), list)
+    assert len(FakeClient.last_payload["history"]) == 1
 
 
 def test_automation_proxy_lists_suggestions(monkeypatch):
@@ -172,6 +242,50 @@ def test_automation_proxy_lists_suggestions(monkeypatch):
     response = client.get("/api/automation")
     assert response.status_code == 200
     assert response.json()["result"]["suggestions"][0]["id"] == "sug-1"
+
+
+def test_advice_cards_proxy(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "count": 1,
+                "cards": [
+                    {
+                        "card_id": "c1",
+                        "title": "Check water",
+                        "severity": "warn",
+                        "status": "pending",
+                        "opportunity": "irrigation",
+                        "summary": "Check water",
+                        "evidence": {},
+                        "safe_next_checks": [],
+                        "blocked_actions": ["autonomous_irrigation_change"],
+                        "human_review_required": True,
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, path):
+            assert path == "/v1/automation/advice-cards"
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    response = client.get("/api/advice-cards")
+    assert response.status_code == 200
+    assert response.json()["result"]["cards"][0]["card_id"] == "c1"
 
 
 def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatch):
@@ -254,14 +368,15 @@ def test_automation_approve_and_reject_proxy(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, path):
+        async def post(self, path, json):
+            assert json == {"reviewer": "Local operator"}
             FakeClient.requested_paths.append(path)
             return FakeResponse()
 
     monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
 
-    approve = client.post("/api/automation/suggestions/sug-1/approve")
-    reject = client.post("/api/automation/suggestions/sug-2/reject")
+    approve = client.post("/api/automation/suggestions/sug-1/approve", json={"reviewer": "Local operator"})
+    reject = client.post("/api/automation/suggestions/sug-2/reject", json={"reviewer": "Local operator"})
 
     assert approve.status_code == 200
     assert reject.status_code == 200

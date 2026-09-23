@@ -22,7 +22,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 ---
 
-> **Early MVP.** Simulated sensors → SQLite-backed API → guarded reasoner pipeline → read-only dashboard. Docker remains the recommended deployment path; local validation also works without Docker. [What to expect →](docs/GETTING_STARTED.md)
+> **Early MVP.** Simulated sensors → SQLite-backed API → guarded reasoner pipeline → monitoring dashboard with manual suggestion decisions. No actuator execution. Docker remains the recommended deployment path; local validation also works without Docker. [What to expect →](docs/GETTING_STARTED.md)
 
 ## 🚀 Quickstart (any OS — Docker)
 
@@ -160,7 +160,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 | 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |
-| 6 | Automation engine | ⏳ partial — YAML rules, suggestions, and manual approve/reject; [live API](https://automation-engine-fawn.vercel.app) deployed, no dashboard integration yet |
+| 6 | Automation engine | ⏳ partial — YAML rules, dashboard evaluate/approve/reject, bounded SQLite history in local Compose; [public API demo](https://automation-engine-fawn.vercel.app) remains ephemeral |
 | 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |

@@ -79,10 +79,19 @@ This model is crop-agnostic and useful across:
   "stale_reading",
   "unit_mismatch",
   "sensor_drift_possible",
+  "stuck_value",
+  "flatline_possible",
+  "baseline_drift_possible",
   "conflicting_readings",
   "insufficient_context"
 ]
 ```
+
+## Related design drafts
+
+- Temporal stuck / flatline / baseline drift: [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md) (implemented locally in deterministic rules)
+- Calibration events and tagged corrections: [CALIBRATION_PROVENANCE.md](./CALIBRATION_PROVENANCE.md)
+- Backlog index: [LATER_PATTERNS_BACKLOG.md](./LATER_PATTERNS_BACKLOG.md)
 
 ## Relationship To Other Models
 

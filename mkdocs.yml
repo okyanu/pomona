@@ -7,7 +7,10 @@ repo_name: okyanu/pomona
 repo_url: https://github.com/okyanu/pomona
 edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2026 Pomona Contributors · Apache-2.0
-exclude_docs: README.md
+exclude_docs: |
+  README.md
+  EXECUTION_PLAN.md
+  UNPUBLISHED_MODEL_RELEASES.md
 
 theme:
   name: material
@@ -47,6 +50,7 @@ nav:
       - Installation: INSTALL.md
       - Plug and play: PLUG_AND_PLAY.md
       - Local validation: LOCAL_VALIDATION.md
+      - Offline demo: LOCAL_DEMO.md
   - Platform:
       - Architecture: architecture.md
       - Project status: PROJECT_STATUS.md
@@ -71,15 +75,17 @@ nav:
 plugins:
   - search
 
-# Some public docs intentionally link to source files that live outside docs/.
-# MkDocs cannot copy those targets into the Pages artifact, so keep the links
-# visible without treating them as deployment failures.
+# Repository-source links use explicit GitHub URLs; broken local links should
+# now fail the strict build instead of being hidden as informational messages.
 validation:
   links:
-    not_found: info
-    unrecognized_links: info
+    not_found: warn
+    unrecognized_links: warn
 
 markdown_extensions:
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - admonition
   - attr_list
   - md_in_html

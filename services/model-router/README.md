@@ -23,11 +23,11 @@ Currently implements:
 | GET | `/v1/runtimes` | Local rules, Ollama, and MLX availability |
 | POST | `/v1/advisor/explain` | Sensor-aware advisory explanation |
 | POST | `/v1/reasoners/sensor-quality` | Sensor packet quality labels with rules-only fallback |
-| POST | `/v1/reasoners/tomato-risk` | Tomato risk labels with rules-only fallback |
+| POST | `/v1/reasoners/tomato-risk` | Schema-constrained local labels with deterministic guarded output |
 | POST | `/v1/reasoners/water-irrigation-risk` | Water/irrigation labels via rules, Ollama, or MLX |
 | POST | `/v1/reasoners/actuator-command-gate` | Advisory actuator/chemical gate via deterministic rules |
 | POST | `/v1/reasoners/safety-triage` | Advisory safety labels and blocked actions |
-| POST | `/v1/reasoners/nutrient-ph-ec` | pH/EC risk labels with deterministic fallback |
+| POST | `/v1/reasoners/nutrient-ph-ec` | Schema/semantic-validated local pH/EC model with deterministic guarded output |
 | POST | `/v1/reasoners/shared-chain` | Quality -> water risk -> actuator safety chain |
 | POST | `/v1/pipeline/evaluate` | Full offline guarded software-validation pipeline |
 | GET | `/v1/pipeline/audit` | Recent local pipeline summaries without sensor payloads |
