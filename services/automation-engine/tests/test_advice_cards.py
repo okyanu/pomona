@@ -76,3 +76,33 @@ def test_suggestions_to_advice_cards_filters_status():
     )
     assert len(cards) == 1
     assert cards[0]["card_id"] == "1"
+
+
+def test_evidence_hash_tracks_snapshot_without_claiming_authentication():
+    suggestion={"context":{"sensor_snapshot":{"ph":6.2,"calibration_id":"c1"}}}
+    card=suggestion_to_advice_card(suggestion)
+    assert card["evidence"]["provenance_status"] == "recorded_snapshot"
+    assert card["evidence"]["sensor_snapshot"]["calibration_id"] == "c1"
+    assert card["evidence"]["snapshot_sha256"] == suggestion_to_advice_card(suggestion)["evidence"]["snapshot_sha256"]
+    suggestion["context"]["sensor_snapshot"]["ph"]=6.3
+    assert card["evidence"]["snapshot_sha256"] != suggestion_to_advice_card(suggestion)["evidence"]["snapshot_sha256"]
+    assert suggestion_to_advice_card({})["evidence"]["provenance_status"] == "legacy_missing_snapshot"
+
+
+def test_persisted_snapshot_survives_retry_and_restart(tmp_path):
+    path=tmp_path/"suggestions.db"
+    store=SuggestionStore(db_path=path)
+    context={"sensor_snapshot":{"ph":6.2},"history_snapshot":[{"ph":6.1}]}
+    original=store.add("rule", "review", "Check probe", context, event_id="sample-1")
+    context["sensor_snapshot"]["ph"]=9
+    retry=store.add("rule", "review", "Check probe", context, event_id="sample-1")
+    assert retry["context"]["sensor_snapshot"]["ph"]==6.2
+    expected=suggestion_to_advice_card(original)["evidence"]["snapshot_sha256"]
+    store.close()
+    reopened=SuggestionStore(db_path=path)
+    try:
+        actual=suggestion_to_advice_card(reopened.get(original["id"]))
+        assert actual["evidence"]["snapshot_sha256"]==expected
+        assert actual["evidence"]["history_snapshot"]==[{"ph":6.1}]
+    finally:
+        reopened.close()

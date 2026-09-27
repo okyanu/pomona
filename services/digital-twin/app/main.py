@@ -89,10 +89,6 @@ def soft_estimates_from_state(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     estimates: List[Dict[str, Any]] = []
     temperature = state.get("air_temperature_c")
     humidity = state.get("humidity_pct")
-    moisture = next(
-        (state.get(key) for key in ("substrate_moisture_pct", "soil_moisture_pct", "root_zone_moisture_pct") if state.get(key) is not None),
-        None,
-    )
     if isinstance(temperature, (int, float)) and isinstance(humidity, (int, float)) and not isinstance(temperature, bool):
         # Magnus approximation for vapor-pressure deficit (kPa); advisory only.
         es = 0.6108 * (2.718281828 ** ((17.27 * temperature) / (temperature + 237.3)))
@@ -107,19 +103,8 @@ def soft_estimates_from_state(state: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "human_review_required": False,
             }
         )
-    if moisture is None and isinstance(humidity, (int, float)) and not isinstance(humidity, bool):
-        # Crude moisture proxy when no root-zone sensor is present — never stored as raw truth.
-        proxy = round(max(0.0, min(100.0, humidity * 0.55)), 2)
-        estimates.append(
-            {
-                "name": "estimated_root_zone_moisture_pct",
-                "value": proxy,
-                "quality": "estimated",
-                "method": "humidity_proxy_v0",
-                "human_review_required": True,
-                "note": "Unmeasured moisture estimated from humidity; confirm with a probe before acting.",
-            }
-        )
+    # Air humidity alone does not identify root-zone moisture. Leave an absent
+    # measurement absent until a separately validated soft-sensor model exists.
     return estimates
 
 
@@ -164,6 +149,7 @@ def simulate(request: ScenarioRequest) -> ScenarioResponse:
         "Real sensor feedback must be checked before any operational decision.",
         f"Parameter snapshot: {request.parameter_version}.",
         "No RPC/MPC actuator path; advisory only.",
+        "Missing root-zone moisture is not inferred from air humidity.",
     ]
     if soft_estimates:
         assumptions.append("Soft estimates are labeled quality=estimated and are not raw sensor events.")

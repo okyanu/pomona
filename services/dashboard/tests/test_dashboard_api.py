@@ -292,6 +292,8 @@ def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatc
     async def fake_pipeline():
         return dashboard_main.PipelineResponse(
             available=True,
+            sensor_snapshot={"farm_id": "farm", "zone_id": "zone", "ph": 6.3, "calibration_id": "cal-1"},
+            history_sha256="history-hash",
             result={
                 "pipeline_id": "pipeline-test",
                 "sensor_quality": {"data_quality_labels": ["stale_reading"]},
@@ -336,6 +338,11 @@ def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatc
     assert set(payload["risk_labels"]) == {"stale_reading", "low_moisture", "high_ec"}
     assert payload["blocked_actions"] == ["direct_actuator_control"]
     assert payload["context"]["pipeline_id"] == "pipeline-test"
+    assert payload["context"]["readings"] == {"ph": 6.3}
+    assert payload["context"]["sensor_snapshot"]["calibration_id"] == "cal-1"
+    assert payload["context"]["history_sha256"] == "history-hash"
+    assert payload["context"]["sensor_quality_labels"] == ["stale_reading"]
+    assert payload["context"]["blocked_actions"] == ["direct_actuator_control"]
 
 
 def test_automation_evaluate_without_pipeline_result_is_unavailable(monkeypatch):

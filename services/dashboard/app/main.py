@@ -51,6 +51,9 @@ class RiskResponse(BaseModel):
 
 class PipelineResponse(BaseModel):
     available: bool
+    sensor_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    history_snapshot: List[Dict[str, Any]] = Field(default_factory=list)
+    history_sha256: Optional[str] = None
     sensor_timestamp: Optional[str] = None
     sensor_event_id: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
@@ -297,7 +300,9 @@ async def pipeline() -> PipelineResponse:
             )
             response.raise_for_status()
         event_id = hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return PipelineResponse(available=True, result=response.json(), sensor_event_id=event_id, sensor_timestamp=event.get("timestamp"))
+        return PipelineResponse(available=True, result=response.json(), sensor_event_id=event_id,
+                                sensor_timestamp=event.get("timestamp"), sensor_snapshot=event, history_snapshot=history,
+                                history_sha256=hashlib.sha256(json.dumps(history, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
     except Exception as exc:
         return PipelineResponse(available=False, error=f"Integrated pipeline unavailable: {exc}")
 
@@ -368,7 +373,28 @@ async def automation_evaluate() -> AutomationResponse:
                     "risk_labels": risk_labels,
                     "event_id": pipeline_data.sensor_event_id,
                     "blocked_actions": blocked_actions,
-                    "context": {"pipeline_id": result.get("pipeline_id"), "sensor_timestamp": pipeline_data.sensor_timestamp, **request_scope.get()},
+                    "context": {
+                        "pipeline_id": result.get("pipeline_id"),
+                        "sensor_timestamp": pipeline_data.sensor_timestamp,
+                        "sensor_event_id": pipeline_data.sensor_event_id,
+                        "sensor_snapshot": pipeline_data.sensor_snapshot,
+                        "history_sha256": pipeline_data.history_sha256,
+                        "history_snapshot": pipeline_data.history_snapshot,
+                        "readings": {k: v for k, v in pipeline_data.sensor_snapshot.items() if k in {
+                            "air_temperature_c", "water_temperature_c", "humidity_pct", "ph", "ec_ms_cm",
+                            "soil_moisture_pct", "substrate_moisture_pct", "root_zone_moisture_pct"}},
+                        "farm_id": pipeline_data.sensor_snapshot.get("farm_id"),
+                        "zone_id": pipeline_data.sensor_snapshot.get("zone_id"),
+                        "sensor_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", []),
+                        "risk_labels": risk_labels,
+                        "blocked_actions": blocked_actions,
+                        "reasoner_ids": list(dict.fromkeys(part["model_id"] for name in (
+                            "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk")
+                            if isinstance(part := result.get(name), dict) and part.get("model_id"))),
+                        "reasoner_snapshot": {name: result.get(name) for name in (
+                            "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk", "final_decision")},
+                        **request_scope.get(),
+                    },
                 },
             )
             response.raise_for_status()
@@ -811,6 +837,9 @@ async function renderAdviceCards() {
       <div class="value" style="font-size:1.05rem">${escapeHtml(card.title || card.summary || '--')}</div>
       <p class="status">${escapeHtml(card.summary || '')}</p>
       <p class="status">Checks: ${escapeHtml((card.safe_next_checks || []).join('; ') || 'none')}</p>
+      <p class="status">Sample: ${escapeHtml((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
+      <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
+      <details><summary>Recorded evidence</summary><pre>${escapeHtml(JSON.stringify(card.evidence || {}, null, 2))}</pre></details>
       <p class="status">Blocked: ${badge((card.blocked_actions || []).join(', ') || 'none', (card.blocked_actions || []).length ? 'danger' : 'success')}</p>
       <p class="status">Status: ${badge(card.status || 'pending', card.status === 'pending' ? 'warning' : 'neutral')}</p>
     </article>`).join('')}</div>`;

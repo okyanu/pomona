@@ -53,14 +53,15 @@ def test_forecast_is_bounded_and_not_a_command():
     assert body["soft_estimates"][0]["name"] == "vapor_pressure_deficit_kpa"
 
 
-def test_soft_estimate_marks_missing_moisture_proxy():
+def test_missing_moisture_is_not_invented_from_air_humidity():
     response = client.post(
         "/v1/digital-twin/scenarios/simulate",
         json={"state": {"air_temperature_c": 24.0, "humidity_pct": 70.0}, "scenario": {}},
     )
     assert response.status_code == 200
     names = {item["name"] for item in response.json()["soft_estimates"]}
-    assert "estimated_root_zone_moisture_pct" in names
+    assert "estimated_root_zone_moisture_pct" not in names
+    assert all("soil_moisture_pct" not in step for step in response.json()["trajectory"])
     assert "vapor_pressure_deficit_kpa" in names
 
 

@@ -15,6 +15,13 @@ Living record of completed work. **Update when a phase completes** — see check
 
 Agents: read [PHASES.md](./PHASES.md) before starting work.
 
+Local checkpoint (2026-09-25): removed unsupported root-moisture proxy, added
+offline twin-versus-persistence replay, persisted advice-card evidence and an
+offline exact-source retrieval prototype. Unit suite: 198 passed, 1 skipped;
+local integration passed. No field calibration, full RAG, model release or phase
+completion claimed. See [twin](./DIGITAL_TWIN.md), [cards](./ADVICE_CARDS.md) and
+[retrieval experiment](./LOCAL_ADVICE_RETRIEVAL.md). Current changes uncommitted.
+
 Local checkpoint (2026-09-16): validation, MQTT reliability, suggestion expiry
 and evaluation hygiene are implemented and unit-tested. See
 [reliability hardening](./RELIABILITY_HARDENING.md) for limits and outstanding

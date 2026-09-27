@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+import hashlib
+import json
 
 
 SEVERITY_BY_ACTION = {
@@ -39,6 +41,16 @@ def suggestion_to_advice_card(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             "reasoner_ids": context.get("reasoner_ids") or [],
             "sensor_quality_labels": context.get("sensor_quality_labels") or [],
             "risk_labels": context.get("risk_labels") or [],
+            "sensor_event_id": context.get("sensor_event_id"),
+            "sensor_snapshot": context.get("sensor_snapshot") or {},
+            "history_sha256": context.get("history_sha256"),
+            "history_snapshot": context.get("history_snapshot") or [],
+            "reasoner_snapshot": context.get("reasoner_snapshot") or {},
+            "snapshot_sha256": hashlib.sha256(json.dumps(context, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "provenance_status": "recorded_snapshot" if context.get("sensor_snapshot") else "legacy_missing_snapshot",
+            "units": {"air_temperature_c": "C", "water_temperature_c": "C", "humidity_pct": "%",
+                      "ph": "pH", "ec_ms_cm": "mS/cm", "soil_moisture_pct": "%",
+                      "substrate_moisture_pct": "%", "root_zone_moisture_pct": "%"},
         },
         "safe_next_checks": context.get("safe_next_checks")
         or ["confirm sensors are not stuck or flatlined", "review suggestion before acting"],

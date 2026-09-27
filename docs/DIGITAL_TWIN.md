@@ -61,6 +61,31 @@ probes):
 
 ## Soft estimates
 
+2026-09-25: removed the unvalidated `humidity * 0.55` root-moisture proxy.
+Missing root-zone readings stay missing. VPD remains a derived estimate from
+measured air temperature/RH, not a new independent measurement.
+
+## Offline replay checkpoint
+
+`scripts/benchmark_twin_replay.py` calls the actual simulator and compares MAE,
+RMSE and bias to persistence at 15/30/60 minutes by default. Input is one
+farm/zone, strictly ordered timezone-aware samples, explicit `quality: valid`,
+and `state` values. Optional scenarios must be known at forecast origin.
+Mixed zones, duplicate times and boolean/nonfinite readings are rejected.
+Gaps and bad-quality pairs are not imputed. Earlier rows are reserved as a
+calibration block; **no parameter fitting is implemented or claimed**.
+
+```bash
+services/core/.venv/bin/python scripts/benchmark_twin_replay.py \
+  examples/scenarios/twin-replay-synthetic.jsonl /tmp/pomona-twin-report.json \
+  --split-index 3
+```
+
+Output must be a new file. The supplied data is explicitly synthetic. With
+zero scenario deltas this twin equals persistence; matching it proves no
+forecast improvement. Real AGC2/site data, facility mapping and independent
+calibration/evaluation windows are still required before field claims.
+
 When estimating quantities not sampled every second:
 
 - Mark `quality: "estimated"` (or equivalent).

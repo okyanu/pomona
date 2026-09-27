@@ -11,6 +11,17 @@ new crop domain.
 
 ## Goal
 
+2026-09-25 evidence checkpoint: dashboard evaluation now records the sensor
+and history snapshots, history hash, rule outputs/IDs, readings, timestamps,
+scope and blocked actions in suggestion context. Card API exposes these with
+a context SHA-256 and units; dashboard renders escaped evidence details.
+Legacy suggestions show `legacy_missing_snapshot` instead of invented evidence.
+Hashes identify content; they are not signatures or proof of sensor accuracy.
+Calibration references are preserved when present in the source snapshot, not
+inferred or automatically resolved. Complete runtime/model pinning remains a
+separate reproducibility requirement. Stored telemetry can be sensitive; keep
+local suggestion databases private.
+
 Turn reasoner + automation suggestions into stable **advice cards** for the
 dashboard (and later optional mobile), answering:
 
