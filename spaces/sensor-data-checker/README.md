@@ -43,7 +43,7 @@ Everything runs in your browser. Files are never uploaded.
 
 The checks are the deterministic sensor-quality rules from
 [Pomona](https://github.com/okyanu/pomona) (`services/model-router/app/sensor_quality.py`),
-ported to JavaScript. The port is tested against the Python rules on 7,714 cases, including
+ported to JavaScript. The port is tested against the Python rules on 8,638 cases, including
 Python 3.11's timestamp parsing, so the page gives the same answers as the platform.
 
 Why rules instead of an AI model? We measured it on the

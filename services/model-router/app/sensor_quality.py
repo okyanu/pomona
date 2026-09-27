@@ -36,8 +36,13 @@ STUCK_FIELDS = (
 # Chemical probes: compare recent value to the stream startup baseline.
 BASELINE_DRIFT_FIELDS = ("ph", "ec_ms_cm")
 STUCK_WINDOW = 3
+# Flatline is a softer hint than stuck, so it uses a longer window: slow signals
+# at 5-minute steps often stay within epsilon for 3 samples while healthy.
+FLATLINE_WINDOW = 6
 STUCK_EPSILON = 1e-9
 BASELINE_DRIFT_THRESHOLDS = {"ph": 0.35, "ec_ms_cm": 0.4}
+# Readings outside these bounds are flagged impossible and never serve as a drift baseline.
+PLAUSIBLE_RANGES = {"ph": (3.0, 11.0), "ec_ms_cm": (0.0, 12.0)}
 FLATLINE_EPSILON = {
     "air_temperature_c": 0.05,
     "water_temperature_c": 0.05,
@@ -101,6 +106,29 @@ def _series_values(history: List[Dict[str, Any]], sensor: Dict[str, Any], field:
     return values
 
 
+def _trailing_run(values: List[float]) -> int:
+    run = 0
+    for value in reversed(values):
+        if run and abs(value - values[-1]) > STUCK_EPSILON:
+            break
+        run += 1
+    return run
+
+
+def _longest_run(values: List[float]) -> int:
+    longest = current = 0
+    for index, value in enumerate(values):
+        current = current + 1 if index and abs(value - values[index - 1]) <= STUCK_EPSILON else 1
+        longest = max(longest, current)
+    return longest
+
+
+def _median(values: List[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
 def apply_temporal_checks(
     sensor: Dict[str, Any],
     history: List[Dict[str, Any]],
@@ -114,28 +142,38 @@ def apply_temporal_checks(
 
     for field in STUCK_FIELDS:
         values = _series_values(history, sensor, field)
-        if len(values) < STUCK_WINDOW + 1:
-            continue
-        prior = values[:-STUCK_WINDOW]
-        # Legitimate long plateaus never varied; require prior motion before stuck/flatline.
-        if not prior or max(prior) - min(prior) <= STUCK_EPSILON:
-            continue
-        window = values[-STUCK_WINDOW:]
-        span = max(window) - min(window)
-        if span <= STUCK_EPSILON:
+        # Stuck: the latest value has repeated at least STUCK_WINDOW times and at least
+        # twice as long as any earlier repeat in the history. Continuous sensors are
+        # flagged after 3 identical samples; quantized probes (e.g. DS18B20 0.0625 C
+        # steps) that legitimately repeat 2-3 times need a correspondingly longer freeze.
+        run = _trailing_run(values)
+        earlier = values[:len(values) - run]
+        if (len(earlier) >= 2 and max(earlier) - min(earlier) > STUCK_EPSILON
+                and run >= max(STUCK_WINDOW, 2 * _longest_run(earlier))):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
-            checks.append(f"inspect {field}: identical readings across {STUCK_WINDOW} fresh samples")
-        elif span <= FLATLINE_EPSILON.get(field, 0.0):
-            add_unique(labels, "flatline_possible")
-            add_unique(suspect_fields, field)
-            checks.append(f"inspect {field}: near-zero variance may indicate a stuck or clipped probe")
+            checks.append(f"inspect {field}: identical readings across {run} fresh samples")
+            continue
+        # Flatline: the last FLATLINE_WINDOW samples moved less in total than the
+        # sensor normally moves in a single step.
+        epsilon = FLATLINE_EPSILON.get(field, 0.0)
+        if len(values) >= FLATLINE_WINDOW + 2:
+            prior = values[:-FLATLINE_WINDOW]
+            window = values[-FLATLINE_WINDOW:]
+            prior_step = _median([abs(b - a) for a, b in zip(prior, prior[1:])])
+            span = max(window) - min(window)
+            if prior_step >= epsilon and STUCK_EPSILON < span <= epsilon:
+                add_unique(labels, "flatline_possible")
+                add_unique(suspect_fields, field)
+                checks.append(f"inspect {field}: near-zero variance may indicate a stuck or clipped probe")
 
-    baseline_packet = next((packet for packet in history if isinstance(packet, dict)), None)
-    if baseline_packet is None:
-        return
     for field in BASELINE_DRIFT_FIELDS:
-        baseline = numeric(baseline_packet.get(field))
+        low, high = PLAUSIBLE_RANGES[field]
+        baseline = next(
+            (value for value in (numeric(packet.get(field)) for packet in history if isinstance(packet, dict))
+             if value is not None and low <= value <= high),
+            None,
+        )
         current = numeric(sensor.get(field))
         if baseline is None or current is None:
             continue
@@ -253,6 +291,17 @@ def derive_sensor_quality(
             add_unique(suspect_fields, "air_temperature_c")
             add_unique(suspect_fields, "backup_air_temperature_c")
             checks.append("compare primary and backup temperature probes before using the value")
+
+    # DS18B20-style probes report -127 C (disconnected) or 85 C (power-on reset) on error.
+    for field, low, high, check in (
+        ("water_temperature_c", 0.0, 50.0, "compare water temperature with a second thermometer; -127 or 85 C are common probe error codes"),
+        ("substrate_temperature_c", -10.0, 60.0, "compare substrate temperature with a second thermometer; -127 or 85 C are common probe error codes"),
+    ):
+        value = numeric(sensor.get(field))
+        if value is not None and (value < low or value > high):
+            add_unique(labels, "impossible_temperature")
+            add_unique(suspect_fields, field)
+            checks.append(check)
 
     if temperature_f is not None and "air_temperature_c" in sensor:
         add_unique(labels, "unit_mismatch")

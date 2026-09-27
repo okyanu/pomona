@@ -85,16 +85,31 @@ numeric_texts = ["6.5", " 6.5 ", "6.5\n", "+6.5", "-0", "1e3", "1E-2", ".5", "5.
 numeric_cases = [{"value": v, "out": sq.numeric(v)} for v in numeric_texts]
 numeric_cases += [{"value": v, "out": sq.numeric(v)} for v in [True, False, None, 0, 1.5, -3, [], {}, [1]]]
 
-# Temporal: random series ending in each pattern.
+# Temporal: random series ending in each pattern (up to 12 values = 11 history + current).
 temporal_cases = []
 fields = ["air_temperature_c", "humidity_pct", "soil_moisture_pct", "ph", "ec_ms_cm", "water_temperature_c"]
-for n in range(600):
-    length = rng.randrange(1, 12)
-    start = rng.choice([6.0, 1.8, 22.0, 60.0])
-    series = [round(start + rng.choice([0, 0, 0.01, 0.1, 0.3, 0.5, 1.0]) * rng.choice([-1, 1]) * k, 3) for k in range(length + 1)]
-    if rng.random() < 0.4:
-        series[-3:] = [series[-1]] * len(series[-3:])
+for n in range(1500):
+    length = rng.randrange(1, 13)
+    start_value = rng.choice([6.0, 1.8, 22.0, 60.0])
+    series = [round(start_value + rng.choice([0, 0, 0.01, 0.1, 0.3, 0.5, 1.0]) * rng.choice([-1, 1]) * k, 3)
+              for k in range(length + 1)]
+    pattern = rng.random()
+    if pattern < 0.25:  # frozen tail
+        tail = rng.randrange(2, 8)
+        series[-tail:] = [series[-min(tail, len(series))]] * len(series[-tail:])
+    elif pattern < 0.45:  # quantized probe flicker (DS18B20 0.0625 C steps), sometimes frozen
+        series = [17.25 + 0.0625 * rng.choice([0, 0, 1]) for _ in series]
+        if rng.random() < 0.5:
+            tail = rng.randrange(1, 8)
+            series[-tail:] = [17.25] * len(series[-tail:])
+    elif pattern < 0.65:  # noisy start, tiny-variance tail
+        series = [round(20 + rng.uniform(-0.4, 0.4), 3) for _ in series]
+        tail = rng.randrange(3, 9)
+        amp = rng.choice([0.0, 0.01, 0.02, 0.04, 0.06, 0.3])
+        series[-tail:] = [round(20 + rng.uniform(-amp, amp), 3) for _ in series[-tail:]]
     field = rng.choice(fields)
+    if rng.random() < 0.15:
+        series[0] = rng.choice([14.9, -1.0, 13.0])  # impossible first value (drift-baseline anchor)
     packets = [{field: v, "timestamp": "2026-01-01T00:00:00+00:00"} for v in series]
     if rng.random() < 0.1:
         packets[rng.randrange(len(packets))][field] = rng.choice(["broken", None, True])
@@ -102,6 +117,12 @@ for n in range(600):
     if rng.random() < 0.05:
         history.insert(0, None)
     temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"}, sensor, [field], None, history))
+
+# Probe error codes and edges on water/substrate temperature.
+for field in ("water_temperature_c", "substrate_temperature_c"):
+    for value in (-127.0, 85.0, -10.0, -10.01, 0.0, -0.01, 50.0, 50.01, 60.0, 60.01, 18.5, "85"):
+        derive_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"},
+                                        {field: value, "timestamp": "2026-01-01T00:00:00+00:00"}, [field]))
 
 # Time boundaries around stale/future limits.
 now = datetime(2026, 5, 6, 7, 8, 9, tzinfo=timezone.utc)

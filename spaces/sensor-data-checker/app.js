@@ -15,16 +15,16 @@
     missing_moisture: ["bad", "Moisture missing", "No soil/substrate moisture value."],
     impossible_ph: ["bad", "Impossible pH", "pH below 3 or above 11: almost always a probe, wiring or calibration problem."],
     impossible_ec: ["bad", "Impossible EC", "EC below 0 or above 12 mS/cm. If you log µS/cm, divide by 1000."],
-    impossible_temperature: ["bad", "Impossible temperature", "Air temperature below −10 °C or above 65 °C."],
+    impossible_temperature: ["bad", "Impossible temperature", "Air below −10 °C or above 65 °C, water below 0 °C or above 50 °C, or substrate below −10 °C or above 60 °C. −127 °C and 85 °C are classic DS18B20 probe error codes."],
     impossible_humidity: ["bad", "Impossible humidity", "Humidity below 0 % or above 100 %."],
     insufficient_context: ["bad", "Can't trust this packet", "A value isn't a number (e.g. \"err\", \"NaN\"), the timestamp is missing, has no timezone or is in the future, or crop/system/expected readings aren't set."],
     unit_mismatch: ["bad", "Unit mismatch", "Both Celsius and Fahrenheit temperatures are present; check which one is real."],
     conflicting_readings: ["bad", "Sensors disagree", "Primary and backup air temperature differ by 8 °C or more."],
     stale_reading: ["warn", "Stale", "The latest reading is more than 1 hour older than the check time: the logger may have stopped."],
-    stuck_value: ["warn", "Stuck value", "Exactly the same value 3 times in a row after it had been changing: a frozen sensor or repeated cached value."],
+    stuck_value: ["warn", "Stuck value", "The same value repeated at least 3 times, and at least twice as long as any earlier repeat: a frozen sensor or a repeated cached value. Coarse probes that often repeat need a longer freeze before this fires."],
     sensor_drift_possible: ["warn", "Sudden pH jump", "pH moved by 0.8 or more from the previous reading."],
-    baseline_drift_possible: ["warn", "Drift", "pH (≥0.35) or EC (≥0.4 mS/cm) has stayed away from its value 11 readings earlier: recalibrate or verify with a handheld meter."],
-    flatline_possible: ["hint", "Very flat (hint)", "Almost no change across 3 readings. Often fine for slow-changing values at short intervals; worth a glance if it persists."],
+    baseline_drift_possible: ["warn", "Drift", "pH (≥0.35) or EC (≥0.4 mS/cm) has stayed away from the first plausible reading in the last 11: recalibrate or verify with a handheld meter."],
+    flatline_possible: ["hint", "Very flat (hint)", "The last 6 readings moved less in total than this sensor normally moves in one step: possibly a clipped or failing probe."],
   };
   const info = (l) => LABELS[l] || ["warn", l, ""];
   const chip = (l, extra = "") => `<span class="chip ${info(l)[0]}" title="${esc(info(l)[2])}"${extra}>${esc(info(l)[1])}</span>`;

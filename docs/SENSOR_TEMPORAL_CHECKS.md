@@ -52,6 +52,25 @@ Extend the allowlist in [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.m
 Keep existing `sensor_drift_possible` until these are sharper; avoid duplicate
 labels on the same frame without a merge rule.
 
+## Implemented behaviour (2026-09-27)
+
+`services/model-router/app/sensor_quality.apply_temporal_checks`, using up to 11
+prior packets (the dashboard's window) plus the current packet:
+
+| Check | Fires when | Why this shape |
+|---|---|---|
+| `stuck_value` | The latest value has repeated ≥ 3 times **and** ≥ 2× the longest earlier repeat, after the field had varied | Continuous sensors are caught after 3 identical samples; quantized probes (DS18B20 0.0625 °C steps) that legitimately repeat 2–3 times need a longer freeze |
+| `flatline_possible` | The last 6 samples span ≤ epsilon (0.05 °C / 0.25 %) but not exactly zero, **and** the field's median step before that was ≥ epsilon | Slow, healthy signals at 5-minute steps often stay within epsilon for 3 samples; the old 3-sample rule flagged them |
+| `baseline_drift_possible` | pH/EC stays ≥ threshold away from the **first plausible** value in the window (pH 3–11, EC 0–12) for 3 samples | An impossible reading must not become the baseline |
+
+Packet-level range checks added alongside: `water_temperature_c` outside 0–50 °C and
+`substrate_temperature_c` outside −10–60 °C give `impossible_temperature` (catches the
+DS18B20 error values −127 °C and 85 °C).
+
+Normal controls covered by `services/model-router/tests/test_sensor_temporal_checks.py`:
+stable pH plateau, quantized probe flicker, slow noisy climb. The browser checker in
+`spaces/sensor-data-checker` mirrors these rules (`make test-checker`).
+
 ## Detection sketch (to implement later)
 
 Inputs per `(farm_id, zone_id, device_id, measurement)`:

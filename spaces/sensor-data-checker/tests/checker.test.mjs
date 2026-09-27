@@ -61,11 +61,10 @@ const flagged = (results) => results.filter((r) => r.out.data_quality_labels.len
   assert.deepEqual(at(30), ["insufficient_context"]); // timestamp without timezone
   assert.deepEqual(at(40), ["insufficient_context"]); // NaN temperature
   assert.deepEqual(at(0), []);
-  // Known rules quirk (reproduced faithfully): 11 packets after the impossible pH 14.9 at index 10,
-  // that packet becomes the oldest history entry and serves as the drift baseline, so index 21 gets
-  // baseline_drift_possible. The Pomona dashboard behaves the same way.
-  assert.deepEqual(at(21), ["baseline_drift_possible"]);
-  const unexpected = results.filter((r, i) => at(i).length && ![10, 17, 21, 22, 30, 40, results.length - 1].includes(i));
+  // Regression: 11 packets after the impossible pH 14.9 at index 10 that packet is the oldest
+  // history entry; it must not become the drift baseline (fixed 2026-09-27).
+  assert.deepEqual(at(21), []);
+  const unexpected = results.filter((r, i) => at(i).length && ![10, 17, 22, 30, 40, results.length - 1].includes(i));
   assert.deepEqual(unexpected.map((r) => [r.rows, r.out.data_quality_labels]), []);
   console.log(`wide log: ${flagged(results).length}/${results.length} flagged (5 planted + latest-reading age)`);
 }

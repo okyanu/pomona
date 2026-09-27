@@ -26,8 +26,10 @@
     "humidity_pct", "substrate_moisture_pct", "soil_moisture_pct"];
   const BASELINE_DRIFT_FIELDS = ["ph", "ec_ms_cm"];
   const STUCK_WINDOW = 3;
+  const FLATLINE_WINDOW = 6;
   const STUCK_EPSILON = 1e-9;
   const BASELINE_DRIFT_THRESHOLDS = { ph: 0.35, ec_ms_cm: 0.4 };
+  const PLAUSIBLE_RANGES = { ph: [3.0, 11.0], ec_ms_cm: [0.0, 12.0] };
   const FLATLINE_EPSILON = { air_temperature_c: 0.05, water_temperature_c: 0.05, substrate_temperature_c: 0.05,
     humidity_pct: 0.25, substrate_moisture_pct: 0.25, soil_moisture_pct: 0.25 };
   const US_PER_S = 1000000n;
@@ -264,29 +266,63 @@
     return values;
   }
 
+  function trailingRun(values) {
+    let run = 0;
+    for (let i = values.length - 1; i >= 0; i--) {
+      if (run && Math.abs(values[i] - values[values.length - 1]) > STUCK_EPSILON) break;
+      run++;
+    }
+    return run;
+  }
+  function longestRun(values) {
+    let longest = 0, current = 0;
+    values.forEach((v, i) => {
+      current = i && Math.abs(v - values[i - 1]) <= STUCK_EPSILON ? current + 1 : 1;
+      longest = Math.max(longest, current);
+    });
+    return longest;
+  }
+  function median(values) {
+    const o = [...values].sort((a, b) => a - b);
+    const m = Math.floor(o.length / 2);
+    return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+  }
+  const steps = (v) => v.slice(1).map((b, i) => Math.abs(b - v[i]));
+
   function applyTemporalChecks(sensor, history, labels, suspect, checks) {
     if (!history.length) return;
     for (const field of STUCK_FIELDS) {
       const values = seriesValues(history, sensor, field);
-      if (values.length < STUCK_WINDOW + 1) continue;
-      const prior = values.slice(0, -STUCK_WINDOW);
-      if (!prior.length || Math.max(...prior) - Math.min(...prior) <= STUCK_EPSILON) continue;
-      const window = values.slice(-STUCK_WINDOW);
-      const span = Math.max(...window) - Math.min(...window);
-      if (span <= STUCK_EPSILON) {
+      const run = trailingRun(values);
+      const earlier = values.slice(0, values.length - run);
+      if (earlier.length >= 2 && Math.max(...earlier) - Math.min(...earlier) > STUCK_EPSILON &&
+          run >= Math.max(STUCK_WINDOW, 2 * longestRun(earlier))) {
         addUnique(labels, "stuck_value");
         addUnique(suspect, field);
-        checks.push(`inspect ${field}: identical readings across ${STUCK_WINDOW} fresh samples`);
-      } else if (span <= (FLATLINE_EPSILON[field] || 0)) {
-        addUnique(labels, "flatline_possible");
-        addUnique(suspect, field);
-        checks.push(`inspect ${field}: near-zero variance may indicate a stuck or clipped probe`);
+        checks.push(`inspect ${field}: identical readings across ${run} fresh samples`);
+        continue;
+      }
+      const epsilon = FLATLINE_EPSILON[field] || 0;
+      if (values.length >= FLATLINE_WINDOW + 2) {
+        const prior = values.slice(0, -FLATLINE_WINDOW);
+        const window = values.slice(-FLATLINE_WINDOW);
+        const priorStep = median(steps(prior));
+        const span = Math.max(...window) - Math.min(...window);
+        if (priorStep >= epsilon && span > STUCK_EPSILON && span <= epsilon) {
+          addUnique(labels, "flatline_possible");
+          addUnique(suspect, field);
+          checks.push(`inspect ${field}: near-zero variance may indicate a stuck or clipped probe`);
+        }
       }
     }
-    const baselinePacket = history.find(isPlainObject);
-    if (!baselinePacket) return;
     for (const field of BASELINE_DRIFT_FIELDS) {
-      const baseline = numeric(get(baselinePacket, field));
+      const [low, high] = PLAUSIBLE_RANGES[field];
+      let baseline = null;
+      for (const packet of history) {
+        if (!isPlainObject(packet)) continue;
+        const v = numeric(get(packet, field));
+        if (v !== null && v >= low && v <= high) { baseline = v; break; }
+      }
       const current = numeric(get(sensor, field));
       if (baseline === null || current === null) continue;
       const threshold = BASELINE_DRIFT_THRESHOLDS[field];
@@ -385,6 +421,16 @@
         addUnique(labels, "conflicting_readings"); addUnique(suspect, "air_temperature_c");
         addUnique(suspect, "backup_air_temperature_c");
         checks.push("compare primary and backup temperature probes before using the value");
+      }
+    }
+    for (const [field, low, high, check] of [
+      ["water_temperature_c", 0.0, 50.0, "compare water temperature with a second thermometer; -127 or 85 C are common probe error codes"],
+      ["substrate_temperature_c", -10.0, 60.0, "compare substrate temperature with a second thermometer; -127 or 85 C are common probe error codes"],
+    ]) {
+      const value = numeric(get(sensor, field));
+      if (value !== null && (value < low || value > high)) {
+        addUnique(labels, "impossible_temperature"); addUnique(suspect, field);
+        checks.push(check);
       }
     }
     if (tempF !== null && has(sensor, "air_temperature_c")) {
