@@ -41,6 +41,8 @@ Unimplemented design notes. Do not treat as phase commitments. Index:
 | [CALIBRATION_PROVENANCE.md](./CALIBRATION_PROVENANCE.md) | Calibration events + tagged corrections (Hurst-style) |
 | [ADVICE_CARDS.md](./ADVICE_CARDS.md) | HITL advice cards (CottonBot-style) |
 | [DIGITAL_TWIN.md](./DIGITAL_TWIN.md) | Advisory calibrate → estimate twin (Frontzek-style) |
+| [LOCAL_ADVICE_RETRIEVAL.md](./LOCAL_ADVICE_RETRIEVAL.md) | Offline exact-excerpt retrieval prototype |
+| [WATERCRESS_PILOT.md](./WATERCRESS_PILOT.md) | Two-zone watercress monitoring pilot (SD logger + importer) |
 
 ## Maintainer-only (local, not in Git)
 

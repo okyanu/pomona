@@ -1,0 +1,6 @@
+# Handheld meter readings. Import: python scripts/import_sd_csv.py examples/pilot/manual_readings.csv --farm-id home-pilot
+# Timestamps need a timezone (Z or +04:00). Example rows below; replace them.
+timestamp_utc,zone_id,measurement,value,sensor_id
+2026-10-05T09:00:00+04:00,cress-hydro-a,ph,6.9,handheld-ph
+2026-10-05T09:00:00+04:00,cress-hydro-a,ec_ms_cm,0.8,handheld-ec
+2026-10-05T09:00:00+04:00,cress-hydro-a,water_temperature_c,19.5,handheld-thermo

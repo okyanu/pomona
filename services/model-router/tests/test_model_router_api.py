@@ -107,6 +107,29 @@ def test_tomato_risk_reasoner_rules_only():
     assert "direct_pesticide_dosage" in body["blocked_actions"]
 
 
+def test_tomato_risk_reasoner_not_applicable_to_other_crops():
+    payload = {
+        "mode": "hybrid_guarded",
+        "input": {
+            "system_type": "hydroponic",
+            "crop": "watercress",
+            "air_temperature_c": 31.0,
+            "humidity_pct": 89.0,
+            "ph": 7.4,
+            "ec_ms_cm": 4.8,
+        },
+    }
+
+    response = client.post("/v1/reasoners/tomato-risk", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "not_applicable"
+    assert body["risk_labels"] == []
+    assert body["human_review_required"] is False
+    assert "crop=watercress" in body["fallback_reason"]
+
+
 def test_sensor_quality_reasoner_rules_only():
     payload = {
         "mode": "rules_only",

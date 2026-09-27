@@ -1,0 +1,3 @@
+date,zone_id,days_after_sowing,sown_count,germinated_count,mean_height_mm,leaf_colour_1_5,wilting_or_yellowing,water_topup_ml,photo_file,notes
+2026-10-05,cress-hydro-a,0,,,,,,,day0-hydro.jpg,example row - replace
+2026-10-05,cress-soil-a,0,,,,,,,day0-soil.jpg,example row - replace

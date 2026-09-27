@@ -163,3 +163,7 @@ hf-repos/
 *.7z
 docs/EXECUTION_PLAN.md
 docs/UNPUBLISHED_MODEL_RELEASES.md
+
+# Per-node firmware config (may hold Wi-Fi credentials)
+devices/*/include/config.h
+devices/*/.pio/

@@ -239,6 +239,22 @@ async def route_tomato_reasoner(
 ) -> Dict[str, Any]:
     selected = mode.strip().lower()
     selected_backend = backend.strip().lower()
+    crop = input_data.get("crop")
+    if isinstance(crop, str) and crop.strip().lower() != "tomato":
+        # Tomato thresholds must not produce advice for other crops (e.g. a
+        # watercress pilot zone); mirror the pipeline's non-tomato fallback.
+        return {
+            "risk_labels": [],
+            "missing_data": [],
+            "safe_next_checks": ["use a crop-specific reasoner for this crop"],
+            "blocked_actions": [],
+            "human_review_required": False,
+            "model_id": model_id,
+            "mode": "rules_only",
+            "backend": "rules",
+            "source": "not_applicable",
+            "fallback_reason": f"tomato reasoner not applicable to crop={crop}",
+        }
     rules = derive_tomato_risk(input_data)
     result = dict(rules)
     source = "deterministic_rules"
