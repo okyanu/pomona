@@ -4,8 +4,9 @@ Firmware for the [watercress pilot](../../docs/WATERCRESS_PILOT.md). One ESP32-S
 per zone writes sensor readings to a CSV file on a microSD card. Import the file
 into Pomona Core afterwards with `scripts/import_sd_csv.py`.
 
-**Status: written but not compiled or bench-tested.** Treat the first 24–48 h
-dry run as the real test. The firmware drives no pumps, relays or dosing. Run
+**Status: compiles cleanly (PlatformIO 6.2, espressif32, 2026-09-27) for the hydro
+node, the soil node and with Wi-Fi clock sync enabled: about 6 % RAM and 11 % flash. Not yet
+bench-tested on hardware.** Treat the first 24–48 h dry run as the real test. The firmware drives no pumps, relays or dosing. Run
 the air pump from its own plug.
 
 ## Sensors
