@@ -23,6 +23,7 @@ cp wiki/Architecture.md    pomona.wiki/Architecture.md
 cp wiki/Model-Status.md    pomona.wiki/Model-Status.md
 cp wiki/Roadmap.md         pomona.wiki/Roadmap.md
 cp wiki/FAQ.md             pomona.wiki/FAQ.md
+cp wiki/DevLog.md          pomona.wiki/DevLog.md
 cd pomona.wiki
 git add . && git commit -m "docs: populate wiki from staged pages" && git push
 ```
