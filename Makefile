@@ -67,6 +67,13 @@ test-local:
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
 
+.PHONY: test-checker
+# Sensor Data Checker Space: JS rules must match the Python rules (needs python3.11 + node).
+test-checker:
+	python3.11 spaces/sensor-data-checker/tests/make_parity_cases.py
+	node spaces/sensor-data-checker/tests/parity.test.mjs
+	node spaces/sensor-data-checker/tests/checker.test.mjs
+
 .PHONY: demo-local
 .PHONY: fault-replay
 fault-replay:

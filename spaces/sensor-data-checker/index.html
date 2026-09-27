@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomona Sensor Data Checker</title>
+<meta name="description" content="Check greenhouse and hydroponic sensor logs for missing, impossible, broken, stuck and badly timed readings. Runs in your browser.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>🌱 Pomona Sensor Data Checker</h1>
+  <p class="subtitle">Upload a sensor log from a greenhouse, grow tent or hydroponic system and see which readings you shouldn't trust: missing, impossible, broken, stuck, drifting or badly timed.</p>
+  <span class="privacy">🔒 Runs entirely in your browser. Your file is never uploaded.</span>
+
+  <section class="card" aria-labelledby="input-h">
+    <h2 id="input-h">1. Your data</h2>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-csv" aria-selected="true" aria-controls="panel-csv">CSV log file</button>
+      <button role="tab" id="tab-json" aria-selected="false" aria-controls="panel-json">One packet (JSON)</button>
+    </div>
+
+    <div id="panel-csv" role="tabpanel" aria-labelledby="tab-csv">
+      <div class="drop" id="drop">
+        <p><strong>Drop a .csv file here</strong> or <label for="file" style="display:inline;color:var(--link);cursor:pointer;text-decoration:underline">choose one</label>.</p>
+        <input type="file" id="file" accept=".csv,.txt,.tsv,text/csv" hidden>
+        <p class="muted">Or try an example:
+          <button class="link" data-sample="pomona_sd_log_example.csv">Pomona SD logger (2 devices)</button> ·
+          <button class="link" data-sample="wide_log_example.csv">spreadsheet-style log</button></p>
+      </div>
+      <details>
+        <summary>…or paste CSV text</summary>
+        <label for="csv-text" style="margin-top:8px">CSV text</label>
+        <textarea id="csv-text" placeholder="time,temperature,humidity,pH,EC&#10;2026-10-06T08:00:00+04:00,22.1,68,6.2,1.4"></textarea>
+        <button id="use-text" style="margin-top:8px">Use this text</button>
+      </details>
+      <p class="muted" id="file-info"></p>
+
+      <details id="formats">
+        <summary>Which CSV layouts work?</summary>
+        <p class="muted"><strong>One row per reading time</strong>, with columns like <code>time</code>, <code>temperature</code>, <code>humidity</code>, <code>pH</code>, <code>EC</code>, <code>soil_moisture</code>, <code>water_temp</code> (common names and units in brackets are recognised). Optional <code>device_id</code>/<code>zone_id</code> columns split the file into devices.</p>
+        <p class="muted"><strong>One row per measurement</strong> (Pomona's SD logger and many databases): columns <code>timestamp_utc</code> (or <code>timestamp</code>), <code>measurement</code>, <code>value</code>, and optionally <code>device_id</code>, <code>zone_id</code>, <code>boot_id</code>.</p>
+        <p class="muted">Timestamps need a timezone (<code>…Z</code> or <code>…+04:00</code>); without one a reading can't be placed in time and is flagged. EC is expected in <strong>mS/cm</strong>; values in µS/cm will show as impossible.</p>
+      </details>
+
+      <div class="grid">
+        <div><label for="crop">Crop</label><input type="text" id="crop" value="greenhouse crop"></div>
+        <div><label for="system">System type</label>
+          <select id="system">
+            <option value="hydroponic">Hydroponic</option>
+            <option value="greenhouse_substrate">Greenhouse, substrate</option>
+            <option value="soil_pot">Soil / pots</option>
+            <option value="controlled_greenhouse">Controlled greenhouse</option>
+          </select></div>
+        <div><label for="now">Check time (UTC, for "is the latest reading stale?")</label>
+          <div class="row"><input type="text" id="now" style="flex:1"><button id="set-now" title="Use the current time">Now</button></div></div>
+      </div>
+      <div id="expected-box" hidden>
+        <label>Readings each device should report</label>
+        <div class="row">
+          <label style="display:inline-flex;gap:6px;color:var(--text);margin:0"><input type="radio" name="expmode" value="auto" checked> Whatever each device reports in this file (recommended)</label>
+          <label style="display:inline-flex;gap:6px;color:var(--text);margin:0"><input type="radio" name="expmode" value="manual"> Same list for every device:</label>
+        </div>
+        <div class="fields" id="fields"></div>
+      </div>
+      <p style="margin-top:14px"><button class="primary" id="run" disabled>Check readings</button> <span class="error" id="csv-error" role="alert"></span></p>
+    </div>
+
+    <div id="panel-json" role="tabpanel" aria-labelledby="tab-json" hidden>
+      <label for="json-text">Packet: <code>farm_context</code>, <code>sensor</code>, <code>expected_fields</code>, optional <code>current_time</code> and <code>history</code> (earlier packets, oldest first)</label>
+      <textarea id="json-text" style="min-height:220px"></textarea>
+      <p><button class="primary" id="run-json">Check packet</button> <span class="error" id="json-error" role="alert"></span></p>
+      <div id="json-result"></div>
+    </div>
+  </section>
+
+  <section class="card" id="summary-card" hidden aria-labelledby="summary-h">
+    <h2 id="summary-h">2. Summary</h2>
+    <div class="tiles" id="tiles"></div>
+    <h2 style="margin-top:18px">What was found <span class="muted" style="font-weight:400">(click a label to filter the table)</span></h2>
+    <ul class="labels-list" id="labels"></ul>
+    <div id="issues"></div>
+  </section>
+
+  <section class="card" id="table-card" hidden aria-labelledby="table-h">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="table-h" style="margin:0">3. Readings</h2>
+      <div class="row">
+        <label style="display:inline-flex;gap:6px;color:var(--text);margin:0"><input type="checkbox" id="show-all"> Show clean readings too</label>
+        <button id="download">Download results (CSV)</button>
+      </div>
+    </div>
+    <p class="muted" id="table-note"></p>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">Time</th><th scope="col">Device · zone</th><th scope="col">Result</th><th scope="col">What to check</th><th scope="col">CSV row</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card" aria-labelledby="how-h">
+    <h2 id="how-h">How it works</h2>
+    <p class="muted">Every reading is checked with the exact rules <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">Pomona</a> uses before any model or person acts on sensor data (<a href="https://github.com/okyanu/pomona/blob/main/services/model-router/app/sensor_quality.py" target="_blank" rel="noopener">source</a>). This page runs a JavaScript copy that matches the Python rules on 7,714 test cases, including timestamp parsing quirks. Each reading is also compared with the 11 readings before it from the same device, to spot stuck, flat or drifting sensors.</p>
+    <p class="muted">Only the <em>latest</em> reading of each device is judged "stale" against the check time; older rows in a log are judged at their own time. Rules check that data is <em>trustworthy</em>, not whether conditions are good for your plants.</p>
+    <p class="muted">Why rules and not an AI model? We measured it: fine-tuned small models scored 0.34–0.68 on this job; the rules score 1.00. See the <a href="https://huggingface.co/datasets/Okyanus/agri-telemetry-sanity-bench" target="_blank" rel="noopener">Agri Telemetry Sanity Bench</a>.</p>
+  </section>
+
+  <footer>Apache-2.0 · <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">GitHub</a> · <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9" target="_blank" rel="noopener">Pomona on Hugging Face</a> · Advisory only: this tool never controls equipment.</footer>
+</main>
+<script src="rules.js"></script>
+<script src="checker.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

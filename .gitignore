@@ -167,3 +167,6 @@ docs/UNPUBLISHED_MODEL_RELEASES.md
 # Per-node firmware config (may hold Wi-Fi credentials)
 devices/*/include/config.h
 devices/*/.pio/
+
+# Sensor checker parity cases (regenerate with tests/make_parity_cases.py)
+spaces/sensor-data-checker/tests/parity_cases.json
