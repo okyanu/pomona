@@ -5,10 +5,10 @@ author: Okyanus
 license: apache-2.0
 
 type: sensor_quality_reasoner
-status: needs_targeted_improvement
+status: paused_rules_authoritative
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/SENSOR_QUALITY_REASONER.md
 
 huggingface:
@@ -94,7 +94,50 @@ evaluation:
     human_review_match_rate: 0.933
   notes: Independent holdout failed the publish gate. Prioritize normal and unit-mismatch separation, impossible-pH cases, and generalized missing-field examples.
 
+decision:
+  date: "2026-09-27"
+  status: paused_rules_authoritative
+  summary: >
+    Model retraining paused. The deterministic contract in
+    services/model-router/app/sensor_quality.py stays the only authority.
+    Two controlled retrains (v0.1.4, v0.1.5 below) showed that better data
+    fixes pattern problems (missing/invalid values, normal packets) but the
+    0.8B model cannot reliably do the exact arithmetic this task needs:
+    timestamp age/future checks and range edges such as pH 2.999 vs 3.0.
+    Those checks are exactly what the rules already compute correctly.
+  reopen_when: >
+    A use appears that rules cannot cover (e.g. free-text maintenance notes or
+    explanation quality), or a prompt design that supplies rule-computed
+    features and still adds measurable value over the rules.
+
 pilots:
+  - id: v0.1.4-v0.1.5-controlled-retrains
+    status: failed_publish_gate
+    base_model: Qwen/Qwen3.5-0.8B
+    base_revision: 2fc06364715b967f1860aea9cf38778875588b17
+    recipe: 4-bit QLoRA r=16, 1 epoch, lr 2e-4, seed 42, Colab T4; identical for both runs
+    prompts: raw-JSON rendered by scripts/datasets/sensor_quality_contract.py
+    holdout: 123 explicit contract cases (scripts/datasets/prepare_sensor_quality_review_bundle.py), never trained on
+    runs:
+      v0.1.4:
+        data: regenerated v0.1 generator (omitted keys + graded pH), 1683 train rows
+        holdout: {label_f1_avg: 0.405, missing_f1_avg: 0.553, suspect_f1_avg: 0.549, human_review_match_rate: 0.837, valid_json_rate: 1.0}
+        failure_cause: >
+          Training-data shortcuts, not recipe: every train packet carried a
+          moisture key (model learned "no moisture key -> missing_moisture"),
+          all timestamps ended in Z, and zero non-numeric values, future
+          timestamps, exact range edges or multi-problem packets.
+      v0.1.5:
+        data: scripts/datasets/build_pomona_sensor_quality_v0_1_5_dataset.py, targets from the deterministic contract, 2082 train rows
+        holdout: {label_f1_avg: 0.684, missing_f1_avg: 0.992, suspect_f1_avg: 0.657, human_review_match_rate: 0.756, valid_json_rate: 1.0}
+        same_distribution_test: {cases: 259, label_f1_avg: 0.70, classification_exact_rate: 0.653}
+        fixed: normal packets (exact 0.00 -> 0.88), invalid values (0.00 -> 1.00), missing keys
+        still_failing: >
+          stale and future timestamps 0% exact even on its own test split
+          (defaults to "fine"); pH 2.999 missed 4/4; near-edge normal values
+          0.41 exact. All are exact arithmetic/threshold comparisons.
+    verdict: FAILED_PUBLISH_GATE_BOTH; paused, see decision
+    artifacts: private/pomona_trained_data/pomona-sensor-quality-v0.1.{4,5}-candidate-not-approved-lora{.zip,-report.json} (local only)
   - id: qwen3.5-0.8b-base-rebase
     status: timefix_retrain_near_miss_phrange_fix_applied_awaiting_second_retrain
     base_model: Qwen/Qwen3.5-0.8B

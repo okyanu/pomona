@@ -139,6 +139,8 @@ Published Hugging Face assets (checked 2026-09-27):
 
 ```text
 model:   Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
+model:   Okyanus/pomona-tomato-risk-reasoner-v0.1.7-GGUF   (research preview, 2026-09-27)
+model:   Okyanus/pomona-tomato-risk-reasoner-v0.1.7-MLX    (research preview, 2026-09-27)
 model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
 model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-GGUF
 model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-MLX
@@ -151,7 +153,10 @@ dataset: Okyanus/greenhouse-sensor-data
 space:   Okyanus/pomona-greenhouse-demo
 ```
 
-Sensor-quality and safety-triage adapters remain unpublished.
+Sensor-quality and safety-triage adapters remain unpublished. Sensor-quality
+training is paused (2026-09-27): two controlled retrains failed the holdout gate
+on exact time/threshold checks that the deterministic rules already perform; see
+`models/registry/sensor-quality-reasoner-v0.1.yaml`.
 
 Endpoint status:
 

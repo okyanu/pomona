@@ -107,7 +107,14 @@ sensor quality reasoner
 
 ## Current Status
 
-Status: scaffold, local dataset builders, and Colab training artifacts.
+Status (2026-09-27): **model training paused; the deterministic rules are the
+authority.** Two controlled retrains on `Qwen/Qwen3.5-0.8B` failed the publish
+gate on a 123-case holdout (best label F1 0.684). Better data fixed missing,
+invalid and normal packets, but the model could not reliably do exact
+timestamp arithmetic (stale/future) or range-edge comparisons, which
+`services/model-router/app/sensor_quality.py` already computes exactly. Details
+and reopen criteria: `models/registry/sensor-quality-reasoner-v0.1.yaml`
+(`decision` and the v0.1.4/v0.1.5 pilot). The history below is kept for context.
 
 Generated train/validation/test files live under `datasets/processed/` and are ignored by Git.
 

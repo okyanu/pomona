@@ -22,9 +22,9 @@ authorization. Weights stay on Hugging Face; platform code stays on GitHub.
 | Artifact | Status | Next HF action |
 |----------|--------|----------------|
 | Water irrigation v0.1.8 | Published RC | None unless a regression fix ships |
-| Tomato risk v0.1.7 | Published | Quality hardening first; no blind re-upload |
+| Tomato risk v0.1.7 | Published LoRA + GGUF/MLX (research preview) | No further retrains planned: labels are threshold rules; rules stay authoritative |
 | Nutrient pH-EC | Published + GGUF/MLX | Runtime eval only unless labels change |
-| Sensor quality | Local only | Publish only after notebook fix + holdout pass + owner approve |
+| Sensor quality | Local only; training paused 2026-09-27 | Rules authoritative; see registry `decision` block |
 | Safety triage | Local only | Same bar as SQI |
 | Greenhouse demo Space | Live | Optional: surface advice-card copy later |
 
