@@ -7,7 +7,7 @@ Model **registry** for the Pomona platform — metadata only.
 | `registry/*.yaml` | Model definitions (HF repo IDs, safety, inputs) |
 | `registry/examples/` | Sample advisor API payloads |
 
-**Training code** is in a separate repo: [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm).
+**Training code** is in a separate repo: `pomona-agronomist-llm` (not yet published).
 
 **Weights** are on Hugging Face — never in Git.
 

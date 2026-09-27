@@ -16,7 +16,7 @@ so it is reviewed and versioned like any other change.
 Once the wiki repo exists, from a machine with GitHub push access:
 
 ```bash
-git clone https://github.com/Okyanus/pomona.wiki.git
+git clone https://github.com/okyanu/pomona.wiki.git
 cp wiki/Home.md            pomona.wiki/Home.md
 cp wiki/Getting-Started.md pomona.wiki/Getting-Started.md
 cp wiki/Architecture.md    pomona.wiki/Architecture.md

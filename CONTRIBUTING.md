@@ -8,7 +8,7 @@ Thank you for helping make Pomona open source. **Contributions are welcome** —
 |------|--------|
 | **License** | [Apache-2.0](../LICENSE) — use, modify, and distribute with attribution |
 | **Platform repo** | This repo (`pomona`) — Docker stack, services, docs |
-| **ML repo** | [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) — training pipeline |
+| **ML repo** | `pomona-agronomist-llm` (not yet published) — training pipeline |
 | **Model weights** | [Hugging Face](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
 
 You do not need permission to fork, experiment, or open a PR.

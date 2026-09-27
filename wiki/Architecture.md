@@ -65,4 +65,4 @@ checker before it can ever reach an actuator. See [Model Status](Model-Status).
 
 ## More detail
 
-Full architecture notes: [docs/architecture.md](https://github.com/Okyanus/pomona/blob/main/docs/architecture.md) · [docs/PROJECT_STATUS.md](https://github.com/Okyanus/pomona/blob/main/docs/PROJECT_STATUS.md)
+Full architecture notes: [docs/architecture.md](https://github.com/okyanu/pomona/blob/main/docs/architecture.md) · [docs/PROJECT_STATUS.md](https://github.com/okyanu/pomona/blob/main/docs/PROJECT_STATUS.md)

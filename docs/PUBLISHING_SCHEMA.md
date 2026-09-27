@@ -31,7 +31,7 @@ lifecycle: release_candidate
 publication: prepared_not_uploaded
 license: apache-2.0
 owner: Okyanus
-github_repo: Okyanus/pomona
+github_repo: okyanu/pomona
 github_docs: docs/<task>.md
 ```
 

@@ -4,8 +4,8 @@ Three publish targets — **three different places**, not one Git repo for every
 
 | Target | What | Script |
 |--------|------|--------|
-| **GitHub `Okyanus/pomona`** | Platform code, Docker, docs, dataset pipeline | `./scripts/publish/github.sh` |
-| **GitHub `Okyanus/pomona-agronomist-llm`** | Agronomist training pipeline (split repo) | separate `git push` in that repo |
+| **GitHub `okyanu/pomona`** | Platform code, Docker, docs, dataset pipeline | `./scripts/publish/github.sh` |
+| **GitHub `pomona-agronomist-llm`** (not yet published) | Agronomist training pipeline (split repo) | separate `git push` in that repo |
 | **Hugging Face — models** | LoRA adapter weights + model card | see below |
 | **Hugging Face — datasets** | Clean JSONL + schema + dataset card | `./scripts/huggingface/publish_dataset_to_hf.sh` |
 
@@ -21,7 +21,7 @@ number. See [VERSIONING.md](./VERSIONING.md).
 
 | Asset | GitHub (source of truth) | Hugging Face (release) | Status |
 |-------|--------------------------|------------------------|--------|
-| Platform stack | [Okyanus/pomona](https://github.com/Okyanus/pomona) | — | Active |
+| Platform stack | [okyanu/pomona](https://github.com/okyanu/pomona) | — | Active |
 | Tomato risk reasoner v0.1.7 LoRA | [models/registry/tomato-risk-reasoner-v0.1.7.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml) + [docs/TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | **Published — do not republish unless you ship a new adapter version** |
 | Water/irrigation reasoner v0.1.8 LoRA | [models/registry/water-irrigation-risk-reasoner-v0.1.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/water-irrigation-risk-reasoner-v0.1.yaml) + [docs/WATER_IRRIGATION_RISK_REASONER.md](./WATER_IRRIGATION_RISK_REASONER.md) | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | **Published release candidate — advisory only** |
 | Actuator command gate v0.1 LoRA | [models/registry/actuator-command-gate-reasoner-v0.1.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/actuator-command-gate-reasoner-v0.1.yaml) + [docs/ACTUATOR_COMMAND_GATE_REASONER.md](./ACTUATOR_COMMAND_GATE_REASONER.md) | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | **Published research preview — below standalone gate; deterministic checker required** |
@@ -88,7 +88,7 @@ Copied by `publish_dataset_to_hf.sh`:
 ## Architecture
 
 ```text
-GitHub:  Okyanus/pomona
+GitHub:  okyanu/pomona
            ├── platform code, schemas, docs
            ├── datasets/pomona-tomato-risk-v0.1/   (source pipeline)
            └── models/registry/*.yaml              (metadata only)

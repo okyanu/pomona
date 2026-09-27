@@ -97,7 +97,8 @@ Pomona references it via:
 Full GPU inference lives in the sibling ML repo:
 
 ```bash
-git clone https://github.com/Okyanus/pomona-agronomist-llm.git
+# Training repo is not published yet; this applies once it exists.
+git clone https://github.com/okyanu/pomona-agronomist-llm.git
 cd pomona-agronomist-llm
 HF_TOKEN=hf_... python deploy/app.py
 ```

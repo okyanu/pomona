@@ -31,4 +31,4 @@ Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic saf
 ## Optional
 - [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md): detailed living status log
 - [docs/VERSIONING.md](docs/VERSIONING.md): platform vs. model versioning policy
-- [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm): sibling repo for advisor LLM training
+- `pomona-agronomist-llm` (not yet published): sibling repo for advisor LLM training

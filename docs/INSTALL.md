@@ -22,7 +22,7 @@ Pomona runs the **same way on every OS** if you use Docker. Pip is optional for 
 Works on **macOS, Linux, Windows** (Docker Desktop + WSL2 on Windows).
 
 ```bash
-git clone https://github.com/Okyanus/pomona.git
+git clone https://github.com/okyanu/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/setup.sh          # optional: installs pip deps + checks tools

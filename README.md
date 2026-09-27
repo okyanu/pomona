@@ -27,7 +27,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 ## 🚀 Quickstart (any OS — Docker)
 
 ```bash
-git clone https://github.com/Okyanus/pomona.git
+git clone https://github.com/okyanu/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/setup.sh          # optional first-time check
@@ -108,10 +108,10 @@ Fork → branch → `make test` → open PR.
 | Repo | Purpose |
 |------|---------|
 | **[Pomona website](https://okyanu.github.io/pomona/)** | Main documentation, architecture, roadmap, and guides |
-| **[pomona](https://github.com/Okyanus/pomona)** (this) | Platform — run with Docker |
+| **[pomona](https://github.com/okyanu/pomona)** (this) | Platform — run with Docker |
 | **[Automation API](https://automation-engine-fawn.vercel.app)** | Live suggestion-only automation service and API documentation |
 | **[Okyanus on Hugging Face](https://huggingface.co/Okyanus)** | Models, datasets, collection, and browser demo |
-| [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) | Agronomist ML training |
+| `pomona-agronomist-llm` (not yet published) | Agronomist ML training |
 | [HF Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9) | All published models + dataset in one place |
 | [HF agronomist](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Advisor LoRA weights |
 | [HF tomato reasoner](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato risk-label LoRA (v0.1.7) |

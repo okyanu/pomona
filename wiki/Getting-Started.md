@@ -2,12 +2,12 @@
 
 **Early MVP** — simulated sensors, REST API, demo advisor. No dashboard yet.
 
-Full install guide (Docker + pip, all OS): [docs/INSTALL.md](https://github.com/Okyanus/pomona/blob/main/docs/INSTALL.md)
+Full install guide (Docker + pip, all OS): [docs/INSTALL.md](https://github.com/okyanu/pomona/blob/main/docs/INSTALL.md)
 
 ## Fastest start (Docker — any OS)
 
 ```bash
-git clone https://github.com/Okyanus/pomona.git
+git clone https://github.com/okyanu/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/up.sh

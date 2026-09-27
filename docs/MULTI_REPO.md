@@ -9,8 +9,8 @@ See **[REPOS.md](./REPOS.md)** for the full catalog of current and future repos.
 ## Today: 2 GitHub repos + 1 Hugging Face
 
 ```text
-GitHub   Okyanus/pomona                    ← platform (this repo)
-GitHub   Okyanus/pomona-agronomist-llm     ← ML training (sibling folder)
+GitHub   okyanu/pomona                     ← platform (this repo)
+GitHub   pomona-agronomist-llm             ← ML training (not yet published)
 HF       Okyanus/ai-pomona-agronomist-gemma4
 ```
 

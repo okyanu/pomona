@@ -6,7 +6,7 @@ Where each piece of the ecosystem lives. **Split-first layout** (recommended).
 
 ## Required repos
 
-### 1. `Okyanus/pomona` — Platform
+### 1. `okyanu/pomona` — Platform
 
 **This folder.** Everything needed to run the edge AI stack locally.
 
@@ -26,7 +26,7 @@ docker-compose.yml
 
 ---
 
-### 2. `Okyanus/pomona-agronomist-llm` — ML training
+### 2. `pomona-agronomist-llm` — ML training (not yet published)
 
 Extracted from `models/agronomist-llm/` via `./scripts/split/extract-ml-repo.sh`.
 
@@ -66,7 +66,7 @@ Platform GitHub repo keeps code, schemas, and registry YAML — not `.safetensor
 | `pomona-docs` | Only if docs outgrow platform repo | Public site, tutorials |
 | `pomona-devices` | Only if firmware explodes (many boards) | ESP32, RP2040 firmware monorepo |
 
-**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in [Okyanus/pomona](https://github.com/Okyanus/pomona).
+**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in [okyanu/pomona](https://github.com/okyanu/pomona).
 
 ---
 

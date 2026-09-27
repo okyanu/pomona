@@ -17,7 +17,7 @@ repo. Trained model weights and datasets live on Hugging Face — see
 
 **Which repo do I train models in?**
 Not this one. ML training lives in the sibling repo
-[pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm).
+`pomona-agronomist-llm` (not yet published).
 This repo (`pomona`) is the platform: Docker, MQTT, core API, model-router,
 simulators.
 
@@ -28,12 +28,12 @@ See [Getting Started](Getting-Started) — Docker quickstart takes under 5 minut
 Platform, models, and datasets each version independently
 (semantic versioning + lifecycle labels like `experimental`,
 `research_preview`, `release_candidate`). Full rules:
-[docs/VERSIONING.md](https://github.com/Okyanus/pomona/blob/main/docs/VERSIONING.md).
+[docs/VERSIONING.md](https://github.com/okyanu/pomona/blob/main/docs/VERSIONING.md).
 
 **How can I contribute?**
 Fork → branch → `make test` → open a PR. Good first contributions: dashboard
 (Phase 2), tests, docs, simulators, crop templates. See
-[CONTRIBUTING.md](https://github.com/Okyanus/pomona/blob/main/CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md).
 
 **Is it open source?**
 Yes — Apache-2.0, contributions welcome.

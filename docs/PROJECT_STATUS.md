@@ -20,7 +20,13 @@ offline twin-versus-persistence replay, persisted advice-card evidence and an
 offline exact-source retrieval prototype. Unit suite: 198 passed, 1 skipped;
 local integration passed. No field calibration, full RAG, model release or phase
 completion claimed. See [twin](./DIGITAL_TWIN.md), [cards](./ADVICE_CARDS.md) and
-[retrieval experiment](./LOCAL_ADVICE_RETRIEVAL.md). Current changes uncommitted.
+[retrieval experiment](./LOCAL_ADVICE_RETRIEVAL.md).
+
+Local checkpoint (2026-09-27): first real-hardware step prepared: a two-zone
+[watercress pilot](./WATERCRESS_PILOT.md) with SD-card logger firmware (not yet
+bench-tested), a CSV importer into Core observations, and plant-log templates.
+Monitoring only; no watercress reasoner or actuator path. Unit suite: 203
+passed, 1 skipped.
 
 Local checkpoint (2026-09-16): validation, MQTT reliability, suggestion expiry
 and evaluation hygiene are implemented and unit-tested. See
@@ -129,15 +135,23 @@ checks. This checkpoint does not complete a phase or approve a model release.
 | Actuator command gate `v0.1.1-hardcases` | Local regression | Do not use |
 | Actuator command gate `v0.1.2-correction` | Independent-eval regression | Do not use |
 
-Published Hugging Face assets right now:
+Published Hugging Face assets (checked 2026-09-27):
 
 ```text
 model:   Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
 model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora
+model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-GGUF
+model:   Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-MLX
+model:   Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-lora
+model:   Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-GGUF
+model:   Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-MLX
 model:   Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora
 model:   Okyanus/ai-pomona-agronomist-gemma4
 dataset: Okyanus/greenhouse-sensor-data
+space:   Okyanus/pomona-greenhouse-demo
 ```
+
+Sensor-quality and safety-triage adapters remain unpublished.
 
 Endpoint status:
 

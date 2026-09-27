@@ -40,7 +40,7 @@ every time). Closing the second list is how the first list stays true.
 - `make local-check` verifies the platform without Docker — lowers the bar
   for anyone else to confirm a change works.
 - First tagged GitHub release
-  ([`v0.1.0-alpha.1`](https://github.com/Okyanus/pomona/releases/tag/v0.1.0-alpha.1)).
+  ([`v0.1.0-alpha.1`](https://github.com/okyanu/pomona/releases/tag/v0.1.0-alpha.1)).
 
 ### Manual toil — real, current, tracked here so it doesn't get lost
 
@@ -95,8 +95,8 @@ would link to the upstream design rather than copy it into this repository.
 
 | What | GitHub | Hugging Face |
 |------|--------|--------------|
-| Platform (this repo) | [Okyanus/pomona](https://github.com/Okyanus/pomona) | — |
-| Agronomist training | [Okyanus/pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) | [ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
+| Platform (this repo) | [okyanu/pomona](https://github.com/okyanu/pomona) | — |
+| Agronomist training | `pomona-agronomist-llm` (not yet published) | [ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
 | Tomato risk reasoner | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml) | [pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) |
 | Water/irrigation reasoner | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/water-irrigation-risk-reasoner-v0.1.yaml) | [pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) |
 | Actuator command gate | [registry YAML](https://github.com/okyanu/pomona/blob/main/models/registry/actuator-command-gate-reasoner-v0.1.yaml) | [pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) — research preview |

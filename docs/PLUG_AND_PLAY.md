@@ -3,7 +3,7 @@
 **Goal:** Clone repo → one command → entire Pomona mechanism running in Docker.
 
 ```bash
-git clone https://github.com/Okyanus/pomona.git
+git clone https://github.com/okyanu/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/up.sh

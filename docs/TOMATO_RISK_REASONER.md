@@ -48,7 +48,7 @@ label F1 on the 15-case golden smoke suite, well below the rules' 1.0 — a
 reason deterministic rules stay authoritative, not a reason to skip trying it.
 
 ```bash
-git clone https://github.com/Okyanus/pomona.git
+git clone https://github.com/okyanu/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/up.sh
@@ -162,7 +162,7 @@ output and automation. No LLM output operates equipment directly.
 
 ## Ecosystem links
 
-- Platform: [github.com/Okyanus/pomona](https://github.com/Okyanus/pomona)
+- Platform: [github.com/okyanu/pomona](https://github.com/okyanu/pomona)
 - Model: [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora)
 - Dataset: [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data)
 - Model catalog: [docs/MODEL_CATALOG.md](MODEL_CATALOG.md)

@@ -15,7 +15,7 @@ Each `*.yaml` file describes a model Pomona can use at runtime. Published weight
 | `nutrient-ph-ec-reasoner-v0.1.yaml` | Local v0.1.1 correction candidate, not published |
 | `water-irrigation-risk-reasoner-v0.1.yaml` | Local scaffold, not trained or published |
 
-Training code lives in a separate GitHub repo: [pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm).
+Training code lives in a separate GitHub repo: `pomona-agronomist-llm` (not yet published).
 
 Future models add a new YAML here when their task, schema, eval, and safety boundaries are clear.
 

@@ -2,7 +2,7 @@
 
 **Open edge AI platform for agriculture** — MQTT ingest, reasoning, deterministic safety checks, and dashboards for the greenhouse. Tomato greenhouse MVP first; more crops later.
 
-Apache-2.0 licensed. [Source →](https://github.com/Okyanus/pomona)
+Apache-2.0 licensed. [Source →](https://github.com/okyanu/pomona)
 
 ## Start here
 
@@ -29,11 +29,11 @@ safety-checker is the final authority on any automation action.
 
 | Type | Where |
 |---|---|
-| Platform (this repo) | [github.com/Okyanus/pomona](https://github.com/Okyanus/pomona) |
-| ML training | [github.com/Okyanus/pomona-agronomist-llm](https://github.com/Okyanus/pomona-agronomist-llm) |
+| Platform (this repo) | [github.com/okyanu/pomona](https://github.com/okyanu/pomona) |
+| ML training | `pomona-agronomist-llm` (not yet published) |
 | Model weights | [huggingface.co/Okyanus](https://huggingface.co/Okyanus) |
 | Datasets | [huggingface.co/datasets/Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) |
 
 ## Contributing
 
-Fork → branch → `make test` → open a PR. See [CONTRIBUTING.md](https://github.com/Okyanus/pomona/blob/main/CONTRIBUTING.md) in the main repo. Good first contributions: dashboard (Phase 2), tests, docs, simulators, crop templates.
+Fork → branch → `make test` → open a PR. See [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md) in the main repo. Good first contributions: dashboard (Phase 2), tests, docs, simulators, crop templates.

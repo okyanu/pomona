@@ -3,7 +3,7 @@
 **Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **6 active/partial**
 
 Phase status tracks product completion; it is intentionally separate from
-platform/model version numbers — see [Versioning](https://github.com/Okyanus/pomona/blob/main/docs/VERSIONING.md).
+platform/model version numbers — see [Versioning](https://github.com/okyanu/pomona/blob/main/docs/VERSIONING.md).
 
 | # | Focus | Status |
 |---|--------|--------|
@@ -35,4 +35,4 @@ POST /v1/actuator-command-gate/check
 
 ## Details
 
-Full phase tracker with update rules: [docs/PHASES.md](https://github.com/Okyanus/pomona/blob/main/docs/PHASES.md) · [docs/PROJECT_STATUS.md](https://github.com/Okyanus/pomona/blob/main/docs/PROJECT_STATUS.md)
+Full phase tracker with update rules: [docs/PHASES.md](https://github.com/okyanu/pomona/blob/main/docs/PHASES.md) · [docs/PROJECT_STATUS.md](https://github.com/okyanu/pomona/blob/main/docs/PROJECT_STATUS.md)

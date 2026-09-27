@@ -51,8 +51,8 @@ llm = [
 all = ["pomona[core,model-router,simulator,dev]"]
 
 [project.urls]
-Homepage = "https://github.com/Okyanus/pomona"
-Documentation = "https://github.com/Okyanus/pomona/tree/main/docs"
+Homepage = "https://github.com/okyanu/pomona"
+Documentation = "https://github.com/okyanu/pomona/tree/main/docs"
 HuggingFace = "https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4"
 
 [tool.setuptools.packages.find]

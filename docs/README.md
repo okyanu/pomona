@@ -15,7 +15,7 @@ Public docs for contributors and users.
 | [PROJECT_STATUS.md](./PROJECT_STATUS.md) | What's done / current phase |
 | [NEXT_MODELS_AND_HF.md](./NEXT_MODELS_AND_HF.md) | Sequenced next steps for models / Hugging Face |
 | [REPOS.md](./REPOS.md) | Platform vs ML vs Hugging Face |
-| [GitHub Wiki](https://github.com/Okyanus/pomona/wiki) | Reader-friendly summaries linking back here |
+| [GitHub Wiki](https://github.com/okyanu/pomona/wiki) | Reader-friendly summaries linking back here |
 
 ## Architecture & roadmap
 

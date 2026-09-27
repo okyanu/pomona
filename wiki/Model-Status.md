@@ -2,7 +2,7 @@
 
 Pomona keeps platform code, routing, deterministic safety logic, and
 metadata in GitHub. Model weights and published datasets live on
-Hugging Face. See [Versioning](https://github.com/Okyanus/pomona/blob/main/docs/VERSIONING.md) for how version numbers and lifecycle labels work.
+Hugging Face. See [Versioning](https://github.com/okyanu/pomona/blob/main/docs/VERSIONING.md) for how version numbers and lifecycle labels work.
 
 | Model | Current status | Use now? |
 |-------|----------------|----------|
