@@ -67,6 +67,11 @@ test-local:
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
 
+.PHONY: print-pack
+# 3D-printable station and sensor mounts: render STL/3MF and run geometry checks (needs OpenSCAD).
+print-pack:
+	hardware/a1mini-sensor-station/build.sh
+
 .PHONY: test-checker
 # Sensor Data Checker Space: JS rules must match the Python rules (needs python3.11 + node).
 test-checker:

@@ -28,6 +28,8 @@ Record which one you used as `system_type`.
   writes CSV to SD. It has not been bench-tested yet.
 - Importer: `scripts/import_sd_csv.py` sends SD and manual CSV rows to Core. It
   reports rejected rows, and re-importing the same file is safe.
+- 3D-printed mounts: [`hardware/a1mini-sensor-station`](https://github.com/okyanu/pomona/tree/main/hardware/a1mini-sensor-station)
+  holds the probes on a rail. Its README notes that the probes still need to reach the water.
 - Templates: `examples/pilot/manual_readings.csv` (meter readings) and
   `examples/pilot/watercress_plant_log.csv` (plant observations).
 
