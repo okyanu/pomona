@@ -33,5 +33,9 @@
 // pH calibration: pH = PH_SLOPE * volts + PH_OFFSET, from pH 7 and pH 4
 // buffers. PH_SLOPE 0 = uncalibrated, so only raw volts are logged.
 #define PH_ADS_CHANNEL 0
+// Each logged pH is the median of PH_SAMPLES reads, PH_SAMPLE_GAP_MS apart
+// (defaults 15 and 20 ms, about 0.4 s). Use an odd count.
+// #define PH_SAMPLES 15
+// #define PH_SAMPLE_GAP_MS 20
 #define PH_SLOPE 0.0f
 #define PH_OFFSET 0.0f

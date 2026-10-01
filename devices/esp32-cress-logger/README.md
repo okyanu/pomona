@@ -17,7 +17,7 @@ the air pump from its own plug.
 | hydro | DS18B20 in reservoir | OneWire + 4.7 kΩ pull-up | `water_temperature_c` |
 | soil | DS18B20 in substrate | OneWire + 4.7 kΩ pull-up | `substrate_temperature_c` (SD only, not imported yet) |
 | soil | capacitive moisture probe | ADC | `soil_moisture_pct` (+ raw ADC) |
-| hydro | analog pH probe via ADS1115 (0x48) ch0 | I2C | `ph` (+ raw volts) |
+| hydro | analog pH probe via ADS1115 (0x48) ch0 | I2C | `ph` (+ raw volts; median of 15 reads) |
 
 The shopping list has no EC probe. Measure EC with a handheld meter and enter
 it in the manual readings CSV (see the pilot doc).

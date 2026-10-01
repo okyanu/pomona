@@ -2,7 +2,7 @@
 //
 // Writes one CSV row per measurement every LOG_INTERVAL_MS. The CSV matches
 // scripts/import_sd_csv.py. There is no actuator output of any kind.
-// Status: written for the pilot, NOT compiled or bench-verified yet.
+// Status: compiles (PlatformIO, hydro and soil variants); NOT bench-verified yet.
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -17,7 +17,17 @@
 
 #include "config.h"
 
-static const char *FIRMWARE = "cress-logger-0.1.0";
+// pH is logged as the median of several ADS1115 reads per interval. Analog pH
+// boards (PH-4502C style) swing ~1.6 pH within 5 minutes on single reads in
+// real logs; the median rejects pump/ground-loop spikes. config.h may override.
+#ifndef PH_SAMPLES
+#define PH_SAMPLES 15
+#endif
+#ifndef PH_SAMPLE_GAP_MS
+#define PH_SAMPLE_GAP_MS 20
+#endif
+
+static const char *FIRMWARE = "cress-logger-0.1.1";
 static const char *CSV_HEADER =
     "timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,"
     "measurement,unit,raw,value,quality,firmware";
@@ -133,7 +143,15 @@ void logPh() {
     writeRow("ph-probe-1", "ph", "pH", "", NAN, "disconnected");
     return;
   }
-  float volts = ads.computeVolts(ads.readADC_SingleEnded(PH_ADS_CHANNEL));
+  int16_t reads[PH_SAMPLES];
+  for (int i = 0; i < PH_SAMPLES; i++) {
+    int16_t value = ads.readADC_SingleEnded(PH_ADS_CHANNEL);
+    int j = i;  // insertion sort as we go
+    for (; j > 0 && reads[j - 1] > value; j--) reads[j] = reads[j - 1];
+    reads[j] = value;
+    if (i + 1 < PH_SAMPLES) delay(PH_SAMPLE_GAP_MS);
+  }
+  float volts = ads.computeVolts(reads[PH_SAMPLES / 2]);
   // Two-point calibration: pH = PH_SLOPE * volts + PH_OFFSET. Until the
   // owner records a buffer calibration, log raw volts only.
   if (PH_SLOPE == 0.0f) {
