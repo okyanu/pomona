@@ -29,7 +29,9 @@ Record which one you used as `system_type`.
 - Importer: `scripts/import_sd_csv.py` sends SD and manual CSV rows to Core. It
   reports rejected rows, and re-importing the same file is safe.
 - 3D-printed mounts: [`hardware/a1mini-sensor-station`](https://github.com/okyanu/pomona/tree/main/hardware/a1mini-sensor-station)
-  holds the probes on a rail. Its README notes that the probes still need to reach the water.
+  holds the probes on a rail (soil tray, SHT31). For the hydro zone, print its **probe lid**
+  for a 1–2 L round container: pot seat plus pH, DS18B20, airline and float-switch ports that
+  put the probes in the water. Print the fit ring first; not print-tested yet.
 - Templates: `examples/pilot/manual_readings.csv` (meter readings) and
   `examples/pilot/watercress_plant_log.csv` (plant observations).
 

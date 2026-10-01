@@ -10,8 +10,12 @@ anyone may print, modify, remix and sell them, keeping the licence and attributi
 - **Sensor mounts** (`src/pomona_sensor_mounts.scad`): clips that slide onto those rails and
   hold a pH probe, a DS18B20 temperature probe, an airline hose, a capacitive soil-moisture
   board and an SHT31 air sensor.
+- **Probe lid** (`src/pomona_probe_lid.scad`): a lid for any round container with a 90–165 mm
+  opening. It holds the same seedling pot plus the pH probe, DS18B20, airline and an optional
+  float switch, so the probes hang straight into the solution. Use it for hydro instead of the
+  0.24 L Hydro V2 body.
 
-Every file in `stl/` and `3mf/` is generated from these two sources by `build.sh`.
+Every file in `stl/` and `3mf/` is generated from these sources by `build.sh`.
 
 ## Files
 
@@ -26,6 +30,8 @@ Every file in `stl/` and `3mf/` is generated from these two sources by `build.sh
 | `stl/pomona_v6_3_sht31.stl` | SHT31 post with vented, roofed cage | 1 per zone |
 | `stl/pomona_station_hydro_v2.stl` | Hydroponic station body | 1 |
 | `stl/pomona_station_soil_v1.stl` | Soil catch tray | 1 |
+| `stl/pomona_probe_lid_v1_fit_ring.stl` | Container fit test (rim + skirt only). **Print this before the lid** | 1 |
+| `stl/pomona_probe_lid_v1.stl` | Probe lid for a 110 mm container opening (rebuild for your size) | 1 |
 
 The 50 mm seedling pot itself is not included. Use any pot or net pot with a 50 mm body and a
 52 mm rim.
@@ -38,6 +44,28 @@ The 50 mm seedling pot itself is not included. Use any pot or net pot with a 50 
 - **PETG** for anything that touches nutrient solution or wet soil. PLA softens and degrades
   in warm water. Neither is certified food-safe.
 - Brim recommended for the tall SHT31 post.
+
+## Probe lid
+
+1. Measure the **inside diameter of your container's opening** (deli tub, food box or bucket;
+   90–165 mm fits the A1 mini). Set `CONTAINER_ID` at the top of `src/pomona_probe_lid.scad`
+   and run `./build.sh`. The default is 110 mm, which suits 1–2 L round tubs.
+2. Print `pomona_probe_lid_v1_fit_ring.stl` (a few minutes). The skirt should drop into the
+   opening with a slight drag. Too tight or loose: change `FIT_CLEAR` (default 0.6 mm).
+3. Print the lid **top face down** as exported, supports off, in **opaque PETG**. Light through
+   the lid grows algae in the solution.
+
+| Port | Default | Parameter |
+|---|---|---|
+| Seedling pot | 50 mm pot, 52 mm rim (same as the stations) | `POT_HOLE_D`, `RIM_SEAT_D` |
+| pH probe | 12 mm, 18 mm sleeve with three crush ribs | `PH_PROBE_D` |
+| DS18B20 | 6 mm, 18 mm sleeve with crush ribs | `DS_PROBE_D` |
+| Airline | 6 mm tubing, 18 mm sleeve | `HOSE_OD` |
+| Float switch | 8.4 mm hole for an M8 vertical float switch (`low_level_contact`); 0 = none | `LEVEL_PORT_D` |
+
+Slide each probe through its sleeve until the tip is under the solution; the crush ribs hold it
+at that height. Keep the pH bulb wet and off the container floor. The SHT31 air sensor stays on
+its rail post or anywhere above the canopy; it does not belong over the water.
 
 ## Rail fit
 
@@ -65,8 +93,10 @@ Edit the parameters at the top of `src/pomona_sensor_mounts.scad`, then run `./b
 ./build.sh            # needs OpenSCAD and python3
 ```
 
-`build.sh` renders every STL and the 3MF plate, then runs `tests/check_geometry.py`, which
-fails if any mount:
+`build.sh` renders every STL and the 3MF plate, then runs `tests/check_geometry.py`. It checks
+the probe lid at 110 mm and also renders and checks it at 90 and 150 mm: every port open, the
+plate solid elsewhere (light-tight), nothing outside the skirt below the rim, closed mesh, fits
+the bed, no supports. It fails if any mount:
 
 - reaches into the rail slot, or behind the socket into the vessel wall;
 - blocks its own probe, hose or board path;
@@ -86,12 +116,14 @@ fails if any mount:
 
 ## Known limitations
 
-- **The mounts hold probes beside the station, not in it.** A probe in the pH sleeve is
-  about 14 mm outside the vessel wall, and the pot closes the top. To measure the water, the
-  probe must reach the reservoir. For now, use the mounts with a larger container or bucket,
-  or run the probe over the rim. A lid with probe ports is the next design step.
+- **The rail mounts hold probes beside the station, not in it.** A probe in the pH sleeve is
+  about 14 mm outside the vessel wall, and the pot closes the top. For hydro, use the probe lid
+  on a larger container instead; the rail mounts suit the soil tray and the SHT31 post.
 - The Hydro V2 reservoir holds about 0.24 L. That is fine for germination, but small for
-  deep-water culture: temperature and nutrient levels swing quickly, and an air stone and probes need room.
+  deep-water culture: temperature and nutrient levels swing quickly, and an air stone and probes
+  need room. The probe lid on a 1–2 L container avoids this.
+- The probe lid is verified geometrically only, not printed yet. Crush-rib grip depends on your
+  printer; if a probe slides, add a turn of tape or reduce `PROBE_CLEAR`.
 - Not yet print-tested as V6.3. The rail socket is unchanged from the tested V5.7/V6.x
   clip; the other changes are verified geometrically, not on a printer.
 

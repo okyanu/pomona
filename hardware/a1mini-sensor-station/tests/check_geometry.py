@@ -13,6 +13,11 @@ Checks, per mount:
   6. Supportless: no downward-facing area steeper than 45 degrees above the bed, except short
      bridges (reported, and limited per part).
 Values must match src/pomona_sensor_mounts.scad defaults.
+
+Probe lid (src/pomona_probe_lid.scad, print orientation, top face on the bed), per container size:
+  pot, probe, hose and level ports open; lid plate solid elsewhere (blocks light); nothing below
+  the rim reaches outside the skirt (it drops into the opening); skirt diameter; closed mesh;
+  fits the bed; supportless. Extra sizes: --lid-variant ID:PATH (build.sh renders 90 and 150 mm).
 """
 import math
 import struct
@@ -128,8 +133,72 @@ PARTS = {
 }
 
 
+def lid_layout(cid):
+    """Mirror of pomona_probe_lid.scad defaults for container inside diameter `cid`."""
+    return {
+        "lid_t": 3.0, "skirt_h": 10.0, "sleeve_h": 18.0, "lid_d": cid + 8.0, "skirt_od": cid - 0.6,
+        "holes": {"pot": ((-0.14 * cid, 0), 50.4 / 2), "ph": ((0.27 * cid, 0), 12.6 / 2),
+                  "ds18b20": ((0.20 * cid, 0.20 * cid), 6.6 / 2), "hose": ((0.20 * cid, -0.20 * cid), 6.4 / 2),
+                  "level": ((0.06 * cid, 0.36 * cid), 8.4 / 2)},
+        "sleeves": ("ph", "ds18b20", "hose"),
+    }
+
+
+def check_lid(path, cid):
+    L = lid_layout(cid)
+    tris = load(path)
+    vs = [v for t in tris for v in t]
+    lo = [min(v[i] for v in vs) for i in range(3)]
+    hi = [max(v[i] for v in vs) for i in range(3)]
+    size = [hi[i] - lo[i] for i in range(3)]
+    t = L["lid_t"]
+    blocked = []
+    for name, ((x, y), r) in L["holes"].items():
+        top = t + L["sleeve_h"] if name in L["sleeves"] else t
+        zs = [0.3, t / 2, t - 0.3] + ([t + 1, t + L["sleeve_h"] / 2, top - 0.5] if name in L["sleeves"] else [])
+        blocked += [(name, p) for p in circle_points(x, y, r, zs, frac=0.8) if inside(tris, p)]
+    # Light block: the plate is solid away from every hole.
+    solid_pts = []
+    for gx in range(-60, 61, 6):
+        for gy in range(-60, 61, 6):
+            if math.hypot(gx, gy) > L["lid_d"] / 2 - 1.5:
+                continue
+            if any(math.hypot(gx - x, gy - y) < r + 1.2 for (x, y), r in L["holes"].values()):
+                continue
+            solid_pts.append((gx, gy, t / 2))
+    leaks = [p for p in solid_pts if not inside(tris, p)]
+    below_rim = [math.hypot(v[0], v[1]) for v in vs if v[2] > t + 0.05]
+    skirt = [math.hypot(v[0], v[1]) for v in vs if t + 0.05 < v[2] <= t + L["skirt_h"] + 0.05]
+    checks = {
+        "ports open": not blocked,
+        "plate solid": not leaks and len(solid_pts) > 50,
+        "drops into opening": max(below_rim) <= L["skirt_od"] / 2 + 1e-3,
+        "skirt diameter": abs(2 * max(skirt) - L["skirt_od"]) < 0.1,
+        "sleeve length": abs(hi[2] - (t + L["sleeve_h"])) < 1e-3,
+        "closed mesh": edges_manifold(tris) == 0,
+        "fits A1 mini": size[0] <= 180 and size[1] <= 180 and abs(lo[2]) < 1e-6,
+        "supportless": overhang_area(tris) <= 1.0,
+    }
+    ok = all(checks.values())
+    print(f"lid {cid:5.1f} {'ok' if ok else 'FAIL':4s} size {size[0]:5.1f} x {size[1]:5.1f} x {size[2]:5.1f} mm, "
+          f"{len(tris)} triangles, {len(solid_pts)} solid samples "
+          + " ".join(f"[{k}]" for k, good in checks.items() if not good))
+    if blocked:
+        print("   port blocked:", [(n, tuple(round(c, 2) for c in p)) for n, p in blocked[:3]])
+    if leaks:
+        print("   plate open at:", leaks[:3])
+    return ok
+
+
 def main():
     failures = []
+    if not check_lid(STL_DIR / "pomona_probe_lid_v1.stl", 110.0):
+        failures.append("lid")
+    for arg in sys.argv[1:]:
+        if arg.startswith("--lid-variant="):
+            cid, path = arg.split("=", 1)[1].split(":", 1)
+            if not check_lid(Path(path), float(cid)):
+                failures.append(f"lid {cid}")
     for name, spec in PARTS.items():
         path = STL_DIR / f"pomona_v6_3_{name}.stl"
         tris = load(path)
@@ -169,7 +238,7 @@ def main():
     if failures:
         print("FAILED:", ", ".join(failures))
         return 1
-    print("all mounts pass")
+    print("all mounts and lid sizes pass")
     return 0
 
 
