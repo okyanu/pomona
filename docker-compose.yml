@@ -1,6 +1,20 @@
+# Container lockdown (every Pomona service): unprivileged user (uid 10001, set in each
+# Dockerfile), read-only root filesystem, all Linux capabilities dropped, no privilege
+# escalation, and CPU / memory limits. Writable state lives only in the named volumes.
+# Limits can be raised in .env (e.g. MODEL_ROUTER_MEM_LIMIT=8g for the Hugging Face backend).
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=64m,mode=1777"]
+
 services:
   mqtt:
     image: eclipse-mosquitto:2
+    <<: *hardened
+    user: "1883:1883"   # the image's mosquitto user; persistence is off, config is read-only
+    mem_limit: ${MQTT_MEM_LIMIT:-128m}
+    cpus: ${MQTT_CPUS:-0.5}
     ports:
       - "1883:1883"
     volumes:
@@ -13,6 +27,9 @@ services:
 
   core:
     build: ./services/core
+    <<: *hardened
+    mem_limit: ${CORE_MEM_LIMIT:-512m}
+    cpus: ${CORE_CPUS:-1.0}
     ports:
       - "8080:8080"
     environment:
@@ -34,12 +51,17 @@ services:
 
   model-router:
     build: ./services/model-router
+    <<: *hardened
+    mem_limit: ${MODEL_ROUTER_MEM_LIMIT:-2g}
+    cpus: ${MODEL_ROUTER_CPUS:-2.0}
     ports:
       - "8081:8081"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       MODELS_DIR: /app/models/registry
+      AUDIT_LOG_PATH: /app/data/pomona-pipeline-audit.jsonl
+      HF_HOME: /app/data/huggingface
       POMONA_LLM_BACKEND: ${POMONA_LLM_BACKEND:-stub}
       HF_MODEL_ID: ${HF_MODEL_ID:-Okyanus/ai-pomona-agronomist-gemma4}
       HF_BASE_MODEL_ID: ${HF_BASE_MODEL_ID:-google/gemma-4-E2B-it}
@@ -55,12 +77,16 @@ services:
     volumes:
       - ./models/registry:/app/models/registry:ro
       - ./services/safety-checker/app:/app/safety_checker_rules:ro
+      - router_data:/app/data
     depends_on:
       core:
         condition: service_started
 
   dashboard:
     build: ./services/dashboard
+    <<: *hardened
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
+    cpus: ${DASHBOARD_CPUS:-0.5}
     ports:
       - "3000:3000"
     environment:
@@ -77,11 +103,17 @@ services:
 
   digital-twin:
     build: ./services/digital-twin
+    <<: *hardened
+    mem_limit: ${DIGITAL_TWIN_MEM_LIMIT:-256m}
+    cpus: ${DIGITAL_TWIN_CPUS:-0.5}
     ports:
       - "8084:8084"
 
   automation-engine:
     build: ./services/automation-engine
+    <<: *hardened
+    mem_limit: ${AUTOMATION_MEM_LIMIT:-256m}
+    cpus: ${AUTOMATION_CPUS:-0.5}
     environment:
       AUTOMATION_DB_PATH: /data/automation.db
       MAX_SUGGESTIONS: ${MAX_SUGGESTIONS:-200}
@@ -94,6 +126,9 @@ services:
 
   safety-checker:
     build: ./services/safety-checker
+    <<: *hardened
+    mem_limit: ${SAFETY_CHECKER_MEM_LIMIT:-256m}
+    cpus: ${SAFETY_CHECKER_CPUS:-0.5}
     ports:
       - "8082:8082"
     depends_on:
@@ -103,6 +138,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]
+    # Third-party image that writes its own state: no privilege escalation, but no other lockdown.
+    security_opt: ["no-new-privileges:true"]
     ports:
       - "11434:11434"
     volumes:
@@ -111,4 +148,5 @@ services:
 volumes:
   automation_data:
   core_data:
+  router_data:
   ollama_data:

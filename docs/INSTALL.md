@@ -47,6 +47,19 @@ Stop:
 # or: docker compose down
 ```
 
+**Container lockdown.** Every Pomona service runs as an unprivileged user (uid 10001;
+Mosquitto as 1883) with a read-only filesystem, all Linux capabilities dropped, no
+privilege escalation, and CPU/memory limits. Only the named volumes are writable
+(`core_data`, `router_data`, `automation_data`). If you upgrade from an older version and
+start with `docker compose up` instead of `./scripts/up.sh`, give old root-owned volumes to
+the new user once:
+
+```bash
+docker compose run --rm --no-deps --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --entrypoint chown core -R 10001:10001 /app/data
+```
+
+`./scripts/up.sh` does this automatically for core, model-router and automation-engine.
+
 ### Windows notes
 
 - Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2
@@ -135,6 +148,8 @@ You rarely need to edit `.env` for basic use. Defaults work out of the box.
 | Simulator no data in core | MQTT must be up; simulator uses `localhost:1883` |
 | `make: command not found` | Use `./scripts/up.sh` instead |
 | Linux Ollama from container | `host.docker.internal` fixed via `extra_hosts` in compose |
+| `Permission denied` / `readonly database` after upgrading | Old root-owned volume: run `./scripts/up.sh`, or the `chown` command under *Container lockdown* |
+| Model router killed (exit 137) with the Hugging Face backend | Raise `MODEL_ROUTER_MEM_LIMIT` in `.env` (default 2g) |
 
 Run diagnostics:
 
