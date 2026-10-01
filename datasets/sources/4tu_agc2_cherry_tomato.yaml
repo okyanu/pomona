@@ -1,0 +1,23 @@
+id: 4tu_agc2_cherry_tomato
+name: "Autonomous Greenhouse Challenge, Second Edition (2019)"
+url: "https://data.4tu.nl/articles/_/12764777/2"
+doi: "10.4121/uuid:88d22c60-21b3-4ea8-90db-20249a5be2a7"
+license: "CC0"
+allowed_use: "Candidate source for sensor-quality fault replay (climate, drain EC/pH, slab sensors) and nutrient/irrigation reasoner cases. Cherry tomato, 6 compartments, 2019-12-16 to 2020-05-30, 5-minute climate data."
+redistribution_notes: "CC0 places the data in the public domain; attribution is still given as good practice. Raw files stay local in datasets/raw/ and must not be committed to GitHub."
+redistribution_allowed: true
+derived_dataset_allowed: true
+attribution_required: false
+license_verified_on: "2026-09-28"
+verification_source: "4TU.ResearchData landing page and v2 files API"
+pipeline_priority: "candidate"
+data_quality_status: "per_team_csv_contains_real_sensor_faults"
+raw_files:
+  - filename: "AutonomousGreenhouseChallenge_edition2.7z"
+    local_path: "datasets/raw/4tu_agc2_cherry_tomato/AutonomousGreenhouseChallenge_edition2.7z"
+    content_type: "application/x-7z-compressed"
+    size_bytes: 8418715
+    md5: "2a0c7f3332881caef54ca8f4dc60c9a3"
+    sha256: "b889e9ab1663fe3b8a90a3dab71d4340a6ecd49492532c43784cc82d799708ca"
+    git_policy: "ignored_raw_source_do_not_commit"
+status: candidate_not_in_release

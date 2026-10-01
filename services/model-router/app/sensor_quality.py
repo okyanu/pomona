@@ -7,7 +7,7 @@ confidence when required fields are missing, implausible, stale, or conflicting.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import math
 from typing import Any, Dict, List, Optional
 
@@ -42,7 +42,21 @@ FLATLINE_WINDOW = 6
 STUCK_EPSILON = 1e-9
 BASELINE_DRIFT_THRESHOLDS = {"ph": 0.35, "ec_ms_cm": 0.4}
 # Readings outside these bounds are flagged impossible and never serve as a drift baseline.
+# The baseline is the median of the first plausible readings in the window, so one
+# outlier at the start cannot make every later reading look drifted.
+BASELINE_SAMPLES = 3
 PLAUSIBLE_RANGES = {"ph": (3.0, 11.0), "ec_ms_cm": (0.0, 12.0)}
+# Water volumes and substrate have thermal mass: a DS18B20 can legitimately hold one
+# 0.0625 C step for hours (real aquaponic pond at 5-minute samples: 99th percentile
+# 2.25 h, longest 4.75 h). A freeze on these fields must also last this long.
+STUCK_MIN_DURATION = {
+    "water_temperature_c": timedelta(hours=3),
+    "substrate_temperature_c": timedelta(hours=3),
+}
+# A pH/EC probe whose typical step between samples is as large as the drift threshold
+# is too noisy to judge drift (e.g. an unshielded PH-4502C swinging ~1.6 pH in 5 min;
+# commercial greenhouse drain sensors stay at <= 0.1).
+NOISE_MIN_SAMPLES = 6
 FLATLINE_EPSILON = {
     "air_temperature_c": 0.05,
     "water_temperature_c": 0.05,
@@ -82,7 +96,10 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
         return None
     if parsed.tzinfo is None:
         return None
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError:  # e.g. 0001-01-01T00:00:00+01:00 falls before year 1 in UTC
+        return None
 
 
 def stale_timestamp(sensor: Dict[str, Any], now: Optional[datetime]) -> bool:
@@ -104,6 +121,18 @@ def _series_values(history: List[Dict[str, Any]], sensor: Dict[str, Any], field:
         if parsed is not None:
             values.append(parsed)
     return values
+
+
+def _series_points(history: List[Dict[str, Any]], sensor: Dict[str, Any], field: str) -> List[tuple]:
+    """(value, packet) pairs for packets with a numeric reading, oldest first."""
+    points = []
+    for packet in [*history, sensor]:
+        if not isinstance(packet, dict):
+            continue
+        parsed = numeric(packet.get(field))
+        if parsed is not None:
+            points.append((parsed, packet))
+    return points
 
 
 def _trailing_run(values: List[float]) -> int:
@@ -141,15 +170,21 @@ def apply_temporal_checks(
         return
 
     for field in STUCK_FIELDS:
-        values = _series_values(history, sensor, field)
+        points = _series_points(history, sensor, field)
+        values = [value for value, _ in points]
         # Stuck: the latest value has repeated at least STUCK_WINDOW times and at least
         # twice as long as any earlier repeat in the history. Continuous sensors are
         # flagged after 3 identical samples; quantized probes (e.g. DS18B20 0.0625 C
         # steps) that legitimately repeat 2-3 times need a correspondingly longer freeze.
         run = _trailing_run(values)
         earlier = values[:len(values) - run]
+        long_enough = True
+        if field in STUCK_MIN_DURATION and run:
+            first = parse_timestamp(points[-run][1].get("timestamp"))
+            last = parse_timestamp(points[-1][1].get("timestamp"))
+            long_enough = first is not None and last is not None and last - first >= STUCK_MIN_DURATION[field]
         if (len(earlier) >= 2 and max(earlier) - min(earlier) > STUCK_EPSILON
-                and run >= max(STUCK_WINDOW, 2 * _longest_run(earlier))):
+                and run >= max(STUCK_WINDOW, 2 * _longest_run(earlier)) and long_enough):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
             checks.append(f"inspect {field}: identical readings across {run} fresh samples")
@@ -168,16 +203,24 @@ def apply_temporal_checks(
                 checks.append(f"inspect {field}: near-zero variance may indicate a stuck or clipped probe")
 
     for field in BASELINE_DRIFT_FIELDS:
-        low, high = PLAUSIBLE_RANGES[field]
-        baseline = next(
-            (value for value in (numeric(packet.get(field)) for packet in history if isinstance(packet, dict))
-             if value is not None and low <= value <= high),
-            None,
-        )
-        current = numeric(sensor.get(field))
-        if baseline is None or current is None:
-            continue
         threshold = BASELINE_DRIFT_THRESHOLDS[field]
+        values = _series_values(history, sensor, field)
+        if (len(values) >= NOISE_MIN_SAMPLES
+                and _median([abs(b - a) for a, b in zip(values, values[1:])]) >= threshold):
+            # Drift cannot be told apart from noise this large; report the noise instead.
+            add_unique(labels, "noisy_signal_possible")
+            add_unique(suspect_fields, field)
+            checks.append(
+                f"inspect {field}: readings jump between samples; check probe shielding, grounding and averaging"
+            )
+            continue
+        low, high = PLAUSIBLE_RANGES[field]
+        plausible = [value for value in (numeric(packet.get(field)) for packet in history if isinstance(packet, dict))
+                     if value is not None and low <= value <= high][:BASELINE_SAMPLES]
+        current = numeric(sensor.get(field))
+        if len(plausible) < BASELINE_SAMPLES or current is None:
+            continue
+        baseline = _median(plausible)
         if abs(current - baseline) < threshold:
             continue
         # Require a short sustained walk away from startup, not a single spike.

@@ -44,6 +44,30 @@ Pomona platform code is Apache-2.0. Dataset source material may have different l
 - Downloaded raw files: `datasets/raw/4tu_autonomous_greenhouse_challenge/README.md` and `datasets/raw/4tu_autonomous_greenhouse_challenge/autonomous_greenhouse_challenge4_timeseries.zip` (ignored by Git)
 - Skipped raw file: canopy camera zip, because it is about 31 GB and not needed for the compact v0.1 reasoner dataset.
 
+## Candidate Sources (downloaded, not in any release)
+
+### 4tu_agc2_cherry_tomato
+
+- Title: Autonomous Greenhouse Challenge, Second Edition (2019)
+- DOI: `10.4121/uuid:88d22c60-21b3-4ea8-90db-20249a5be2a7`
+- URL: `https://data.4tu.nl/articles/_/12764777/2`
+- License: CC0
+- Verification date: 2026-09-28
+- Attribution required: no (given anyway)
+- Raw data policy: keep local only in `datasets/raw/`; never commit raw files.
+- Downloaded raw file: `datasets/raw/4tu_agc2_cherry_tomato/AutonomousGreenhouseChallenge_edition2.7z` (ignored by Git)
+
+### mendeley_aquaponic_pond_iot
+
+- Title: A Simple Dataset of Aquaponic Fish Pond Water Quality Measurement using Internet of Things devices
+- DOI: `10.17632/yd36bx6f8f.2`
+- URL: `https://data.mendeley.com/datasets/yd36bx6f8f/2`
+- License: CC BY 4.0
+- Verification date: 2026-09-28
+- Attribution required: yes
+- Raw data policy: keep local only in `datasets/raw/`; never commit raw files.
+- Downloaded raw files: `datasets/raw/mendeley_aquaponic_pond_iot/pond_iot_2023.csv` and `pond_iot_2023_raw.csv` (ignored by Git)
+
 ## Excluded From v0.1
 
 ### mendeley_hydroponics_fertigation

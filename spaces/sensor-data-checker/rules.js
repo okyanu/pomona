@@ -33,6 +33,12 @@
   const FLATLINE_EPSILON = { air_temperature_c: 0.05, water_temperature_c: 0.05, substrate_temperature_c: 0.05,
     humidity_pct: 0.25, substrate_moisture_pct: 0.25, soil_moisture_pct: 0.25 };
   const US_PER_S = 1000000n;
+  // Thermal-mass fields: a freeze must also last 3 h (see STUCK_MIN_DURATION in sensor_quality.py).
+  const STUCK_MIN_DURATION_US = { water_temperature_c: 3n * 3600n * US_PER_S, substrate_temperature_c: 3n * 3600n * US_PER_S };
+  // pH/EC whose median step is >= the drift threshold is reported as noise, not drift.
+  const NOISE_MIN_SAMPLES = 6;
+  // Drift baseline = median of the first BASELINE_SAMPLES plausible readings in the window.
+  const BASELINE_SAMPLES = 3;
 
   const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -247,7 +253,11 @@
     const EPOCH_ORDINAL = 719163n; // 1970-01-01
     const local = (BigInt(ymdToOrdinal(year, month, day)) - EPOCH_ORDINAL) * day24 +
       BigInt(h * 3600 + mi * 60 + s) * US_PER_S + BigInt(us);
-    return local - tz;
+    const utc = local - tz;
+    // Python's astimezone raises OverflowError outside years 1-9999; parse_timestamp returns None.
+    const minUs = (1n - EPOCH_ORDINAL) * day24;
+    const maxUs = (BigInt(ymdToOrdinal(9999, 12, 31)) - EPOCH_ORDINAL + 1n) * day24 - 1n;
+    return utc < minUs || utc > maxUs ? null : utc;
   }
 
   // parse_timestamp in sensor_quality.py: strings only, every "Z" becomes "+00:00", must be aware.
@@ -264,6 +274,16 @@
       if (parsed !== null) values.push(parsed);
     }
     return values;
+  }
+
+  function seriesPoints(history, sensor, field) {
+    const points = [];
+    for (const packet of [...history, sensor]) {
+      if (!isPlainObject(packet)) continue;
+      const parsed = numeric(get(packet, field));
+      if (parsed !== null) points.push([parsed, packet]);
+    }
+    return points;
   }
 
   function trailingRun(values) {
@@ -292,11 +312,18 @@
   function applyTemporalChecks(sensor, history, labels, suspect, checks) {
     if (!history.length) return;
     for (const field of STUCK_FIELDS) {
-      const values = seriesValues(history, sensor, field);
+      const points = seriesPoints(history, sensor, field);
+      const values = points.map((p) => p[0]);
       const run = trailingRun(values);
       const earlier = values.slice(0, values.length - run);
+      let longEnough = true;
+      if (has(STUCK_MIN_DURATION_US, field) && run) {
+        const first = parseTimestampUs(get(points[points.length - run][1], "timestamp"));
+        const last = parseTimestampUs(get(points[points.length - 1][1], "timestamp"));
+        longEnough = first !== null && last !== null && last - first >= STUCK_MIN_DURATION_US[field];
+      }
       if (earlier.length >= 2 && Math.max(...earlier) - Math.min(...earlier) > STUCK_EPSILON &&
-          run >= Math.max(STUCK_WINDOW, 2 * longestRun(earlier))) {
+          run >= Math.max(STUCK_WINDOW, 2 * longestRun(earlier)) && longEnough) {
         addUnique(labels, "stuck_value");
         addUnique(suspect, field);
         checks.push(`inspect ${field}: identical readings across ${run} fresh samples`);
@@ -316,16 +343,25 @@
       }
     }
     for (const field of BASELINE_DRIFT_FIELDS) {
+      const threshold = BASELINE_DRIFT_THRESHOLDS[field];
+      const series = seriesValues(history, sensor, field);
+      if (series.length >= NOISE_MIN_SAMPLES && median(steps(series)) >= threshold) {
+        addUnique(labels, "noisy_signal_possible");
+        addUnique(suspect, field);
+        checks.push(`inspect ${field}: readings jump between samples; check probe shielding, grounding and averaging`);
+        continue;
+      }
       const [low, high] = PLAUSIBLE_RANGES[field];
-      let baseline = null;
+      const plausible = [];
       for (const packet of history) {
+        if (plausible.length >= BASELINE_SAMPLES) break;
         if (!isPlainObject(packet)) continue;
         const v = numeric(get(packet, field));
-        if (v !== null && v >= low && v <= high) { baseline = v; break; }
+        if (v !== null && v >= low && v <= high) plausible.push(v);
       }
       const current = numeric(get(sensor, field));
-      if (baseline === null || current === null) continue;
-      const threshold = BASELINE_DRIFT_THRESHOLDS[field];
+      if (plausible.length < BASELINE_SAMPLES || current === null) continue;
+      const baseline = median(plausible);
       if (Math.abs(current - baseline) < threshold) continue;
       const recent = seriesValues(history.slice(-(STUCK_WINDOW - 1)), sensor, field);
       if (recent.length < STUCK_WINDOW) continue;

@@ -82,6 +82,7 @@ This model is crop-agnostic and useful across:
   "stuck_value",
   "flatline_possible",
   "baseline_drift_possible",
+  "noisy_signal_possible",
   "conflicting_readings",
   "insufficient_context"
 ]

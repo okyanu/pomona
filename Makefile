@@ -84,6 +84,11 @@ test-checker:
 fault-replay:
 	services/model-router/.venv/bin/python scripts/benchmark_sensor_fault_replay.py
 
+.PHONY: real-replay
+# Real third-party sensor logs (local raw files, see datasets/sources/); skips missing datasets.
+real-replay:
+	services/model-router/.venv/bin/python scripts/benchmark_real_sensor_replay.py
+
 demo-local:
 	services/model-router/.venv/bin/python scripts/demo_local.py
 

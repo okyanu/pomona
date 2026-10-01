@@ -71,7 +71,8 @@ for form in base_forms:
         stamps.add("".join(s))
 stamps |= {"", "2026", "2026-03-04", "2026-03-04T", "2026-03-04T24:00:00+00:00", "2026-13-01T00:00:00+00:00",
            "2026-02-29T00:00:00+00:00", "2026-03-04T05:06:07+24:00", "2026-03-04T05:06:07+23:59", "0001-01-01T00:00:00+00:00",
-           "9999-12-31T23:59:59+00:00", "2026-03-04T05:06:07＋00:00", "2026-03-04é05:06:07+00:00", "2020-W53-7T00:00:00+00:00",
+           "9999-12-31T23:59:59+00:00", "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00",
+           "0001-01-01T00:30:00+00:29", "9999-12-31T23:30:00-00:29", "2026-03-04T05:06:07＋00:00", "2026-03-04é05:06:07+00:00", "2020-W53-7T00:00:00+00:00",
            "2021-W53-1T00:00:00+00:00", "2026-03-04T05:06:07.+00:00", "2026-03-04T05:06:07 +00:00", "2026-03-04T05:06:07.5x+00:00"}
 timestamp_cases = []
 for s in sorted(stamps):
@@ -117,6 +118,27 @@ for n in range(1500):
     if rng.random() < 0.05:
         history.insert(0, None)
     temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"}, sensor, [field], None, history))
+
+# Time-stamped series: thermal-mass stuck duration (3 h) and pH/EC noise vs drift.
+trng = random.Random(928)
+for n in range(600):
+    field = trng.choice(["water_temperature_c", "substrate_temperature_c", "air_temperature_c", "ph", "ec_ms_cm"])
+    length = trng.randrange(2, 13)
+    cadence = trng.choice([300, 1200, 1500, 1800, 3600])
+    base = {"ph": 7.0, "ec_ms_cm": 1.5}.get(field, 18.0)
+    if field in ("ph", "ec_ms_cm"):
+        amp = trng.choice([0.0, 0.05, 0.2, 0.35, 0.4, 0.8])
+        series = [round(base + trng.uniform(-amp, amp) + trng.choice([0, 0.1]) * k, 3) for k in range(length)]
+    else:
+        series = [17.25 + 0.0625 * trng.choice([0, 1]) for _ in range(length)]
+        tail = trng.randrange(1, length + 1)
+        series[-tail:] = [17.25] * tail
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    packets = [{field: v, "timestamp": (start + timedelta(seconds=cadence * k)).isoformat()} for k, v in enumerate(series)]
+    if trng.random() < 0.1:
+        packets[trng.randrange(len(packets))]["timestamp"] = trng.choice(["", "bad", "2026-01-01T00:00:00", None])
+    temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"},
+                                      packets[-1], [field], None, packets[:-1]))
 
 # Probe error codes and edges on water/substrate temperature.
 for field in ("water_temperature_c", "substrate_temperature_c"):

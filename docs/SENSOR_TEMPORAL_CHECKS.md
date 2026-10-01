@@ -59,13 +59,18 @@ prior packets (the dashboard's window) plus the current packet:
 
 | Check | Fires when | Why this shape |
 |---|---|---|
-| `stuck_value` | The latest value has repeated ≥ 3 times **and** ≥ 2× the longest earlier repeat, after the field had varied | Continuous sensors are caught after 3 identical samples; quantized probes (DS18B20 0.0625 °C steps) that legitimately repeat 2–3 times need a longer freeze |
+| `stuck_value` | The latest value has repeated ≥ 3 times **and** ≥ 2× the longest earlier repeat, after the field had varied; for water and substrate temperature the repeat must also span ≥ 3 h of sample time | Continuous sensors are caught after 3 identical samples; quantized probes (DS18B20 0.0625 °C steps) that legitimately repeat 2–3 times need a longer freeze. Thermal mass holds a DS18B20 step for hours (real pond: 99th percentile 2.25 h, longest 4.75 h), so at 5-minute samples and an 11-packet window this cannot fire for those two fields; their probe error codes are still caught by range checks |
 | `flatline_possible` | The last 6 samples span ≤ epsilon (0.05 °C / 0.25 %) but not exactly zero, **and** the field's median step before that was ≥ epsilon | Slow, healthy signals at 5-minute steps often stay within epsilon for 3 samples; the old 3-sample rule flagged them |
-| `baseline_drift_possible` | pH/EC stays ≥ threshold away from the **first plausible** value in the window (pH 3–11, EC 0–12) for 3 samples | An impossible reading must not become the baseline |
+| `noisy_signal_possible` | pH/EC has ≥ 6 samples in the window and their median step is ≥ the drift threshold (pH 0.35, EC 0.4 mS/cm); drift is not evaluated for that field | Real unshielded PH-4502C jumps ~0.5 pH per 5-minute sample; commercial greenhouse drain probes stay ≤ 0.1. Noise that large cannot be told apart from drift |
+| `baseline_drift_possible` | pH/EC stays ≥ threshold away from the **median of the first 3 plausible** values in the window (pH 3–11, EC 0–12) for 3 samples; no judgement until 3 plausible values exist | An impossible reading must not become the baseline, and one outlier first reading must not make a steady probe look drifted |
 
 Packet-level range checks added alongside: `water_temperature_c` outside 0–50 °C and
 `substrate_temperature_c` outside −10–60 °C give `impossible_temperature` (catches the
 DS18B20 error values −127 °C and 85 °C).
+
+Real-data replay (2026-09-28, `make real-replay`, see
+[SENSOR_FAULT_REPLAY.md](./SENSOR_FAULT_REPLAY.md#real-data-replay-2026-09-28)) set the
+3 h thermal-mass window and the noise label.
 
 Normal controls covered by `services/model-router/tests/test_sensor_temporal_checks.py`:
 stable pH plateau, quantized probe flicker, slow noisy climb. The browser checker in

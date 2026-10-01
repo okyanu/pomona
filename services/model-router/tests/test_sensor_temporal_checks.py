@@ -80,9 +80,39 @@ def test_quantized_probe_repeats_are_not_stuck():
 
 
 def test_quantized_probe_long_freeze_is_stuck():
-    water = [17.25, 17.3125, 17.25, 17.25, 17.3125, 17.25] + [17.25] * 6
+    # 20-minute samples: the freeze spans 10 samples = 3 h, the thermal-mass minimum.
+    water = [17.25, 17.3125] + [17.25] * 10
     labels = _series("water_temperature_c", water)
     assert "stuck_value" in labels[-1]
+    assert not any("stuck_value" in step for step in labels[:-1])
+
+
+def test_water_temperature_hold_under_three_hours_is_not_stuck():
+    # A large water volume holding one DS18B20 step for 2 h (seen in a real aquaponic pond).
+    water = [17.25, 17.3125, 17.25, 17.3125, 17.3125, 17.25] + [17.25] * 6
+    assert not any("stuck_value" in labels for labels in _series("water_temperature_c", water))
+
+
+def test_air_temperature_stuck_stays_sample_based():
+    air = [24.0, 24.1, 24.0, 24.1] + [24.0] * 4
+    assert "stuck_value" in _series("air_temperature_c", air)[-1]
+
+
+def test_noisy_ph_probe_is_reported_instead_of_drift():
+    # Unshielded analog pH probe: large jumps every sample around a stable mean.
+    ph = [7.6, 6.9, 7.8, 7.1, 7.9, 6.8, 7.7, 7.0, 7.8, 6.9, 7.9, 7.0]
+    labels = _series("ph", ph)
+    # Six samples are needed to call it noise; from then on noise replaces drift.
+    assert not any("noisy_signal_possible" in step for step in labels[:5])
+    assert all("noisy_signal_possible" in step for step in labels[5:])
+    assert not any("baseline_drift_possible" in step for step in labels[5:])
+
+
+def test_slow_real_drift_is_not_noise():
+    ph = [6.0, 6.0, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9]
+    labels = _series("ph", ph)
+    assert "baseline_drift_possible" in labels[-1]
+    assert not any("noisy_signal_possible" in step for step in labels)
 
 
 def test_slow_noisy_signal_is_not_flatline():
@@ -114,3 +144,17 @@ def test_probe_error_codes_are_impossible_temperatures():
             result = derive_sensor_quality(CONTEXT, sensor, FIELDS + [field], now=now)
             assert ("impossible_temperature" in result["data_quality_labels"]) is bad, (field, value)
             assert (field in result["suspect_fields"]) is bad
+
+
+def test_drift_baseline_ignores_one_outlier_first_reading():
+    # A single low first reading (seen on a real PH-4502C log) must not make a
+    # steady probe look drifted: the baseline is the median of the first three.
+    ph = [5.93, 7.6, 7.6, 7.6, 7.62, 7.58, 7.6, 7.61, 7.6, 7.59, 7.6, 7.6]
+    assert not any("baseline_drift_possible" in step for step in _series("ph", ph))
+
+
+def test_drift_needs_three_plausible_baseline_readings():
+    ph = [6.0, 6.0, 6.9, 6.9, 6.9]
+    labels = _series("ph", ph)
+    assert not any("baseline_drift_possible" in step for step in labels[:3])
+    assert "baseline_drift_possible" in labels[-1]

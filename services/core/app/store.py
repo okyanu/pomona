@@ -185,6 +185,7 @@ class SensorEventStore:
             "sensor_drift_possible",
             "stuck_value",
             "flatline_possible",
+            "noisy_signal_possible",
             "impossible_ph",
             "impossible_ec",
             "conflicting_readings",

@@ -28,7 +28,7 @@ you shouldn't trust:
 - **broken** values (`err`, `NaN`, text where a number should be)
 - **badly timed** readings (no timezone, future-dated, stale latest reading, logging gaps, reboots,
   time going backwards)
-- **stuck, flat or drifting** sensors (compared with the previous 11 readings of the same device)
+- **stuck, flat, noisy or drifting** sensors (compared with the previous 11 readings of the same device)
 
 Everything runs in your browser. Files are never uploaded.
 

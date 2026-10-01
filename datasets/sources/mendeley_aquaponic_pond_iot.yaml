@@ -1,0 +1,30 @@
+id: mendeley_aquaponic_pond_iot
+name: "A Simple Dataset of Aquaponic Fish Pond Water Quality Measurement using Internet of Things devices"
+url: "https://data.mendeley.com/datasets/yd36bx6f8f/2"
+doi: "10.17632/yd36bx6f8f.2"
+license: "CC BY 4.0"
+allowed_use: "Candidate source for sensor-quality replay on real hobby-grade probes (PH-4502C pH, DFRobot analog TDS, DS18B20 water temperature, ESP8266), the same class of hardware as the Pomona cress logger. NFT hydroponic + fish pond, 2023-01-26 to 2023-03-22."
+redistribution_notes: "CC BY 4.0 permits sharing and adaptation with attribution. Raw files stay local in datasets/raw/ and must not be committed to GitHub. Timestamps are minute resolution with no timezone (assumed local time). TDS is ppm; EC derivation needs a stated conversion factor."
+redistribution_allowed: true
+derived_dataset_allowed: true
+attribution_required: true
+license_verified_on: "2026-09-28"
+verification_source: "Mendeley Data landing page and public files API"
+pipeline_priority: "candidate"
+data_quality_status: "raw_file_unfiltered; cleaned_file_is_range_clipped_ph_6_5_to_8_5"
+raw_files:
+  - filename: "pond_iot_2023.csv"
+    local_path: "datasets/raw/mendeley_aquaponic_pond_iot/pond_iot_2023.csv"
+    content_type: "text/csv"
+    size_bytes: 4431680
+    md5: "0490e958e9ac18db834ed14438163102"
+    sha256: "ea2a2569107912f151141bcad67a39c41c25b9b4ddca775d40346d66e39f2c07"
+    git_policy: "ignored_raw_source_do_not_commit"
+  - filename: "pond_iot_2023_raw.csv"
+    local_path: "datasets/raw/mendeley_aquaponic_pond_iot/pond_iot_2023_raw.csv"
+    content_type: "text/csv"
+    size_bytes: 19026532
+    md5: "9067a23e6a16ad5334fd979f7d1ab66d"
+    sha256: "ac69aff715a31f3f35439247b02d9e7bf95e409652bf88e5f15329c6effb9dba"
+    git_policy: "ignored_raw_source_do_not_commit"
+status: candidate_not_in_release
