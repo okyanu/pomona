@@ -47,3 +47,26 @@ model itself had just populated. This is exactly why Pomona never exposes
 model-only output directly: `POST /v1/reasoners/nutrient-ph-ec` always
 validates and corrects through the deterministic rules layer before a
 response is guarded and returned.
+
+## Real commercial lab data check (2026-10-04)
+
+`scripts/datasets/build_nutrient_cases_from_agc2.py` turns the 60 lab analyses of the Wageningen
+Autonomous Greenhouse Challenge, 2nd edition (cherry tomato on rockwool, CC0; local raw files, see
+`datasets/sources/4tu_agc2_cherry_tomato.yaml`) into 120 candidate cases (feed and drain of each
+sample) in `datasets/interim/agc2_nutrient_candidate_cases.jsonl` (gitignored). Expected output is
+what the deterministic rules say today.
+
+The rules flag 78 of 120 (low_ph 47, high_ec 50, high_ph 1). In 55 of those, the label contradicts
+usual commercial practice, so the cases are marked `needs_owner_review` and are not in the
+committed eval set:
+
+- **Feed pH 5.0-5.3 reads as `low_ph` (16 cases).** Rockwool feed solution is normally run around
+  pH 5.0-5.5.
+- **Drain EC 4.5-6.5 mS/cm reads as `high_ec` (39 cases).** Growers push root-zone salinity on
+  purpose for fruit quality; drain EC runs above feed EC.
+
+Takeaway: the thresholds (pH <= 5.3 low, EC >= 4.5 high) fit a general or hobby hydroponic
+reservoir, not a commercial rockwool drain. Because the rules block fertigation changes whenever
+a label is present, these flags would raise review requests on a normal crop. If Pomona is meant to
+cover rockwool or substrate tomato, give it a solution-type-specific range (feed vs drain) instead
+of changing the shared thresholds. Not changed: owner decision.
