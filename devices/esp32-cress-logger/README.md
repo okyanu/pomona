@@ -54,7 +54,16 @@ timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,measurement,u
 
 - **Moisture:** read the raw value with the probe in dry air, then in a glass of
   water. Put the two values in `MOISTURE_RAW_DRY` and `MOISTURE_RAW_WET`.
-- **pH:** record the volts in pH 7 and pH 4 buffers. Set
-  `PH_SLOPE = (7-4)/(V7-V4)` and `PH_OFFSET = 7 - PH_SLOPE*V7`. Then record the
-  calibration in Core (see the pilot doc).
+- **pH:** record the volts in pH 7 and pH 4 buffers (the `raw` column, probe fully settled and
+  rinsed between buffers), then run
+  `python3 tools/ph_calibrate.py --v7 <volts> --v4 <volts>`. It prints `PH_SLOPE` and `PH_OFFSET`
+  for `config.h` and checks them. Add `--v10 <volts>` with a pH 10 buffer to test linearity.
+  Then record the calibration in Core (see the pilot doc).
+- **Calibration check (firmware 0.1.2).** At boot the logger prints a `ph_cal=` line. If the
+  slope implies a sensitivity outside 20-600 mV/pH (identical, swapped or wrong buffers) or a pH 7
+  voltage outside 0.05-3.4 V, every pH row is `suspect`, so a bad calibration cannot pass as good
+  data. For a stricter check, set `PH_EXPECTED_MV_PER_PH` and `PH_EXPECTED_SLOPE_SIGN` in
+  `config.h` (the calibrator prints both from a good calibration); then swapped buffers and a worn
+  probe are flagged too. A pH reading at the ADC rail (probe unplugged or shorted) logs the raw
+  volts with no value. Host tests: `c++ -std=c++17 -Iinclude extras/test_ph_calibration.cpp -o /tmp/t && /tmp/t`.
 - Until calibrated, rows are `suspect`, with raw values only.

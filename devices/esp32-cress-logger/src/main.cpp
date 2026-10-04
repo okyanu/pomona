@@ -16,6 +16,7 @@
 #include <DallasTemperature.h>
 
 #include "config.h"
+#include "ph_calibration.h"
 
 // pH is logged as the median of several ADS1115 reads per interval. Analog pH
 // boards (PH-4502C style) swing ~1.6 pH within 5 minutes on single reads in
@@ -27,7 +28,15 @@
 #define PH_SAMPLE_GAP_MS 20
 #endif
 
-static const char *FIRMWARE = "cress-logger-0.1.1";
+// Optional pH calibration sanity check settings (see config.example.h); 0 = only the loose window.
+#ifndef PH_EXPECTED_MV_PER_PH
+#define PH_EXPECTED_MV_PER_PH 0
+#endif
+#ifndef PH_EXPECTED_SLOPE_SIGN
+#define PH_EXPECTED_SLOPE_SIGN 0
+#endif
+
+static const char *FIRMWARE = "cress-logger-0.1.2";
 static const char *CSV_HEADER =
     "timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,"
     "measurement,unit,raw,value,quality,firmware";
@@ -42,6 +51,7 @@ bool adsOk = false;
 bool sdOk = false;
 char bootId[17];
 uint32_t sequenceNo = 0;
+PhCalResult phCal = {PhCalState::Uncalibrated, "", 0.0f, 0.0f};
 char logPath[64];
 
 // Returns false until the clock has been set (NTP); rows then get an empty
@@ -151,7 +161,14 @@ void logPh() {
     reads[j] = value;
     if (i + 1 < PH_SAMPLES) delay(PH_SAMPLE_GAP_MS);
   }
-  float volts = ads.computeVolts(reads[PH_SAMPLES / 2]);
+  int16_t median = reads[PH_SAMPLES / 2];
+  float volts = ads.computeVolts(median);
+  // A reading at the ADC rail is a floating, shorted or over-range input, not a pH. Keep the
+  // raw volts for the record and give no value.
+  if (phReadingAtRail(median)) {
+    writeRow("ph-probe-1", "ph", "pH", String(volts, 4), NAN, "suspect");
+    return;
+  }
   // Two-point calibration: pH = PH_SLOPE * volts + PH_OFFSET. Until the
   // owner records a buffer calibration, log raw volts only.
   if (PH_SLOPE == 0.0f) {
@@ -160,8 +177,11 @@ void logPh() {
   }
   float ph = PH_SLOPE * volts + PH_OFFSET;
   bool plausible = ph >= 0.0f && ph <= 14.0f;
+  // A calibration that failed its sanity check (see boot line "ph_cal=") keeps its numbers but
+  // every row is "suspect", so nothing downstream treats them as trusted.
+  bool trusted = plausible && phCal.state == PhCalState::Ok;
   writeRow("ph-probe-1", "ph", "pH", String(volts, 4), plausible ? ph : NAN,
-           plausible ? "valid" : "suspect");
+           trusted ? "valid" : "suspect");
 #endif
 }
 
@@ -185,6 +205,12 @@ void setup() {
     if (f) { f.println(CSV_HEADER); f.close(); }
   }
   Serial.printf("boot_id=%s sd=%d sht31=%d ads1115=%d\n", bootId, sdOk, shtOk, adsOk);
+#if ZONE_IS_HYDRO && PH_PROBE_FITTED
+  phCal = phCalibrationCheck(PH_SLOPE, PH_OFFSET, PH_EXPECTED_MV_PER_PH, PH_EXPECTED_SLOPE_SIGN);
+  Serial.printf("ph_cal=%s sens=%.0f mV/pH v7=%.3f V %s\n",
+                phCal.state == PhCalState::Ok ? "ok" : phCal.state == PhCalState::Suspect ? "SUSPECT" : "uncalibrated",
+                phCal.mv_per_ph, phCal.v_at_ph7, phCal.reason);
+#endif
 
   syncClockOnce();
   Serial.println(clockValid() ? "clock synced" : "clock NOT set: rows get empty timestamps");

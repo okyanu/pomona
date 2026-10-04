@@ -39,3 +39,11 @@
 // #define PH_SAMPLE_GAP_MS 20
 #define PH_SLOPE 0.0f
 #define PH_OFFSET 0.0f
+// Optional sanity check of the calibration above (checked at boot, printed as "ph_cal=").
+// Always on: sensitivity must be 20-600 mV/pH and the pH 7 voltage 0.05-3.4 V; otherwise every
+// pH row is quality=suspect. Add your board's values to also catch swapped buffers and a worn
+// probe: sensitivity in mV per pH (bare probe ~59, PH-4502C-style board ~180; measure yours on a
+// first good calibration) and the slope direction (-1 if volts FALL as pH rises, +1 if they rise).
+// Run tools/ph_calibrate.py to get all three from your buffer readings.
+// #define PH_EXPECTED_MV_PER_PH 180
+// #define PH_EXPECTED_SLOPE_SIGN -1
