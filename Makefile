@@ -85,6 +85,12 @@ test-demo:
 	services/model-router/.venv/bin/python spaces/pomona-greenhouse-demo/tests/make_parity_cases.py
 	node spaces/pomona-greenhouse-demo/tests/parity.test.cjs
 
+.PHONY: test-ph-checker
+# pH Calibration Checker Space: the page's JavaScript must match the Python calibrator and Core's probe health.
+test-ph-checker:
+	python3 spaces/ph-calibration-checker/tests/make_parity_cases.py
+	node spaces/ph-calibration-checker/tests/parity.test.cjs
+
 .PHONY: demo-local
 .PHONY: fault-replay
 fault-replay:

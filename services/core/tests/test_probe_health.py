@@ -83,6 +83,14 @@ def test_ph7_voltage_shift_is_flagged_even_with_good_sensitivity():
     assert entry["status"] == "weakening" and "pH 7 voltage moved" in entry["reasons"][0]
 
 
+def test_ph7_shift_of_exactly_0_1_v_is_flagged_despite_float_noise():
+    # 2.705 -> 2.805 is 0.10000000000000009 in floats; the shift is rounded to 0.1 mV first.
+    entry = status_of(calibration(0, v7=2.705), calibration(30, 180.0, v7=2.805))
+    assert entry["v_at_ph7_shift_v"] == 0.1 and entry["status"] == "weakening"
+    just_under = status_of(calibration(0, v7=2.705), calibration(30, 180.0, v7=2.8049))
+    assert just_under["status"] == "ok"
+
+
 def test_probes_are_separate_and_worst_comes_first():
     entries = probe_health([calibration(0, sensor="a"), calibration(30, 180.0, sensor="a"),
                             calibration(0, sensor="b"), calibration(30, 120.0, sensor="b")], now=T0)

@@ -171,3 +171,4 @@ devices/*/.pio/
 # Sensor checker parity cases (regenerate with tests/make_parity_cases.py)
 spaces/sensor-data-checker/tests/parity_cases.json
 spaces/pomona-greenhouse-demo/tests/parity_cases.json
+spaces/ph-calibration-checker/tests/parity_cases.json

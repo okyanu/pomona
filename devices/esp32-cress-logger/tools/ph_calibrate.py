@@ -39,6 +39,26 @@ def check(slope, offset, expected_mv=0.0, expected_sign=0):
     return "", mv, v7
 
 
+def evaluate(v7, v4, v10=None, expected_mv=0.0, expected_sign=0):
+    """Everything main() prints, as data (also the reference for spaces/ph-calibration-checker)."""
+    if v7 == v4:
+        return {"ok": False, "reason": "the pH 7 and pH 4 readings are identical; was the probe moved between buffers?",
+                "slope": None, "offset": None, "mv_per_ph": None, "v_at_ph7": None, "direction": 0,
+                "ph10_predicted": None, "ph10_error": None, "ph10_ok": None}
+    slope = (7.0 - 4.0) / (v7 - v4)
+    offset = 7.0 - slope * v7
+    reason, mv, v7_expected = check(slope, offset, expected_mv, expected_sign)
+    out = {"ok": not reason, "reason": reason, "slope": slope, "offset": offset, "mv_per_ph": mv,
+           "v_at_ph7": v7_expected, "direction": -1 if slope < 0 else 1,
+           "ph10_predicted": None, "ph10_error": None, "ph10_ok": None}
+    if v10 is not None:
+        out["ph10_predicted"] = slope * v10 + offset
+        out["ph10_error"] = out["ph10_predicted"] - 10.0
+        out["ph10_ok"] = abs(out["ph10_error"]) <= 0.3
+        out["ok"] = out["ok"] and out["ph10_ok"]
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--v7", type=float, required=True, help="volts in pH 7 buffer")
@@ -48,25 +68,21 @@ def main():
     p.add_argument("--expected-sign", type=int, choices=(-1, 0, 1), default=0,
                    help="-1 if volts fall as pH rises, +1 if they rise, 0 = do not check")
     a = p.parse_args()
-    if a.v7 == a.v4:
-        print("FAIL: the pH 7 and pH 4 readings are identical; was the probe moved between buffers?")
+    r = evaluate(a.v7, a.v4, a.v10, a.expected_mv, a.expected_sign)
+    if r["slope"] is None:
+        print(f"FAIL: {r['reason']}")
         return 1
-    slope = (7.0 - 4.0) / (a.v7 - a.v4)
-    offset = 7.0 - slope * a.v7
-    reason, mv, v7 = check(slope, offset, a.expected_mv, a.expected_sign)
-    print(f"#define PH_SLOPE  {slope:.4f}f")
-    print(f"#define PH_OFFSET {offset:.4f}f")
-    print(f"# sensitivity {mv:.1f} mV/pH, pH 7 expected at {v7:.3f} V, slope direction {'-1 (volts fall as pH rises)' if slope < 0 else '+1 (volts rise with pH)'}")
-    print(f"# optional: #define PH_EXPECTED_MV_PER_PH {mv:.0f}   #define PH_EXPECTED_SLOPE_SIGN {-1 if slope < 0 else 1}")
+    print(f"#define PH_SLOPE  {r['slope']:.4f}f")
+    print(f"#define PH_OFFSET {r['offset']:.4f}f")
+    print(f"# sensitivity {r['mv_per_ph']:.1f} mV/pH, pH 7 expected at {r['v_at_ph7']:.3f} V, slope direction {'-1 (volts fall as pH rises)' if r['direction'] < 0 else '+1 (volts rise with pH)'}")
+    print(f"# optional: #define PH_EXPECTED_MV_PER_PH {r['mv_per_ph']:.0f}   #define PH_EXPECTED_SLOPE_SIGN {r['direction']}")
     status = 0
-    if reason:
-        print(f"FAIL: {reason}")
+    if r["reason"]:
+        print(f"FAIL: {r['reason']}")
         status = 1
-    if a.v10 is not None:
-        predicted = slope * a.v10 + offset
-        err = predicted - 10.0
-        print(f"# pH 10 check: the two-point line predicts {predicted:.2f} at the pH 10 voltage (error {err:+.2f})")
-        if abs(err) > 0.3:
+    if r["ph10_predicted"] is not None:
+        print(f"# pH 10 check: the two-point line predicts {r['ph10_predicted']:.2f} at the pH 10 voltage (error {r['ph10_error']:+.2f})")
+        if not r["ph10_ok"]:
             print("FAIL: the pH 10 point is off the line by more than 0.3 pH: probe is nonlinear or a buffer is bad")
             status = 1
     if not status:

@@ -32,6 +32,9 @@ you shouldn't trust:
 
 Everything runs in your browser. Files are never uploaded.
 
+Companion Space: [Pomona pH Calibration Checker](https://huggingface.co/spaces/Okyanus/pomona-ph-calibration-checker)
+turns pH buffer readings into a calibration and checks that the probe is not wearing out.
+
 ## Formats
 
 - One row per reading time: `time, temperature, humidity, pH, EC, …` (common column names

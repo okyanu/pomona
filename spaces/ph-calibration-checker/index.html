@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomona pH Calibration Checker</title>
+<meta name="description" content="Turn pH buffer readings into a calibration, check that it makes sense, and see whether your probe is wearing out. Runs in your browser.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>🧪 Pomona pH Calibration Checker</h1>
+  <p class="subtitle">Enter the voltage your pH probe gives in pH 7 and pH 4 buffer. You get the calibration numbers for your logger, a check that they are believable, and (optionally) how the probe compares with its first calibration.</p>
+  <span class="privacy">🔒 Runs entirely in your browser. Nothing is uploaded.</span>
+
+  <section class="card" aria-labelledby="in-h">
+    <h2 id="in-h">1. Buffer readings</h2>
+    <div class="grid">
+      <div><label for="v7">Volts in pH 7 buffer</label><input id="v7" type="number" step="any" inputmode="decimal" placeholder="2.503"></div>
+      <div><label for="v4">Volts in pH 4 buffer</label><input id="v4" type="number" step="any" inputmode="decimal" placeholder="3.041"></div>
+      <div><label for="v10">Volts in pH 10 buffer <span class="muted">(optional)</span></label><input id="v10" type="number" step="any" inputmode="decimal" placeholder="1.97"></div>
+    </div>
+    <p class="hint">Use the settled reading (the <code>raw</code> column of the SD log, or the serial output). Rinse the probe between buffers and let each reading settle for a minute.</p>
+    <details>
+      <summary>Stricter check for your board (optional)</summary>
+      <div class="grid" style="margin-top:10px">
+        <div><label for="expected-mv">Expected sensitivity, mV per pH</label><input id="expected-mv" type="number" step="any" inputmode="decimal" placeholder="180"><p class="hint">Bare probe about 59; PH-4502C-style board about 180. Take it from a first good calibration of your own board.</p></div>
+        <div><label for="expected-sign">Slope direction</label>
+          <select id="expected-sign"><option value="0">Do not check</option><option value="-1">Volts fall as pH rises (most boards)</option><option value="1">Volts rise with pH</option></select>
+          <p class="hint">Catches swapped buffers.</p></div>
+      </div>
+    </details>
+    <details>
+      <summary>Compare with the probe's first calibration (optional)</summary>
+      <div class="grid" style="margin-top:10px">
+        <div><label for="first-v7">First calibration: volts at pH 7</label><input id="first-v7" type="number" step="any" inputmode="decimal"></div>
+        <div><label for="first-v4">First calibration: volts at pH 4</label><input id="first-v4" type="number" step="any" inputmode="decimal"></div>
+      </div>
+      <p class="hint">A healthy probe keeps about the same sensitivity. Below 90 % of its first calibration it is weakening; below 80 % it is worn.</p>
+    </details>
+    <p><button id="example" class="link" type="button">Fill in an example</button></p>
+  </section>
+
+  <section class="card" aria-labelledby="out-h" aria-live="polite">
+    <h2 id="out-h">2. Result</h2>
+    <div id="result"><p class="muted">Enter the two buffer readings above.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>How it decides</h2>
+    <ul>
+      <li><strong>Sensitivity</strong> (mV per pH) must be 20-600. Identical, swapped or wrong buffers fall outside that.</li>
+      <li>The <strong>pH 7 voltage</strong> must be 0.05-3.4 V, the range an ADS1115 on 3.3 V can read.</li>
+      <li>With your board's expected sensitivity and slope direction: swapped buffers and a worn probe (below 75 % of expected) are flagged.</li>
+      <li>With a pH 10 buffer: the line through pH 7 and pH 4 must predict pH 10 within 0.3.</li>
+    </ul>
+    <p class="muted">These are the same rules the <a href="https://github.com/okyanu/pomona/tree/main/devices/esp32-cress-logger" target="_blank" rel="noopener">Pomona cress logger firmware</a> and <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">Pomona Core</a> use. This page matches the Python rules on 10,000 test cases. The check can tell a calibration is implausible; it cannot prove a plausible one is right: keep using fresh buffers. Advisory only.</p>
+  </section>
+</main>
+<script src="calibration.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

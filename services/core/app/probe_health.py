@@ -77,8 +77,9 @@ def assess_probe(history: List[Dict[str, Any]]) -> Dict[str, Any]:
         days = (datetime.fromisoformat(latest["performed_at"]) - datetime.fromisoformat(first["performed_at"])).total_seconds() / 86400
         if days > 0:
             result["sensitivity_lost_pct_per_30_days"] = round((100.0 - pct) / days * 30.0, 2)
-        shift = latest["v_at_ph7"] - first["v_at_ph7"]
-        result["v_at_ph7_shift_v"] = round(shift, 4)
+        # Rounded to 0.1 mV first: a shift of exactly 0.1 V must not flip with float noise.
+        shift = round(latest["v_at_ph7"] - first["v_at_ph7"], 4)
+        result["v_at_ph7_shift_v"] = shift
         if status == "ok":
             if pct < WORN_PCT:
                 status = "worn"
