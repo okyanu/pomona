@@ -39,22 +39,26 @@ module hydro(){
   }
 }
 
+soil_h=40; // soil body height (V1 was 25); the pot seat and rim pocket stay at the top
+
 module soil(){
-  // 25 mm catch tray, compatible with same 52 mm rim / 50 mm pot footprint.
-  h=25;
+  // Soil V2: soil body for the same 52 mm rim / 50 mm pot footprint, taller than the V1 tray.
+  h=soil_h;
+  assert(h>=25 && h<=120, "soil_h must be 25-120 mm");
+  rail_len=h-10; // rails run from z=8 to 2 mm below the top
   difference(){
     union(){
       cylinder(d=body_od,h=h);
-      rotate([0,0,0]) rail(15);
-      rotate([0,0,120]) rail(15);
-      rotate([0,0,240]) rail(15);
+      rotate([0,0,0]) rail(rail_len);
+      rotate([0,0,120]) rail(rail_len);
+      rotate([0,0,240]) rail(rail_len);
     }
-    translate([0,0,3]) cylinder(d=68,h=19.8);
+    translate([0,0,3]) cylinder(d=68,h=h-5.2);
     // center raised support/drain recess keeps pot centered
-    translate([0,0,19]) cylinder(d=pot_hole_d,h=6.2);
+    translate([0,0,h-6]) cylinder(d=pot_hole_d,h=6.2);
     translate([0,0,h-rim_pocket_depth]) cylinder(d=rim_pocket_d,h=rim_pocket_depth+0.2);
     // drainage holes around pot area
-    for(a=[0:45:315]) translate([20*cos(a),20*sin(a),-0.1]) cylinder(d=3,h=26);
+    for(a=[0:45:315]) translate([20*cos(a),20*sin(a),-0.1]) cylinder(d=3,h=3.2);
   }
 }
 

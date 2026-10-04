@@ -1,4 +1,4 @@
-// Pomona sensor mounts V6.3 for the Hydro V2 / Soil V1 station rail.
+// Pomona sensor mounts V6.3 for the Hydro V2 / Soil V2 station rail.
 // Licence: Apache-2.0 (same as the Pomona repository).
 //
 // Every mount slides onto the station's external T-rail (head 11.0 x 1.6 mm, neck 8.0 mm)

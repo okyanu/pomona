@@ -190,6 +190,41 @@ def check_lid(path, cid):
     return ok
 
 
+def check_seed_box():
+    """Seed box (src/pomona_seed_box.scad defaults): 3 cells of 34 mm, 22 x 22 x 25 mm plugs, plug lid."""
+    box, lid = load(STL_DIR / "pomona_seed_box_v1.stl"), load(STL_DIR / "pomona_seed_box_v1_lid.stl")
+    def bbox(t):
+        vs = [v for tr in t for v in tr]
+        return [min(v[i] for v in vs) for i in range(3)], [max(v[i] for v in vs) for i in range(3)]
+    blo, bhi = bbox(box)
+    llo, lhi = bbox(lid)
+    in_x, in_y = 3 * 34 + 2 * 1.6, 34.0
+    cells = [-in_x / 2 + 17 + i * (34 + 1.6) for i in range(3)]
+    sp_lo, sp_hi = 2.0, 27.0                      # plug z range: on the 2 mm floor, 25 tall
+    sponge_pts = [(cx + dx, dy, z) for cx in cells for dx in (-10.5, 10.5) for dy in (-10.5, 10.5)
+                  for z in (sp_lo + 1, sp_hi - 1)]
+    dividers = [(cx - 17 - 0.8, 0, 6.0) for cx in cells[1:]]
+    lid_plug = [v for tr in lid for v in tr if v[2] > 2.1]
+    checks = {
+        "footprint": abs(bhi[0] - blo[0] - (in_x + 4)) < 0.1 and abs(bhi[1] - blo[1] - (in_y + 4)) < 0.1,
+        "room above plug": (bhi[2] - blo[2]) - sp_hi >= 4 and (bhi[2] - blo[2]) + 2.0 <= 60,
+        "plug volumes empty": not any(inside(box, p) for p in sponge_pts),
+        "flat floors": all(inside(box, (cx, 0, 1.0)) and not inside(box, (cx, 0, 2.5)) for cx in cells),
+        "dividers low": all(inside(box, p) for p in dividers)
+                        and not any(inside(box, (x, 0, 2.0 + 10.5)) for x, _, _ in dividers),
+        "closed mesh": edges_manifold(box) == 0 and edges_manifold(lid) == 0,
+        "lid plug fits opening": max(abs(v[0]) for v in lid_plug) <= in_x / 2 - 0.2
+                                 and max(abs(v[1]) for v in lid_plug) <= in_y / 2 - 0.2,
+        "vents open": all(not inside(lid, (cx + 8, 0, 1.0)) and inside(lid, (cx + 4, 0, 1.0)) for cx in cells),
+        "supportless": overhang_area(box) <= 1.0 and overhang_area(lid) <= 1.0,
+        "fits A1 mini": all(v <= 180 for v in [bhi[0] - blo[0], lhi[0] - llo[0], lhi[1] - llo[1]]),
+    }
+    ok = all(checks.values())
+    print(f"seed box  {'ok' if ok else 'FAIL':4s} box {bhi[0]-blo[0]:.1f} x {bhi[1]-blo[1]:.1f} x {bhi[2]-blo[2]:.1f} mm, "
+          f"closed height {bhi[2]-blo[2]+2.0:.1f} mm " + " ".join(f"[{k}]" for k, v in checks.items() if not v))
+    return ok
+
+
 def main():
     failures = []
     if not check_lid(STL_DIR / "pomona_probe_lid_v1.stl", 110.0):
@@ -199,6 +234,8 @@ def main():
             cid, path = arg.split("=", 1)[1].split(":", 1)
             if not check_lid(Path(path), float(cid)):
                 failures.append(f"lid {cid}")
+    if not check_seed_box():
+        failures.append("seed box")
     for name, spec in PARTS.items():
         path = STL_DIR / f"pomona_v6_3_{name}.stl"
         tris = load(path)

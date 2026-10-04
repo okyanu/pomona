@@ -5,7 +5,7 @@
 anyone may print, modify, remix and sell them, keeping the licence and attribution.
 
 - **Stations** (`src/pomona_dual_station.scad`): a hydroponic body (Hydro V2, 76 × 70 mm)
-  and a soil catch tray (Soil V1, 76 × 25 mm). Both hold a 50 mm pot with a 52 mm rim, and
+  and a soil body (Soil V2, 76 × 40 mm; set `soil_h` to change the height). Both hold a 50 mm pot with a 52 mm rim, and
   both have three external T-rails.
 - **Sensor mounts** (`src/pomona_sensor_mounts.scad`): clips that slide onto those rails and
   hold a pH probe, a DS18B20 temperature probe, an airline hose, a capacitive soil-moisture
@@ -29,12 +29,25 @@ Every file in `stl/` and `3mf/` is generated from these sources by `build.sh`.
 | `stl/pomona_v6_3_moisture.stl` | Capacitive moisture board slot (23 × 1.6 mm board) | 1 |
 | `stl/pomona_v6_3_sht31.stl` | SHT31 post with vented, roofed cage | 1 per zone |
 | `stl/pomona_station_hydro_v2.stl` | Hydroponic station body | 1 |
-| `stl/pomona_station_soil_v1.stl` | Soil catch tray | 1 |
+| `stl/pomona_station_soil_v2.stl` | Soil body, 40 mm tall (V1 tray was 25 mm) | 1 |
 | `stl/pomona_probe_lid_v1_fit_ring.stl` | Container fit test (rim + skirt only). **Print this before the lid** | 1 |
 | `stl/pomona_probe_lid_v1.stl` | Probe lid for a 110 mm container opening (rebuild for your size) | 1 |
+| `stl/pomona_seed_box_v1.stl` | Seed germination box, 109 × 38 × 32 mm, 3 cells for 22 × 22 × 25 mm plugs | 1 |
+| `stl/pomona_seed_box_v1_lid.stl` | Seed box lid (plug fit, 4 vent holes per cell, lift tab). Print plate down | 1 |
+| `3mf/pomona_seed_box_v1_plate_a1mini.3mf` | Seed box + lid on one Bambu A1 mini plate | 1 |
 
 The 50 mm seedling pot itself is not included. Use any pot or net pot with a 50 mm body and a
 52 mm rim.
+
+## Seed germination box
+
+A 109 × 38 mm box (34 mm closed) with 3 cells, one 22 × 22 × 25 mm coco or sponge plug per cell.
+Low 10 mm dividers keep each cell's water separate: pour about 3 mm of water per cell so the plug
+wicks without being submerged. Place a seed in a slit on top of each plug, close the lid (4 vent
+holes per cell), then prop it ajar and remove it as the seedlings grow. Print the box opening up
+and the lid plate down, PETG or PLA, no supports. Set `CELLS` (up to 4 fit the A1 mini bed) or
+`PLUG_CLEAR` (if the lid is tight or loose) in `src/pomona_seed_box.scad`. Not printed yet;
+geometry checked only.
 
 ## Print settings
 
