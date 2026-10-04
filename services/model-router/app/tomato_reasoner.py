@@ -8,6 +8,7 @@ rules so downstream services can integrate against the final response shape.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Dict, List, Optional
 
 from app.backends.chat_json import ollama_chat_json_array
@@ -58,6 +59,13 @@ PESTICIDE_AND_DIAGNOSIS_BLOCKS = [
 # ("hydroponic_greenhouse"), and the hardware event contract ("hydroponic").
 HYDROPONIC_SYSTEM_TYPES = {"controlled_greenhouse", "hydroponic_greenhouse", "hydroponic"}
 
+# Vapour-pressure deficit (kPa) from air temperature and humidity (FAO-56 eq. 11, Magnus form).
+# Below LOW_VPD_KPA leaves stay wet long enough for grey mould and leaf mould even when humidity
+# is under 85 % (e.g. 77 % at 15 C on a cool night). Above HIGH_VPD_KPA tomato stomata close and
+# transpiration outruns the roots; there is no label for that, so it only adds a check.
+LOW_VPD_KPA = 0.4
+HIGH_VPD_KPA = 1.6
+
 
 def add_unique(items: List[str], value: str) -> None:
     if value not in items:
@@ -70,6 +78,15 @@ def missing_input_fields(input_data: Dict[str, Any]) -> List[str]:
     if system_type == "greenhouse_substrate":
         critical.extend(["substrate_temperature_c", "substrate_moisture_pct"])
     return [field for field in critical if input_data.get(field) is None]
+
+def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Optional[float]:
+    """VPD in kPa, or None when either reading is missing, non-numeric or implausible."""
+    numbers = [value for value in (air_temperature_c, humidity_pct)
+               if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)]
+    if len(numbers) != 2 or not -5 <= air_temperature_c <= 60 or not 0 <= humidity_pct <= 100:
+        return None
+    saturation = 0.6108 * math.exp(17.27 * air_temperature_c / (air_temperature_c + 237.3))
+    return round(max(saturation * (1 - humidity_pct / 100), 0.0), 3)
 
 
 def is_actuator_conflict(input_data: Dict[str, Any]) -> bool:
@@ -160,6 +177,14 @@ def derive_tomato_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
             add_unique(risks, "fungal_pressure")
             safe_next_checks.append("inspect canopy and leaf surfaces before any disease conclusion")
 
+    vpd = vapour_pressure_deficit_kpa(air_temp, humidity)
+    if vpd is not None:
+        if vpd < LOW_VPD_KPA and "fungal_pressure" not in risks:
+            add_unique(risks, "fungal_pressure")
+            safe_next_checks.append("low VPD: inspect canopy for condensation before any disease conclusion")
+        elif vpd >= HIGH_VPD_KPA:
+            safe_next_checks.append("high VPD: check irrigation, shading and misting; plants may close stomata")
+
     if substrate_moisture is not None:
         if substrate_moisture < 10 or substrate_moisture > 85:
             add_unique(risks, "water_level_risk")
@@ -189,6 +214,7 @@ def derive_tomato_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
         "safe_next_checks": safe_next_checks,
         "blocked_actions": [action for action in blocked_actions if action in ALLOWED_BLOCKED_ACTIONS],
         "human_review_required": bool(risks or blocked_actions),
+        "vpd_kpa": vpd,
     }
 
 

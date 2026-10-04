@@ -108,6 +108,7 @@ class TomatoRiskReasonerResponse(BaseModel):
     blocked_actions: List[str]
     human_review_required: bool
     fallback_reason: Optional[str] = None
+    vpd_kpa: Optional[float] = None
 
 
 class SensorQualityReasonerRequest(BaseModel):
