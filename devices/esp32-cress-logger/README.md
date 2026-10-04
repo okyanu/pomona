@@ -50,6 +50,29 @@ timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,measurement,u
 - `raw` keeps the ADC value or volts, so readings can be recalculated after a
   later calibration.
 
+## Wi-Fi upload (firmware 0.2.0, optional)
+
+With `WIFI_SSID`, `WIFI_PASSWORD` and `CORE_URL` (for example `http://192.168.1.50:8080`) in
+`config.h`, the logger also sends its SD log to Pomona Core. The SD card stays the source of truth:
+
+- Rows go out **oldest first**, one `POST /v1/sensors/observations` each, and a small
+  `/pomona_<device>.ack` file on the card records how far Core has confirmed. It moves forward only
+  when Core answers 2xx, or for a row Core can never accept (HTTP 400/413/422, a row without a
+  timestamp, or `substrate_temperature_c`, which Core has no field for). Those are counted as
+  skipped and shown in the serial line `upload: sent=… skipped=…`; they stay in the CSV.
+- Any other trouble (Wi-Fi down, Core off, wrong `CORE_API_KEY`, 5xx) stops the session and keeps
+  the offset. The next try comes after 30 s, 1 min, 2 min … up to 15 min, then every
+  `UPLOAD_INTERVAL_MS` (default: every log interval) once it works again. An outage only delays
+  data. Core ignores a repeated boot_id + sequence, so a resend after a lost reply is harmless.
+- Wi-Fi is on only during a session (at most `UPLOAD_MAX_ROWS` = 120 rows or 45 s). A late NTP sync
+  there gives every following row a real timestamp; rows logged before the clock was set stay
+  without one and are skipped (never given a guessed time).
+- `http://` only: use it on a trusted LAN (or a reverse proxy). Set `CORE_API_KEY` to Core's
+  `API_KEY` if Core requires one. `raw` volts never leave the card.
+- Decision logic is in `include/upload_logic.h`; host test:
+  `c++ -std=c++17 -Iinclude extras/test_upload_logic.cpp -o /tmp/t && /tmp/t`.
+  Not bench-tested on the board.
+
 ## Calibration
 
 - **Moisture:** read the raw value with the probe in dry air, then in a glass of

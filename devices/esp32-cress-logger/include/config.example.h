@@ -13,6 +13,13 @@
 // #define WIFI_SSID     "your-ssid"
 // #define WIFI_PASSWORD "your-password"
 
+// Optional upload of the SD log to Pomona Core over Wi-Fi (needs WIFI_SSID above). Rows are sent
+// oldest first and confirmed by Core before the logger moves on, so an outage only delays data:
+// nothing is lost or duplicated, the SD card stays the source of truth. http:// only (trusted LAN).
+// #define CORE_URL     "http://192.168.1.50:8080"
+// #define CORE_API_KEY "same value as API_KEY in Core's .env (leave out if Core has none)"
+// #define UPLOAD_INTERVAL_MS (5UL * 60UL * 1000UL)   // how often to connect and send (default = LOG_INTERVAL_MS)
+
 #define LOG_INTERVAL_MS (5UL * 60UL * 1000UL)
 
 // Pins: common ESP32-S3 DevKit defaults. Check against your board's pinout.

@@ -9,6 +9,7 @@
 #include <SD.h>
 #include <Wire.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <time.h>
 #include <Adafruit_SHT31.h>
 #include <Adafruit_ADS1X15.h>
@@ -17,6 +18,7 @@
 
 #include "config.h"
 #include "ph_calibration.h"
+#include "upload_logic.h"
 
 // pH is logged as the median of several ADS1115 reads per interval. Analog pH
 // boards (PH-4502C style) swing ~1.6 pH within 5 minutes on single reads in
@@ -36,7 +38,24 @@
 #define PH_EXPECTED_SLOPE_SIGN 0
 #endif
 
-static const char *FIRMWARE = "cress-logger-0.1.2";
+// Optional Wi-Fi upload of the SD log to Pomona Core (needs WIFI_SSID and CORE_URL in config.h).
+// The SD card stays the source of truth; see include/upload_logic.h for the retry rules.
+#ifndef UPLOAD_INTERVAL_MS
+#define UPLOAD_INTERVAL_MS LOG_INTERVAL_MS
+#endif
+#ifndef UPLOAD_MAX_ROWS
+#define UPLOAD_MAX_ROWS 120        // rows per session: one pass over a normal 5-minute interval is ~6
+#endif
+#ifndef UPLOAD_SESSION_MS
+#define UPLOAD_SESSION_MS 45000UL  // stop a session after this long, whatever is left waits for the next
+#endif
+#if defined(WIFI_SSID) && defined(CORE_URL)
+#define UPLOAD_ENABLED 1
+#else
+#define UPLOAD_ENABLED 0
+#endif
+
+static const char *FIRMWARE = "cress-logger-0.2.0";
 static const char *CSV_HEADER =
     "timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,"
     "measurement,unit,raw,value,quality,firmware";
@@ -53,6 +72,7 @@ char bootId[17];
 uint32_t sequenceNo = 0;
 PhCalResult phCal = {PhCalState::Uncalibrated, "", 0.0f, 0.0f};
 char logPath[64];
+char ackPath[72];
 
 // Returns false until the clock has been set (NTP); rows then get an empty
 // timestamp, which the importer rejects instead of guessing a time.
@@ -185,12 +205,138 @@ void logPh() {
 #endif
 }
 
+#if UPLOAD_ENABLED
+uint8_t uploadFailures = 0;
+uint32_t nextUploadAt = 0;
+uint32_t uploadedTotal = 0, skippedTotal = 0;
+
+uint32_t readAckOffset() {
+  File f = SD.open(ackPath, FILE_READ);
+  if (!f) return 0;
+  String text = f.readStringUntil('\n');
+  f.close();
+  long value = text.toInt();
+  return value > 0 ? (uint32_t)value : 0;
+}
+
+// Write the new offset next to the old one, then swap: a power cut leaves either the old or the
+// new offset, never a half-written one. An old offset only means some rows are sent twice.
+void writeAckOffset(uint32_t offset) {
+  char tmp[76];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", ackPath);
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) return;
+  f.println(offset);
+  f.close();
+  SD.remove(ackPath);
+  SD.rename(tmp, ackPath);
+}
+
+// Reads one '\n'-terminated line. Returns false at end of file or if the last line is not finished
+// yet (power cut while writing): an unfinished line is never sent.
+bool readLogLine(File &f, char *buf, size_t cap) {
+  size_t n = 0;
+  while (f.available()) {
+    int c = f.read();
+    if (c == '\n') { buf[n] = '\0'; return true; }
+    if (n + 1 < cap) buf[n++] = (char)c;
+  }
+  return false;
+}
+
+bool connectWifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) delay(250);
+  return WiFi.status() == WL_CONNECTED;
+}
+
+void wifiOff() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
+// One upload session: oldest unsent rows first, stop at the first sign of trouble. Returns true
+// when nothing went wrong (including "nothing to send").
+bool uploadBacklog() {
+  if (!sdOk) return true;
+  if (strncmp(CORE_URL, "http://", 7) != 0) {
+    Serial.println("upload: CORE_URL must start with http:// (trusted LAN); https is not supported");
+    return true;
+  }
+  File f = SD.open(logPath, FILE_READ);
+  if (!f) return true;
+  uint32_t offset = readAckOffset();
+  if (offset > f.size()) offset = 0;  // log replaced or card swapped: start over, Core drops repeats
+  if (offset >= f.size()) { f.close(); return true; }
+
+  if (!connectWifi()) {
+    f.close();
+    wifiOff();
+    Serial.println("upload: Wi-Fi not connected, will retry");
+    return false;
+  }
+  if (!clockValid()) {  // a late NTP sync still gives all following rows real timestamps
+    configTime(0, 0, "pool.ntp.org", "time.google.com");
+    for (int i = 0; i < 40 && !clockValid(); i++) delay(250);
+  }
+
+  f.seek(offset);
+  char line[260];
+  char body[560];
+  uint32_t started = millis(), sent = 0, skipped = 0;
+  bool healthy = true;
+  for (int rows = 0; rows < UPLOAD_MAX_ROWS && millis() - started < UPLOAD_SESSION_MS; rows++) {
+    if (!readLogLine(f, line, sizeof(line))) break;
+    uint32_t next = f.position();
+    if (strncmp(line, "timestamp_utc", 13) == 0) { offset = next; continue; }  // header
+    RowResult row = csvRowToObservationJson(line, body, sizeof(body));
+    if (row != RowResult::Ok) { offset = next; skipped++; continue; }  // never sendable: do not block the queue
+    HTTPClient http;
+    http.setTimeout(5000);
+    http.begin(String(CORE_URL) + "/v1/sensors/observations");
+    http.addHeader("Content-Type", "application/json");
+#ifdef CORE_API_KEY
+    http.addHeader("Authorization", String("Bearer ") + CORE_API_KEY);
+#endif
+    int status = http.POST((uint8_t *)body, strlen(body));
+    http.end();
+    HttpAction action = classifyHttpStatus(status);
+    if (action == HttpAction::Retry) {
+      Serial.printf("upload: HTTP %d, will retry\n", status);
+      healthy = false;
+      break;
+    }
+    offset = next;
+    if (action == HttpAction::Ack) sent++; else { skipped++; Serial.printf("upload: Core rejected a row (HTTP %d), skipped\n", status); }
+  }
+  f.close();
+  writeAckOffset(offset);
+  wifiOff();
+  uploadedTotal += sent;
+  skippedTotal += skipped;
+  Serial.printf("upload: sent=%lu skipped=%lu total_sent=%lu total_skipped=%lu ok=%d\n",
+                (unsigned long)sent, (unsigned long)skipped, (unsigned long)uploadedTotal,
+                (unsigned long)skippedTotal, healthy);
+  return healthy;
+}
+
+void uploadIfDue() {
+  if ((int32_t)(millis() - nextUploadAt) < 0) return;
+  bool ok = uploadBacklog();
+  uploadFailures = ok ? 0 : (uploadFailures < 250 ? uploadFailures + 1 : 250);
+  nextUploadAt = millis() + (ok ? UPLOAD_INTERVAL_MS : uploadBackoffMs(uploadFailures));
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   delay(500);
   snprintf(bootId, sizeof(bootId), "%08lx%08lx",
            (unsigned long)esp_random(), (unsigned long)esp_random());
   snprintf(logPath, sizeof(logPath), "/pomona_%s.csv", DEVICE_ID);
+  snprintf(ackPath, sizeof(ackPath), "/pomona_%s.ack", DEVICE_ID);
 
   Wire.begin(PIN_SDA, PIN_SCL);
   shtOk = sht31.begin(0x44);
@@ -225,5 +371,8 @@ void loop() {
     logMoisture();
     logPh();
   }
+#if UPLOAD_ENABLED
+  uploadIfDue();
+#endif
   delay(100);
 }
