@@ -129,8 +129,9 @@ def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
             return None
 
         async def post(self, path, json):
-            self.last_payload = json
-            FakeClient.last_payload = {"path": path, "json": json}
+            FakeClient.payloads.append({"path": path, "json": json})
+            if path == "/v1/pipeline/evaluate":
+                FakeClient.last_payload = {"path": path, "json": json}
             return FakeResponse()
 
     monkeypatch.setattr(dashboard_main, "overview", fake_overview)
@@ -144,6 +145,51 @@ def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
     assert FakeClient.last_payload["json"]["proposed_command"] == {"action_type": "continue_monitoring"}
     assert FakeClient.last_payload["json"]["actor"] == "dashboard"
     assert "source" not in FakeClient.last_payload["json"]["sensor"]
+    # The reading's labels also go to the alert monitor (advisory state, never an actuator).
+    observed = [p["json"] for p in FakeClient.payloads if p["path"] == "/v1/automation/alerts/observe"]
+    assert observed == [{"farm_id": "demo-farm", "zone_id": "greenhouse-a", "device_id": None,
+                         "sample_time": "2026-07-20T10:00:00Z", "risk_labels": []}]
+
+
+def test_pipeline_survives_alert_monitor_outage(monkeypatch):
+    event = {"farm_id": "f", "zone_id": "z", "timestamp": "2026-07-20T10:00:00Z", "air_temperature_c": 24.0,
+             "humidity_pct": 60.0, "ph": 6.0, "ec_ms_cm": 2.0, "soil_moisture_pct": 40.0}
+
+    async def fake_overview():
+        return dashboard_main.OverviewResponse(core_available=True, latest_event=event, recent_events=[event])
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"pipeline_id": "p", "crop_risk": {"risk_labels": ["high_ec"]}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, path, params=None):
+            return dashboard_main.httpx.Response(200, json={"events": [event]},
+                                                 request=dashboard_main.httpx.Request("GET", "http://core" + path))
+
+        async def post(self, path, json):
+            if path == "/v1/automation/alerts/observe":
+                raise dashboard_main.httpx.ConnectError("alert monitor down")
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main, "overview", fake_overview)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    response = client.get("/api/pipeline")
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["result"]["pipeline_id"] == "p"
 
 
 def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
@@ -198,7 +244,8 @@ def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
             )
 
         async def post(self, path, json):
-            FakeClient.last_payload = json
+            if path == "/v1/pipeline/evaluate":
+                FakeClient.last_payload = json
             return FakeResponse()
 
     monkeypatch.setattr(dashboard_main, "overview", fake_overview)

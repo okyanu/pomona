@@ -299,12 +299,49 @@ async def pipeline() -> PipelineResponse:
                 },
             )
             response.raise_for_status()
+        result = response.json()
+        await feed_alert_monitor(event, result)
         event_id = hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return PipelineResponse(available=True, result=response.json(), sensor_event_id=event_id,
+        return PipelineResponse(available=True, result=result, sensor_event_id=event_id,
                                 sensor_timestamp=event.get("timestamp"), sensor_snapshot=event, history_snapshot=history,
                                 history_sha256=hashlib.sha256(json.dumps(history, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
     except Exception as exc:
         return PipelineResponse(available=False, error=f"Integrated pipeline unavailable: {exc}")
+
+
+def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
+    return list(dict.fromkeys([
+        *(result.get("sensor_quality") or {}).get("data_quality_labels", []),
+        *(result.get("water_irrigation") or {}).get("irrigation_risk_labels", []),
+        *(result.get("nutrient_ph_ec") or {}).get("nutrient_risk_labels", []),
+        *(result.get("crop_risk") or {}).get("risk_labels", []),
+    ]))
+
+
+async def feed_alert_monitor(event: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """Give this reading's risk labels to the alert monitor. Failure-isolated: an alert-service
+    outage never hides the pipeline result. Repeated readings are ignored by the monitor."""
+    if not (event.get("farm_id") and event.get("zone_id") and event.get("timestamp")):
+        return
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=2.0) as client:
+            await client.post("/v1/automation/alerts/observe", json={
+                "farm_id": event["farm_id"], "zone_id": event["zone_id"], "device_id": event.get("device_id"),
+                "sample_time": event["timestamp"], "risk_labels": pipeline_risk_labels(result)})
+    except Exception:
+        pass
+
+
+@app.get("/api/alerts", response_model=AutomationResponse)
+async def alerts() -> AutomationResponse:
+    """Alert states (pending / active / recovering) and recent raised / recovered events. Read-only."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=3.0) as client:
+            response = await client.get("/v1/automation/alerts", params=request_scope.get() or None)
+            response.raise_for_status()
+        return AutomationResponse(available=True, result=response.json())
+    except Exception as exc:
+        return AutomationResponse(available=False, error=f"Alert monitor unavailable: {exc}")
 
 
 @app.get("/api/automation", response_model=AutomationResponse)
@@ -358,12 +395,7 @@ async def automation_evaluate() -> AutomationResponse:
         return AutomationResponse(available=False, error="No pipeline result is available to evaluate.")
 
     result = pipeline_data.result
-    risk_labels = list(dict.fromkeys([
-        *(result.get("sensor_quality") or {}).get("data_quality_labels", []),
-        *(result.get("water_irrigation") or {}).get("irrigation_risk_labels", []),
-        *(result.get("nutrient_ph_ec") or {}).get("nutrient_risk_labels", []),
-        *(result.get("crop_risk") or {}).get("risk_labels", []),
-    ]))
+    risk_labels = pipeline_risk_labels(result)
     blocked_actions = (result.get("final_decision") or {}).get("blocked_actions", [])
     try:
         async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=5.0) as client:
@@ -644,7 +676,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
     h1 { margin: 0; font-size: 28px; letter-spacing: 0; display: flex; align-items: center; gap: 10px; }
     .status { color: var(--text-dim); font-size: 14px; }
-    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
+    .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
     .metric { border: 1px solid var(--border); border-left: 3px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 18px; min-height: 84px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: border-color .15s ease, transform .15s ease; }
     .metric:hover { border-color: #484f58; transform: translateY(-1px); }
     .label { color: var(--text-dim); font-size: 13px; }
@@ -661,7 +693,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     .badge.warning { background: var(--warning-bg); color: var(--warning); }
     .badge.danger { background: var(--danger-bg); color: var(--danger); }
     .badge.neutral { background: var(--neutral-bg); color: var(--neutral); }
-    .trend-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .trend-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
     .trend-card { border: 1px solid var(--border); border-left: 3px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 14px; transition: transform .15s ease; }
     .trend-card:hover { transform: translateY(-1px); }
     .trend-card svg { width: 100%; height: 56px; display: block; margin-top: 8px; }
@@ -669,6 +701,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     .accent-humidity { border-left-color: #58a6ff; }
     .accent-ph { border-left-color: #a371f7; }
     .accent-ec { border-left-color: #3fb950; }
+    .accent-vpd { border-left-color: #2bb3c0; }
     @media (max-width: 720px) { .grid, .trend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } .status { display: block; margin-top: 8px; } }
   </style>
 </head>
@@ -690,6 +723,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div class="metric accent-humidity"><div class="label">💧 Humidity</div><div class="value" id="humidity">--</div></div>
     <div class="metric accent-ph"><div class="label">⚗️ pH</div><div class="value" id="ph">--</div></div>
     <div class="metric accent-ec"><div class="label">⚡ EC</div><div class="value" id="ec">--</div></div>
+    <div class="metric accent-vpd" title="Vapour-pressure deficit from air temperature and humidity. Tomato: below 0.4 kPa leaves stay wet (mould risk); above 1.6 kPa plants close stomata."><div class="label">🌫️ VPD</div><div class="value" id="vpd">--</div></div>
   </div>
   <section><h2>Sensor trends</h2><div id="trends" class="empty">Loading...</div></section>
   <section><h2>Integrated guarded pipeline</h2><div id="pipeline" class="empty">Loading...</div></section>
@@ -698,6 +732,10 @@ DASHBOARD_HTML = r"""<!doctype html>
   <section><h2>Recent pipeline audit</h2><div id="audit" class="empty">Loading...</div></section>
   <section><h2>Guarded risk status</h2><div id="risk" class="empty">Loading...</div></section>
   <section><h2>Safety triage</h2><div id="safety" class="empty">Loading...</div></section>
+  <section><h2>Alerts</h2>
+    <p class="status">An alert is raised only after a risk lasts its wait time (10 min; humidity 30 min) and clears only after it stays away (15 min; humidity 30 min), so short flickers do not alert. Advisory only.</p>
+    <div id="alerts" class="empty">Loading...</div>
+  </section>
   <section><h2>Automation suggestions</h2>
     <label>Reviewer label (optional, unverified) <input id="automation-reviewer" maxlength="80" placeholder="Local operator"></label>
     <button id="automation-evaluate" type="button">Evaluate current risk</button>
@@ -727,6 +765,11 @@ DASHBOARD_HTML = r"""<!doctype html>
 <script>
 const $ = (id) => document.getElementById(id);
 const value = (x, suffix = '') => x === null || x === undefined ? '--' : `${x}${suffix}`;
+// Vapour-pressure deficit (kPa), same formula as the tomato rules (FAO-56 eq. 11). Null when a
+// reading is missing or implausible, so it never invents a value.
+const vpdKpa = (t, rh) => (typeof t === 'number' && typeof rh === 'number' && Number.isFinite(t) && Number.isFinite(rh)
+  && t >= -5 && t <= 60 && rh >= 0 && rh <= 100)
+  ? Math.round(Math.max(0.6108 * Math.exp(17.27 * t / (t + 237.3)) * (1 - rh / 100), 0) * 1000) / 1000 : null;
 // Escape API/model text at HTML sinks, including quoted attribute values.
 // Keep plain textContent values unescaped so they display exactly once.
 const escapeHtml = (text) => String(text ?? '').replace(/[&<>"']/g, (char) => ({
@@ -789,7 +832,7 @@ const markUnavailable = (message) => {
   telemetryUnavailable = true;
   twinPreview = null;
   $('status').textContent = `STALE / unavailable: ${message}`;
-  ['air', 'humidity', 'ph', 'ec', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
+  ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
   setAutomationBusy(automationBusy);
 };
 const setAutomationBusy = (busy) => {
@@ -804,6 +847,21 @@ async function automationRequest(url, body) {
   const payload = await response.json();
   if (!payload.available) throw new Error(payload.error || 'Automation request failed.');
   return payload.result;
+}
+async function renderAlerts() {
+  const payload = await (await scopedFetch('/api/alerts')).json();
+  if (!payload.available) { $('alerts').textContent = payload.error || 'Alert monitor unavailable'; return; }
+  const items = payload.result.alerts || [];
+  const recent = (payload.result.events || []).slice(0, 5);
+  const tone = { active: 'danger', pending: 'warning', recovering: 'neutral' };
+  const label = { active: 'active', pending: 'waiting', recovering: 'recovering' };
+  const table = items.length
+    ? `<table><thead><tr><th scope="col">State</th><th scope="col">Rule</th><th scope="col">Message</th><th scope="col">First seen</th><th scope="col">Raised</th><th scope="col">Clear since</th></tr></thead><tbody>${items.map(a => `<tr><td>${badge(label[a.state] || a.state, tone[a.state] || 'neutral')}</td><td>${escapeHtml(a.rule_id)}</td><td>${escapeHtml(a.message || '')}</td><td>${escapeHtml(a.since)}</td><td>${escapeHtml(a.raised_at || '--')}</td><td>${escapeHtml(a.recovering_since || '--')}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="status">No open alerts.</p>';
+  const history = recent.length
+    ? `<p class="status">Recent: ${recent.map(e => `${escapeHtml(e.rule_id)} ${escapeHtml(e.event)} at ${escapeHtml(e.sample_time)}`).join(' · ')}</p>`
+    : '';
+  $('alerts').innerHTML = table + history;
 }
 async function renderAutomation() {
   const automation = await (await scopedFetch('/api/automation')).json();
@@ -889,6 +947,8 @@ async function refreshData() {
     $('humidity').textContent = value(event.humidity_pct, ' %');
     $('ph').textContent = value(event.ph);
     $('ec').textContent = value(event.ec_ms_cm, ' mS/cm');
+    const vpd = vpdKpa(event.air_temperature_c, event.humidity_pct);
+    $('vpd').textContent = vpd === null ? '--' : `${vpd.toFixed(2)} kPa${vpd < 0.4 ? ' · low' : vpd >= 1.6 ? ' · high' : ''}`;
   }
   const chronological = [...data.recent_events].reverse();
   $('trends').innerHTML = `<div class="trend-grid">
@@ -896,6 +956,7 @@ async function refreshData() {
     <div class="trend-card accent-humidity"><div class="label">💧 Humidity (%)</div>${sparkline(chronological.map((e) => e.humidity_pct), '#58a6ff')}</div>
     <div class="trend-card accent-ph"><div class="label">⚗️ pH</div>${sparkline(chronological.map((e) => e.ph), '#a371f7')}</div>
     <div class="trend-card accent-ec"><div class="label">⚡ EC (mS/cm)</div>${sparkline(chronological.map((e) => e.ec_ms_cm), '#3fb950')}</div>
+    <div class="trend-card accent-vpd"><div class="label">🌫️ VPD (kPa)</div>${sparkline(chronological.map((e) => vpdKpa(e.air_temperature_c, e.humidity_pct)), '#2bb3c0')}</div>
   </div>`;
   const pipelineResponse = await scopedFetch('/api/pipeline');
   const pipeline = await pipelineResponse.json();
@@ -965,6 +1026,7 @@ async function refreshData() {
     const safetyBlocked = result.blocked_actions || [];
     $('safety').innerHTML = `<div class="grid"><div class="metric"><div class="label">Decision</div><div class="value">${badge(safetyReview ? 'review' : 'allowed', safetyReview ? 'warning' : 'success')}</div></div><div class="metric"><div class="label">Safety labels</div><div class="value">${badge((result.safety_labels || []).join(', ') || 'none', listSeverity(result.safety_labels))}</div></div><div class="metric"><div class="label">Blocked actions</div><div class="value">${badge(safetyBlocked.join(', ') || 'none', safetyBlocked.length ? 'danger' : 'success')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p>${escapeHtml(result.safe_alternative || 'Continue routine monitoring.')}</p><p class="status">Dashboard view is read-only. No action is executed.</p>`;
   }
+  await renderAlerts();
   await renderAutomation();
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
   $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${escapeHtml(e.timestamp)}</td><td>${escapeHtml(e.farm_id)}</td><td>${escapeHtml(e.zone_id)}</td><td>${escapeHtml(e.crop)}</td><td>${escapeHtml(value(e.air_temperature_c, ' °C'))}</td><td>${escapeHtml(value(e.humidity_pct, ' %'))}</td></tr>`).join('')}</tbody></table>`;

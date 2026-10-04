@@ -51,6 +51,27 @@ time, context, and the first decision are retained; later decisions cannot
 overwrite it. No approval ever executes hardware. Keep the unauthenticated
 service on a trusted local network.
 
+## Alerts (wait and recover)
+
+Suggestions are made when a person presses *Evaluate*. Alerts follow every reading instead:
+the dashboard sends each new reading's risk labels to `POST /v1/automation/alerts/observe`
+(`farm_id`, `zone_id`, optional `device_id`, `sample_time` with a timezone, `risk_labels`).
+
+| State | Meaning |
+|---|---|
+| waiting (`pending`) | A rule's label appeared; it must last `raise_after_seconds` before an alert is raised. If it disappears first, nothing is recorded. |
+| `active` | Raised. One `raised` event per incident. |
+| `recovering` | The label is gone; it must stay away `clear_after_seconds`. If it comes back, the same incident continues. |
+| (cleared) | One `recovered` event; the alert is closed. |
+
+Defaults are 600 s to raise and 900 s to clear (`ALERT_RAISE_AFTER_SECONDS`,
+`ALERT_CLEAR_AFTER_SECONDS`); a rule in `rules.yaml` can set its own `raise_after_seconds` /
+`clear_after_seconds` (humidity uses 30 / 30 minutes, because it swings with every vent and
+irrigation pulse). Time is the sensor's sample time, so retries, replays and late packets
+never move an alert. `GET /v1/automation/alerts?farm_id=&zone_id=` lists open alerts and the
+last raised / recovered events. Alerts are advisory: they never create suggestions or touch
+hardware.
+
 ## Run locally
 
 ```bash

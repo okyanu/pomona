@@ -55,6 +55,14 @@ def load_rules(path: Path) -> List[Dict[str, Any]]:
         if not message or not isinstance(message, str):
             raise InvalidRuleError(f"rule '{rule_id}' missing a string 'message'")
 
+        windows = {}
+        for key in ("raise_after_seconds", "clear_after_seconds"):
+            if key in rule:
+                value = rule[key]
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 7 * 24 * 3600:
+                    raise InvalidRuleError(f"rule '{rule_id}' {key} must be a whole number of seconds, 0 to 7 days")
+                windows[key] = value
+
         seen_ids.add(rule_id)
         validated.append(
             {
@@ -62,6 +70,7 @@ def load_rules(path: Path) -> List[Dict[str, Any]]:
                 "match_any_labels": list(match_any_labels),
                 "action": action,
                 "message": message.strip(),
+                **windows,
             }
         )
     return validated

@@ -10,6 +10,10 @@ rules:
   - id: high_humidity_fan
     match_any_labels: [fungal_pressure]
     action: increase_ventilation
+    # Humidity and VPD swing with every vent or irrigation pulse: raise the alert only after
+    # 30 minutes and clear it only after 30 quiet minutes (other rules use the 10 / 15 min defaults).
+    raise_after_seconds: 1800
+    clear_after_seconds: 1800
     message: >-
       Elevated humidity risk detected. Consider running ventilation or fans,
       and inspect canopy for early fungal signs before any treatment.

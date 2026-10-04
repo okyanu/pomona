@@ -8,16 +8,18 @@ decision; there is no execution path to any hardware or actuator in v0.1.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.rules import InvalidRuleError, evaluate_rules, load_rules
 from app.store import suggestion_store
 from app.advice_cards import suggestions_to_advice_cards
+from app.alerts import AlertMonitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,6 +95,60 @@ class AdviceCardListResponse(BaseModel):
     count: int
     cards: List[AdviceCard]
 
+
+class AlertObserveRequest(BaseModel):
+    farm_id: str = Field(..., min_length=1, max_length=128)
+    zone_id: str = Field(..., min_length=1, max_length=128)
+    device_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    sample_time: datetime
+    risk_labels: List[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("sample_time")
+    @classmethod
+    def timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("sample_time must include a timezone")
+        return value
+
+
+class AlertState(BaseModel):
+    farm_id: str
+    zone_id: str
+    device_id: Optional[str] = None
+    rule_id: str
+    action: Optional[str] = None
+    message: Optional[str] = None
+    state: Literal["pending", "active", "recovering"]
+    since: str
+    raised_at: Optional[str] = None
+    recovering_since: Optional[str] = None
+
+
+class AlertEvent(BaseModel):
+    farm_id: str
+    zone_id: str
+    device_id: Optional[str] = None
+    rule_id: str
+    action: Optional[str] = None
+    message: Optional[str] = None
+    event: Literal["raised", "recovered"]
+    sample_time: str
+
+
+class AlertObserveResponse(BaseModel):
+    ignored: bool
+    events: List[AlertEvent]
+    alerts: List[AlertState]
+
+
+class AlertListResponse(BaseModel):
+    count: int
+    alerts: List[AlertState]
+    events: List[AlertEvent]
+
+
+alert_monitor = AlertMonitor(RULES, settings.alert_raise_after_seconds, settings.alert_clear_after_seconds,
+                             db_path=settings.automation_db_path)
 
 app = FastAPI(
     title="Pomona Automation Engine",
@@ -415,6 +471,25 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         ",".join(rule["id"] for rule in matched_rules) or "none",
     )
     return EvaluateResponse(suggestions=created)
+
+
+@app.post("/v1/automation/alerts/observe", response_model=AlertObserveResponse)
+def observe_alerts(request: AlertObserveRequest) -> AlertObserveResponse:
+    """Feed one reading's risk labels to the alert monitor. Advisory state only; no actuator path."""
+    result = alert_monitor.observe(request.farm_id, request.zone_id, request.device_id,
+                                   request.sample_time, request.risk_labels)
+    for event in result["events"]:
+        logger.info("alert %s rule=%s farm=%s zone=%s sample=%s", event["event"], event["rule_id"],
+                    event["farm_id"], event["zone_id"], event["sample_time"])
+    return AlertObserveResponse(ignored=result["ignored"], events=result["events"],
+                                alerts=alert_monitor.states(request.farm_id, request.zone_id))
+
+
+@app.get("/v1/automation/alerts", response_model=AlertListResponse)
+def list_alerts(farm_id: Optional[str] = Query(default=None, max_length=128),
+                zone_id: Optional[str] = Query(default=None, max_length=128)) -> AlertListResponse:
+    alerts = alert_monitor.states(farm_id, zone_id)
+    return AlertListResponse(count=len(alerts), alerts=alerts, events=alert_monitor.events(farm_id, zone_id))
 
 
 @app.get("/v1/automation/suggestions", response_model=SuggestionListResponse)
