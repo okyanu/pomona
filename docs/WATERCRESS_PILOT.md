@@ -48,7 +48,9 @@ python3 scripts/import_sd_csv.py examples/pilot/manual_readings.csv --farm-id ho
 `private/pilot-data/`). They are the raw record. The Core database is a working
 copy.
 
-Record probe calibrations in Core so later readings have provenance:
+Record probe calibrations in Core so later readings have provenance (`raw` is the probe voltage
+in volts; the dashboard's *pH probe health* panel then tracks sensitivity from one calibration to
+the next):
 
 ```bash
 curl -X POST localhost:8080/v1/sensors/calibrations -H 'Content-Type: application/json' -d '{

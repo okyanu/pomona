@@ -31,6 +31,24 @@ After probes are flagged WARN/FAULT:
 - Sender-reported `calibration_timestamp` on devices remains advisory until a
   matching calibration event exists in core.
 
+## Probe health trend (implemented)
+
+`GET /v1/sensors/probe-health?farm_id=&zone_id=` (and the dashboard's *pH probe health* panel) fits
+volts-vs-pH through each stored pH calibration (`points[].raw` is the probe voltage in volts) and
+reports, per probe, the sensitivity in mV/pH and the pH 7 voltage of the first and the latest
+calibration:
+
+| Status | Meaning |
+|---|---|
+| `ok` | latest sensitivity is at least 90 % of the first calibration |
+| `weakening` | 80-90 %, or the pH 7 voltage moved by 0.1 V or more: clean the probe, recalibrate soon |
+| `worn` | below 80 %: clean, check the buffers, replace if it stays low |
+| `suspect` | the latest calibration is implausible (outside 20-600 mV/pH, or three or more points do not lie on a line): redo it |
+| `baseline_only` | one calibration so far, no trend yet |
+
+It also reports `sensitivity_lost_pct_per_30_days` and days since the last calibration. Advisory
+only: stored readings and calibrations are never changed. Code: `services/core/app/probe_health.py`.
+
 ## Proposed calibration event (sketch)
 
 HTTP/MQTT sibling to modular observations (exact path TBD at implementation):

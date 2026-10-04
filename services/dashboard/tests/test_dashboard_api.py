@@ -38,6 +38,8 @@ def test_scope_is_forwarded_and_does_not_leak_between_requests(monkeypatch):
         assert calls[-1][1] == {"farm_id": "farm", "zone_id": zone, "limit": 20}
         assert client.get("/api/devices", params=query).json()["available"]
         assert calls[-1][1] == query
+        assert client.get("/api/probe-health", params=query).json()["available"]
+        assert calls[-1] == ("/v1/sensors/probe-health", query)
         assert client.get("/api/history", params={**query, "kind": "observations", "offset": 100}).json()["available"]
         assert calls[-1] == ("/v1/sensors/observations", {**query, "limit": 100, "offset": 100})
         assert client.get("/api/history/export.csv", params=query).status_code == 200

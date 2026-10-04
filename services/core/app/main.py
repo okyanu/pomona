@@ -18,6 +18,7 @@ from app.schemas import (
     CalibrationEvent,
     CorrectedObservation,
 )
+from app.probe_health import probe_health
 from app.store import event_store
 
 
@@ -130,6 +131,14 @@ def ingest_corrected(observation: CorrectedObservation) -> CorrectedObservation:
 def list_corrected(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), farm_id: Optional[str] = None, zone_id: Optional[str] = None):
     items = event_store.list_corrected(limit, farm_id, zone_id, offset)
     return {"count": len(items), "corrected_observations": items}
+
+
+@app.get("/v1/sensors/probe-health")
+def probe_health_report(farm_id: Optional[str] = None, zone_id: Optional[str] = None):
+    """pH probe sensitivity trend from stored calibrations. Advisory: never acts, never edits data."""
+    calibrations = event_store.list_calibrations(500, farm_id, zone_id)
+    probes = probe_health(calibrations)
+    return {"count": len(probes), "probes": probes}
 
 
 @app.get("/v1/sensors/recalibrate-next")

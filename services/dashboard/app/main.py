@@ -164,6 +164,18 @@ async def devices():
         return {"available": False, "error": f"Device status unavailable: {exc}"}
 
 
+@app.get("/api/probe-health")
+async def probe_health():
+    """pH probe sensitivity trend from stored calibrations. Read-only."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.core_url, timeout=3.0) as client:
+            response = await client.get("/v1/sensors/probe-health", params=request_scope.get())
+            response.raise_for_status()
+        return {"available": True, "result": response.json()}
+    except Exception as exc:
+        return {"available": False, "error": f"Probe health unavailable: {exc}"}
+
+
 @app.get("/api/history")
 async def history(kind: Literal["events", "observations"] = "events", offset: int = Query(0, ge=0)):
     try:
@@ -716,6 +728,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <button type="submit">Open zone</button>
   </form>
   <p id="scope-status" class="status">Select a farm and zone to monitor.</p>
+  <section><h2>pH probe health</h2><div id="probe-health">Select a zone.</div><p>Sensitivity (mV per pH) is fitted from each stored buffer calibration and compared with the first one. Advisory: it never changes readings or calibrations.</p></section>
   <section><h2>Device health</h2><div id="devices">Select a zone.</div><p>Recent/silent is inferred from last receipt, not proof of connectivity. Quality is sender-reported.</p></section>
   <section><h2>Sensor history</h2><a id="history-download">Download this page as CSV</a><div id="history">Select a zone.</div><p>100 records per page; increase offset by 100 for older records. Pages can shift during ingestion. Modular observations do not feed reasoners.</p></section>
   <div class="grid">
@@ -821,6 +834,11 @@ if (hasScope) $('history-download').href = scopedUrl(`/api/history/export.csv?ki
 async function renderHistory() {
   const devices = await (await scopedFetch('/api/devices')).json();
   $('devices').innerHTML = devices.available ? `<table><thead><tr><th scope="col">Device</th><th scope="col">Last seen</th><th scope="col">Availability</th><th scope="col">Sample stale</th><th scope="col">Reported quality</th></tr></thead><tbody>${(devices.result.devices || []).map(d => `<tr><td>${escapeHtml(d.device_id)}</td><td>${escapeHtml(d.last_seen)}</td><td>${escapeHtml(d.availability)}</td><td>${d.sample_stale ? 'yes' : 'no'}</td><td>${escapeHtml(d.quality || 'not reported')}</td></tr>`).join('')}</tbody></table>` : escapeHtml(devices.error || 'Device status unavailable');
+  const probes = await (await scopedFetch('/api/probe-health')).json();
+  const probeTone = { ok: 'success', baseline_only: 'neutral', weakening: 'warning', worn: 'danger', suspect: 'danger', no_data: 'neutral' };
+  $('probe-health').innerHTML = !probes.available ? escapeHtml(probes.error || 'Probe health unavailable')
+    : (probes.result.probes || []).length ? `<table><thead><tr><th scope="col">Probe</th><th scope="col">Status</th><th scope="col">Sensitivity</th><th scope="col">vs first</th><th scope="col">pH 7 shift</th><th scope="col">Calibrations</th><th scope="col">Since last</th><th scope="col">Advice</th></tr></thead><tbody>${probes.result.probes.map(p => `<tr><td>${escapeHtml(p.sensor_id)}</td><td>${badge(p.status, probeTone[p.status] || 'neutral')}</td><td>${p.latest ? escapeHtml(Number(p.latest.sensitivity_mv_per_ph).toFixed(0)) + ' mV/pH' : '--'}</td><td>${p.sensitivity_vs_first_pct === undefined ? '--' : escapeHtml(p.sensitivity_vs_first_pct) + ' %'}</td><td>${p.v_at_ph7_shift_v === undefined ? '--' : escapeHtml((p.v_at_ph7_shift_v * 1000).toFixed(0)) + ' mV'}</td><td>${escapeHtml(p.calibrations ?? 0)}</td><td>${p.days_since_last_calibration === null || p.days_since_last_calibration === undefined ? '--' : escapeHtml(p.days_since_last_calibration) + ' d'}</td><td>${escapeHtml((p.reasons || []).join(' '))}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="status">No pH calibrations recorded yet. Record one with POST /v1/sensors/calibrations (see the pilot doc).</p>';
   const history = await (await scopedFetch(`/api/history?kind=${historyKind}&offset=${historyOffset}`)).json();
   if (!history.available) { $('history').textContent = history.error || 'History unavailable'; return; }
   const rows = history.result[historyKind] || [];
@@ -832,7 +850,7 @@ const markUnavailable = (message) => {
   telemetryUnavailable = true;
   twinPreview = null;
   $('status').textContent = `STALE / unavailable: ${message}`;
-  ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
+  ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'probe-health', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
   setAutomationBusy(automationBusy);
 };
 const setAutomationBusy = (busy) => {
