@@ -73,6 +73,7 @@ def build_reading() -> dict:
         "npk_target": NPK_TARGET,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": "simulator",
+        "schema_version": "1.0",
     }
 
 

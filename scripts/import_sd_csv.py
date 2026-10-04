@@ -85,6 +85,7 @@ def row_to_observation(row: Dict[str, Any], defaults: Dict[str, str]) -> Tuple[O
         "measurement": measurement,
         "unit": row.get("unit") or UNITS[measurement],
         "timestamp": parsed.isoformat(),
+        "schema_version": "1.0",
     }
     value = row.get("value", "")
     if value:

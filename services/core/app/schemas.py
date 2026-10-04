@@ -20,6 +20,20 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Payload contract version, "MAJOR.MINOR". Senders that omit it are treated as 1.0 (every
+# sender before 2026-10 used the 1.x shape). Minor versions only add optional fields, so any
+# 1.x is accepted; a different major is rejected instead of being stored as if it were 1.x.
+SCHEMA_MAJOR = 1
+SCHEMA_VERSION = "1.0"
+
+
+def check_schema_version(value: str) -> str:
+    major = int(value.split(".", 1)[0])
+    if major != SCHEMA_MAJOR:
+        raise ValueError(f"unsupported schema_version {value}: this Core accepts {SCHEMA_MAJOR}.x")
+    return value
+
+
 class WeatherReading(NumericReadings):
     """Daily weather aggregates for FAO-56 ET calculation (agronomy_calc)."""
 
@@ -70,6 +84,12 @@ class SensorEvent(NumericReadings):
     sequence: Optional[int] = Field(default=None, ge=0, strict=True)
     boot_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     mqtt_retained: bool = False  # Set by transport, not trusted from sender.
+    schema_version: str = Field(default=SCHEMA_VERSION, pattern=r"^[0-9]{1,3}\.[0-9]{1,3}$")
+
+    @field_validator("schema_version")
+    @classmethod
+    def supported_schema(cls, value):
+        return check_schema_version(value)
 
     @field_validator("timestamp")
     @classmethod
@@ -97,6 +117,12 @@ class SensorObservation(NumericReadings):
     firmware: Optional[str] = Field(default=None, max_length=128)
     received_at: Optional[datetime] = None
     mqtt_retained: bool = False
+    schema_version: str = Field(default=SCHEMA_VERSION, pattern=r"^[0-9]{1,3}\.[0-9]{1,3}$")
+
+    @field_validator("schema_version")
+    @classmethod
+    def supported_schema(cls, value):
+        return check_schema_version(value)
 
     @model_validator(mode="after")
     def check_measurement(self):

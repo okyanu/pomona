@@ -21,6 +21,8 @@
     "substrate_temperature_c": {"type": ["number", "null"], "minimum": -40, "maximum": 80},
     "substrate_moisture_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
     "timestamp": {"type": "string", "format": "date-time"},
-    "source": {"type": ["string", "null"], "maxLength": 64}
+    "source": {"type": ["string", "null"], "maxLength": 64},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]{1,3}$", "default": "1.0",
+      "description": "Payload contract version MAJOR.MINOR; omitted means 1.0. Core rejects other majors."}
   }
 }

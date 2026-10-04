@@ -400,3 +400,46 @@ def test_recalibrate_ranking_boosts_sqi_labels(client: TestClient):
     assert suggestions
     assert suggestions[0]["device_id"] == "probe-a"
     assert suggestions[0]["reason"] == "sqi_warn_fault"
+
+
+def test_schema_version_defaults_to_1_0_for_legacy_senders(client):
+    response = client.post("/v1/sensors/events", json=_sensor_payload())
+    assert response.status_code == 201
+    assert response.json()["schema_version"] == "1.0"
+    assert client.get("/v1/sensors/events/latest").json()["schema_version"] == "1.0"
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.3", "1.12"])
+def test_schema_version_accepts_any_1_x(client, version):
+    response = client.post("/v1/sensors/events", json={**_sensor_payload(), "schema_version": version})
+    assert response.status_code == 201
+    assert response.json()["schema_version"] == version
+
+
+@pytest.mark.parametrize("version", ["2.0", "0.9", "1", "v1.0", "1.0.0", 1.0, True, ""])
+def test_schema_version_rejects_other_majors_and_malformed(client, version):
+    payload = {**_sensor_payload(), "schema_version": version}
+    assert client.post("/v1/sensors/events", json=payload).status_code == 422
+    obs = observation_payload(schema_version=version)
+    assert client.post("/v1/sensors/observations", json=obs).status_code == 422
+
+
+def test_observation_keeps_schema_version(client):
+    response = client.post("/v1/sensors/observations", json=observation_payload(schema_version="1.1"))
+    assert response.status_code == 201
+    assert response.json()["schema_version"] == "1.1"
+    assert client.post("/v1/sensors/observations", json=observation_payload()).json()["schema_version"] == "1.0"
+
+
+def test_mqtt_rejects_unsupported_major_without_storing(client):
+    import json
+    ingest = MqttIngestClient()
+    payload = {**_sensor_payload(), "farm_id": "farm", "zone_id": "a", "device_id": "node",
+               "timestamp": datetime.now(timezone.utc).isoformat(), "schema_version": "2.0"}
+    message = SimpleNamespace(topic="pomona/farm/a/sensor/node/state",
+                              payload=json.dumps(payload).encode(), retain=False)
+    ingest._on_message(None, None, message)
+    assert event_store.count() == 0
+    ok = SimpleNamespace(topic=message.topic, payload=json.dumps({**payload, "schema_version": "1.0"}).encode(), retain=False)
+    ingest._on_message(None, None, ok)
+    assert event_store.count() == 1

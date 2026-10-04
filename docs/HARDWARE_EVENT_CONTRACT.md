@@ -32,9 +32,17 @@ The MQTT payload must be one JSON object matching
   "ph": 7.5,
   "soil_moisture_pct": 42.0,
   "timestamp": "2026-07-21T10:00:00Z",
-  "source": "esp32"
+  "source": "esp32",
+  "schema_version": "1.0"
 }
 ```
+
+`schema_version` is the payload contract version, `"MAJOR.MINOR"` as a string. A packet
+without it is treated as `"1.0"`, so older senders keep working. Core accepts any `1.x`
+(minor versions only add optional fields) and rejects another major version, for example
+`"2.0"`, with a validation error instead of storing it as if it were 1.x. The stored payload
+keeps the version, so old records stay readable after the contract changes. The same field
+applies to modular observations (`POST /v1/sensors/observations`).
 
 ## Boundary rules
 
