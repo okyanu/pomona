@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomona -- Guarded Greenhouse Risk Demo</title>
+<style>
+  :root {
+    color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    --bg: #0d1117; --bg-card: #161b22; --border: #30363d; --border-soft: #21262d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #3fb950;
+    --success: #3fb950; --success-bg: rgba(63, 185, 80, 0.15);
+    --warning: #d29922; --warning-bg: rgba(210, 153, 34, 0.15);
+    --danger: #f85149; --danger-bg: rgba(248, 81, 73, 0.15);
+    --radius: 10px;
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .subtitle { color: var(--text-dim); margin-top: 0; }
+  .card { border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius); padding: 18px; margin: 16px 0; }
+  .safety-note { border-left: 3px solid var(--accent); }
+  label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+  input, select { width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  button { cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: #21262d; color: var(--text); padding: 9px 16px; font-size: 14px; }
+  button.primary { background: var(--accent); color: #0d1117; font-weight: 600; border: none; }
+  button:hover { filter: brightness(1.1); }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; margin: 2px 4px 2px 0; }
+  .badge.success { background: var(--success-bg); color: var(--success); }
+  .badge.warning { background: var(--warning-bg); color: var(--warning); }
+  .badge.danger { background: var(--danger-bg); color: var(--danger); }
+  ul { margin: 6px 0; padding-left: 20px; }
+  pre { background: #0d1117; border: 1px solid var(--border-soft); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 13px; }
+  a { color: #58a6ff; }
+  .status { color: var(--text-dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🌱 Pomona -- Guarded Greenhouse & Hydroponic Risk Demo</h1>
+  <p class="subtitle">Enter a tomato sensor reading from a substrate/soil greenhouse or a hydroponic system and get back risk labels, safe next checks, and any blocked actions.</p>
+  <p class="status"><strong>Tomato only.</strong> These are tomato thresholds. In the full platform, other crops (for example the watercress monitoring pilot) get <code>not_applicable</code> instead of tomato advice.</p>
+
+  <div class="card safety-note">
+    <p><b>Advisory only.</b> This demo never controls irrigation, dosing, or any other hardware. It never issues a pesticide or fertigation command and never gives a definitive disease diagnosis -- those are always <b>blocked actions</b> that require a human to review and decide.</p>
+    <p class="status">This demo runs the <a href="https://github.com/okyanu/pomona">Pomona platform</a>'s deterministic tomato rules in your browser -- the same rules path the platform uses, not a simplified stand-in. The full platform can also run the tomato model locally through Ollama, always checked by those same rules; that model path is not part of this static demo.</p>
+    <p class="status">Links: <a href="https://github.com/okyanu/pomona">GitHub platform</a> · <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9">Hugging Face Collection</a> · <a href="https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora">Model card</a> · <a href="https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data">Dataset</a></p>
+  </div>
+
+  <div class="card">
+    <label id="presets-label">Load a preset scenario</label>
+    <div class="presets" role="group" aria-labelledby="presets-label">
+      <button id="preset-routine">Routine reading</button>
+      <button id="preset-nutrient">Hydroponic nutrient / pH risk</button>
+      <button id="preset-missing">Missing / suspect data</button>
+    </div>
+
+    <div class="grid">
+      <div><label for="system_type">System type</label>
+        <select id="system_type">
+          <option value="greenhouse_substrate">Substrate / soil greenhouse</option>
+          <option value="controlled_greenhouse">Hydroponic (recirculating solution)</option>
+        </select>
+      </div>
+      <div><label for="growth_stage">Growth stage</label>
+        <select id="growth_stage">
+          <option value="seedling">seedling</option>
+          <option value="vegetative" selected>vegetative</option>
+          <option value="flowering">flowering</option>
+          <option value="fruiting">fruiting</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid">
+      <div><label for="air_temperature_c">Air temperature (°C)</label><input id="air_temperature_c" type="number" step="0.1" value="24"></div>
+      <div><label for="humidity_pct">Humidity (%)</label><input id="humidity_pct" type="number" step="0.1" value="60"></div>
+      <div><label for="ph">pH</label><input id="ph" type="number" step="0.1" value="6.2"></div>
+      <div><label for="ec_ms_cm">EC (mS/cm)</label><input id="ec_ms_cm" type="number" step="0.1" value="2.5"></div>
+      <div><label for="substrate_temperature_c">Substrate temperature (°C)</label><input id="substrate_temperature_c" type="number" step="0.1" value="22"></div>
+      <div><label for="substrate_moisture_pct">Substrate moisture (%)</label><input id="substrate_moisture_pct" type="number" step="0.1" value="45"></div>
+    </div>
+    <button class="primary" id="run">Run analysis</button>
+  </div>
+
+  <div class="card" id="result"></div>
+  <div class="card"><label>Raw response</label><pre id="raw"></pre></div>
+</main>
+
+<script>
+// Deterministic tomato risk reasoner -- ported 1:1 from
+// services/model-router/app/tomato_reasoner.py in github.com/okyanu/pomona
+// (includes the vapour-pressure-deficit rule added in commit 8b4a7ad).
+// This is the exact guarded logic the Pomona platform runs today.
+const ALLOWED_BLOCKED_ACTIONS = new Set([
+  'direct_pesticide_dosage', 'autonomous_fertigation_change', 'direct_actuator_control',
+  'definitive_disease_diagnosis', 'unsafe_chemical_recommendation',
+]);
+const PESTICIDE_AND_DIAGNOSIS_BLOCKS = [
+  'direct_pesticide_dosage', 'definitive_disease_diagnosis', 'unsafe_chemical_recommendation',
+];
+// Recirculating/no-substrate systems: covers naming drift between the
+// platform ("controlled_greenhouse"), the training dataset
+// ("hydroponic_greenhouse"), and the hardware event contract ("hydroponic").
+const HYDROPONIC_SYSTEM_TYPES = new Set(['controlled_greenhouse', 'hydroponic_greenhouse', 'hydroponic']);
+
+// Vapour-pressure deficit (kPa) from air temperature and humidity (FAO-56 eq. 11, Magnus form).
+// Below LOW_VPD_KPA leaves stay wet even when humidity is under 85 % (e.g. 80 % at 17 C on a cool
+// night); at HIGH_VPD_KPA or more tomato stomata close, which only adds a check (no label).
+const LOW_VPD_KPA = 0.4;
+const HIGH_VPD_KPA = 1.6;
+function vapourPressureDeficitKpa(airTemp, humidity) {
+  const ok = (v) => typeof v === 'number' && Number.isFinite(v);
+  if (!ok(airTemp) || !ok(humidity) || airTemp < -5 || airTemp > 60 || humidity < 0 || humidity > 100) return null;
+  const saturation = 0.6108 * Math.exp(17.27 * airTemp / (airTemp + 237.3));
+  return Math.round(Math.max(saturation * (1 - humidity / 100), 0) * 1000) / 1000;
+}
+
+function addUnique(items, value) { if (!items.includes(value)) items.push(value); }
+
+function missingInputFields(d) {
+  const critical = ['air_temperature_c', 'humidity_pct', 'ph', 'ec_ms_cm'];
+  if (d.system_type === 'greenhouse_substrate') critical.push('substrate_temperature_c', 'substrate_moisture_pct');
+  return critical.filter((f) => d[f] === null || d[f] === undefined);
+}
+
+function isActuatorConflict(d) {
+  const states = d.actuator_states || {};
+  const humidity = d.humidity_pct, moisture = d.substrate_moisture_pct;
+  const screenEnergy = states.screen_energy_pct, screenBlackout = states.screen_blackout_pct, waterFlow = states.water_flow_duration_min;
+  if (humidity != null && humidity >= 88) {
+    if ((screenEnergy != null && screenEnergy >= 80) || (screenBlackout != null && screenBlackout >= 80)) return true;
+  }
+  if (moisture != null && moisture < 30 && waterFlow != null && waterFlow <= 0) return true;
+  return false;
+}
+
+function deriveTomatoRisk(d) {
+  const risks = [], safeNextChecks = [], blockedActions = [];
+  const missing = missingInputFields(d);
+  if (missing.length) { addUnique(risks, 'missing_critical_data'); safeNextChecks.push('restore or manually verify missing critical sensor readings'); }
+
+  const { ph, ec_ms_cm: ec, air_temperature_c: airTemp, humidity_pct: humidity, substrate_temperature_c: substrateTemp, substrate_moisture_pct: substrateMoisture, system_type: systemType } = d;
+
+  if (ph != null) {
+    if (ph <= 3.5 || ph >= 9.0) { addUnique(risks, 'sensor_anomaly'); safeNextChecks.push('inspect pH probe calibration and raw telemetry'); }
+    else if (ph >= 7.2) { addUnique(risks, 'high_ph'); safeNextChecks.push('repeat pH measurement with a calibrated meter'); }
+    else if (ph <= 5.3) { addUnique(risks, 'low_ph'); safeNextChecks.push('repeat pH measurement with a calibrated meter'); }
+  }
+  if (ec != null) {
+    if (ec < 0.01 || ec > 10) { addUnique(risks, 'sensor_anomaly'); safeNextChecks.push('inspect EC sensor units, sample availability, and calibration'); }
+    else if (ec >= 4.5) { addUnique(risks, 'high_ec'); safeNextChecks.push('verify EC manually and review nutrient concentration logs'); }
+    else if (HYDROPONIC_SYSTEM_TYPES.has(systemType) && ec <= 0.8) { addUnique(risks, 'low_ec'); safeNextChecks.push('verify EC manually and review nutrient concentration logs'); }
+    else if (systemType === 'greenhouse_substrate' && ec <= 0.05) { addUnique(risks, 'low_ec'); safeNextChecks.push('verify soil EC manually before making any nutrient conclusion'); }
+  }
+  if (airTemp != null) {
+    if (airTemp < -5 || airTemp > 60) { addUnique(risks, 'sensor_anomaly'); safeNextChecks.push('compare air temperature against a backup sensor'); }
+    else if (airTemp >= 30) { addUnique(risks, 'heat_stress'); safeNextChecks.push('review greenhouse temperature trend and ventilation state'); }
+    else if (airTemp <= 16) { addUnique(risks, 'cold_stress'); safeNextChecks.push('review greenhouse heating state and overnight temperature trend'); }
+  }
+  if (substrateTemp != null) {
+    if (substrateTemp >= 30) { addUnique(risks, 'heat_stress'); safeNextChecks.push('review substrate temperature trend and root-zone conditions'); }
+    else if (substrateTemp <= 16) { addUnique(risks, 'cold_stress'); safeNextChecks.push('review substrate temperature trend and root-zone conditions'); }
+  }
+  if (humidity != null) {
+    if (humidity < 0 || humidity > 100) { addUnique(risks, 'sensor_anomaly'); safeNextChecks.push('validate humidity sensor range'); }
+    else if (humidity >= 85) { addUnique(risks, 'fungal_pressure'); safeNextChecks.push('inspect canopy and leaf surfaces before any disease conclusion'); }
+  }
+  const vpd = vapourPressureDeficitKpa(airTemp, humidity);
+  if (vpd !== null) {
+    if (vpd < LOW_VPD_KPA && !risks.includes('fungal_pressure')) {
+      addUnique(risks, 'fungal_pressure');
+      safeNextChecks.push('low VPD: inspect canopy for condensation before any disease conclusion');
+    } else if (vpd >= HIGH_VPD_KPA) {
+      safeNextChecks.push('high VPD: check irrigation, shading and misting; plants may close stomata');
+    }
+  }
+
+  if (substrateMoisture != null) {
+    if (substrateMoisture < 10 || substrateMoisture > 85) { addUnique(risks, 'water_level_risk'); safeNextChecks.push('confirm substrate moisture with a second reading'); }
+  }
+  if (['high_ph', 'low_ph', 'high_ec', 'low_ec'].some((l) => risks.includes(l))) addUnique(risks, 'nutrient_uptake_issue');
+  if (isActuatorConflict(d)) { addUnique(risks, 'actuator_conflict'); safeNextChecks.push('review actuator state with a human operator before changing settings'); }
+
+  if (['high_ph', 'low_ph', 'high_ec', 'low_ec', 'nutrient_uptake_issue'].some((l) => risks.includes(l))) addUnique(blockedActions, 'autonomous_fertigation_change');
+  if (['heat_stress', 'cold_stress', 'water_level_risk', 'actuator_conflict'].some((l) => risks.includes(l))) addUnique(blockedActions, 'direct_actuator_control');
+  if (risks.includes('fungal_pressure')) PESTICIDE_AND_DIAGNOSIS_BLOCKS.forEach((a) => addUnique(blockedActions, a));
+
+  if (!safeNextChecks.length) safeNextChecks.push('continue routine monitoring');
+
+  return {
+    risk_labels: risks,
+    missing_data: missing,
+    safe_next_checks: safeNextChecks,
+    blocked_actions: blockedActions.filter((a) => ALLOWED_BLOCKED_ACTIONS.has(a)),
+    human_review_required: Boolean(risks.length || blockedActions.length),
+    vpd_kpa: vpd,
+  };
+}
+
+// -- UI wiring --
+const $ = (id) => document.getElementById(id);
+const num = (id) => { const v = $(id).value; return v === '' ? null : Number(v); };
+const badge = (text, severity) => `<span class="badge ${severity}">${text}</span>`;
+
+const PRESETS = {
+  routine: { system_type: 'greenhouse_substrate', growth_stage: 'vegetative', air_temperature_c: 24, humidity_pct: 60, ph: 6.2, ec_ms_cm: 2.5, substrate_temperature_c: 22, substrate_moisture_pct: 45 },
+  nutrient: { system_type: 'controlled_greenhouse', growth_stage: 'fruiting', air_temperature_c: 26, humidity_pct: 65, ph: 7.6, ec_ms_cm: 4.8, substrate_temperature_c: 24, substrate_moisture_pct: 40 },
+  missing: { system_type: 'greenhouse_substrate', growth_stage: 'flowering', air_temperature_c: 25, humidity_pct: 62, ph: '', ec_ms_cm: '', substrate_temperature_c: 23, substrate_moisture_pct: 42 },
+};
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  Object.entries(p).forEach(([key, value]) => { $(key).value = value; });
+  runAnalysis();
+}
+
+function runAnalysis() {
+  const input = {
+    system_type: $('system_type').value,
+    crop: 'tomato',
+    growth_stage: $('growth_stage').value,
+    air_temperature_c: num('air_temperature_c'),
+    humidity_pct: num('humidity_pct'),
+    ph: num('ph'),
+    ec_ms_cm: num('ec_ms_cm'),
+    substrate_temperature_c: num('substrate_temperature_c'),
+    substrate_moisture_pct: num('substrate_moisture_pct'),
+  };
+  const result = deriveTomatoRisk(input);
+  const checks = result.safe_next_checks.map((c) => `<li>${c}</li>`).join('');
+  $('result').innerHTML = `
+    <p><b>Risk labels:</b> ${badge(result.risk_labels.join(', ') || 'normal', result.risk_labels.length ? 'warning' : 'success')}</p>
+    <p><b>Missing critical data:</b> ${badge(result.missing_data.join(', ') || 'none', result.missing_data.length ? 'danger' : 'success')}</p>
+    <p><b>Vapour-pressure deficit:</b> ${badge(result.vpd_kpa === null ? 'n/a' : result.vpd_kpa.toFixed(2) + ' kPa', result.vpd_kpa !== null && (result.vpd_kpa < LOW_VPD_KPA || result.vpd_kpa >= HIGH_VPD_KPA) ? 'warning' : 'success')}</p>
+    <p><b>Human review:</b> ${badge(result.human_review_required ? 'required' : 'not required', result.human_review_required ? 'warning' : 'success')}</p>
+    <p><b>Blocked actions:</b> ${badge(result.blocked_actions.join(', ') || 'none', result.blocked_actions.length ? 'danger' : 'success')}</p>
+    <p><b>Safe next checks:</b></p>
+    <ul>${checks}</ul>
+    <p class="status">Deterministic rules only -- local LoRA inference is not yet wired into the Pomona platform runtime, so this demo shows the platform's real current behavior, not a simplified stand-in.</p>
+  `;
+  $('raw').textContent = JSON.stringify({ ...result, input }, null, 2);
+}
+
+$('run').addEventListener('click', runAnalysis);
+$('preset-routine').addEventListener('click', () => loadPreset('routine'));
+$('preset-nutrient').addEventListener('click', () => loadPreset('nutrient'));
+$('preset-missing').addEventListener('click', () => loadPreset('missing'));
+runAnalysis();
+</script>
+</body>
+</html>

@@ -79,6 +79,12 @@ test-checker:
 	node spaces/sensor-data-checker/tests/parity.test.mjs
 	node spaces/sensor-data-checker/tests/checker.test.mjs
 
+.PHONY: test-demo
+# Greenhouse demo Space: the page's own JavaScript tomato rules must match the Python rules.
+test-demo:
+	services/model-router/.venv/bin/python spaces/pomona-greenhouse-demo/tests/make_parity_cases.py
+	node spaces/pomona-greenhouse-demo/tests/parity.test.cjs
+
 .PHONY: demo-local
 .PHONY: fault-replay
 fault-replay:
