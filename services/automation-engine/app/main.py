@@ -59,6 +59,11 @@ class Suggestion(BaseModel):
     expires_at: Optional[str] = None
     decided_at: Optional[str] = None
     reviewer: Optional[str] = None
+    # Set only after an approval: whether later trusted readings showed the reading recovered.
+    # Approval does not mean the action happened.
+    outcome_status: Optional[Literal["awaiting", "confirmed", "not_recovered", "unconfirmed"]] = None
+    outcome_deadline: Optional[str] = None
+    outcome_evidence: Optional[Dict[str, Any]] = None
 
 
 class DecisionRequest(BaseModel):
@@ -89,6 +94,7 @@ class AdviceCard(BaseModel):
     suggestion_id: Optional[str] = None
     human_review_required: bool
     status: str
+    outcome: Optional[Dict[str, Any]] = None
 
 
 class AdviceCardListResponse(BaseModel):
@@ -102,6 +108,7 @@ class AlertObserveRequest(BaseModel):
     device_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     sample_time: datetime
     risk_labels: List[str] = Field(default_factory=list, max_length=100)
+    data_quality_labels: List[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("sample_time")
     @classmethod
@@ -478,6 +485,9 @@ def observe_alerts(request: AlertObserveRequest) -> AlertObserveResponse:
     """Feed one reading's risk labels to the alert monitor. Advisory state only; no actuator path."""
     result = alert_monitor.observe(request.farm_id, request.zone_id, request.device_id,
                                    request.sample_time, request.risk_labels)
+    if not result["ignored"]:
+        suggestion_store.observe_outcomes(request.farm_id, request.zone_id, request.device_id, request.sample_time,
+                                          request.risk_labels, request.data_quality_labels)
     for event in result["events"]:
         logger.info("alert %s rule=%s farm=%s zone=%s sample=%s", event["event"], event["rule_id"],
                     event["farm_id"], event["zone_id"], event["sample_time"])
@@ -515,7 +525,7 @@ def list_advice_cards(status: Optional[str] = Query(default=None)) -> AdviceCard
 
 @app.post("/v1/automation/suggestions/{suggestion_id}/approve", response_model=Suggestion)
 def approve_suggestion(suggestion_id: str, decision: Optional[DecisionRequest] = None) -> Suggestion:
-    suggestion = suggestion_store.decide(suggestion_id, "approved", decision.reviewer if decision else None)
+    suggestion = suggestion_store.decide(suggestion_id, "approved", decision.reviewer if decision else None, rules=RULES)
     if not suggestion:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     if suggestion["status"] == "expired":

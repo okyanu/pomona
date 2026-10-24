@@ -72,6 +72,26 @@ never move an alert. `GET /v1/automation/alerts?farm_id=&zone_id=` lists open al
 last raised / recovered events. Alerts are advisory: they never create suggestions or touch
 hardware.
 
+## Outcome confirmation (after an approval)
+
+Approval records a decision; it does **not** mean the suggested check or change
+happened. After an approval, `observe` also judges each new reading (sample time,
+same farm/zone/device as the suggestion) and the suggestion carries
+`outcome_status`, `outcome_deadline` and `outcome_evidence`:
+
+| `outcome_status` | Meaning |
+|---|---|
+| `awaiting` | Watching until `outcome_deadline` (approval + `OUTCOME_RESPONSE_WINDOW_SECONDS`, default 7200; a rule may set `response_window_seconds`, 1 s to 7 days). |
+| `confirmed` | `OUTCOME_CONFIRM_READINGS` (default 3) consecutive trusted readings after the approval had none of the rule's labels. This is all it means. |
+| `not_recovered` | The window ended with at least that many trusted readings, but no clean run. |
+| `unconfirmed` | The window ended with too few trusted readings to tell (including no readings at all). |
+
+`POST /v1/automation/alerts/observe` accepts optional `data_quality_labels`; a reading
+with any of them is untrusted and counted only as `untrusted_readings`. Readings sampled
+before the approval, repeated or older samples, and samples more than 60 s ahead of the
+service clock are ignored. Rejected, expired and pre-existing suggestions have no outcome
+(`null`). Advice cards expose the same data under `outcome`. There is no actuator path.
+
 ## Run locally
 
 ```bash

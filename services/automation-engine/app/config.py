@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # before an alert is raised, and stay away this long before it recovers.
     alert_raise_after_seconds: int = Field(default=600, ge=0)
     alert_clear_after_seconds: int = Field(default=900, ge=0)
+    # Outcome confirmation after an approval: how long to watch for recovery (rules.yaml may set
+    # `response_window_seconds` per rule) and how many consecutive trusted clean readings confirm it.
+    outcome_response_window_seconds: int = Field(default=7200, ge=1)
+    outcome_confirm_readings: int = Field(default=3, ge=1)
     # Unset stays ephemeral for serverless/demo deployments; Compose sets a volume path.
     automation_db_path: Optional[Path] = None
 

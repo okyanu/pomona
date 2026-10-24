@@ -31,6 +31,32 @@ What should I check or do about water / climate / nutrients?
 
 Cards advise. They never open valves, change schedules, or dose fertilizer.
 
+## Outcome confirmation
+
+Approving a card does **not** mean anyone did anything. After an approval Pomona
+only watches whether the reading recovered, from later readings (sample time),
+not from the click. A card then carries `outcome` (`null` for rejected, expired
+or older suggestions):
+
+```json
+"outcome": {"status": "awaiting", "deadline": "2026-09-23T14:00:00+00:00",
+            "required_clean_readings": 3, "clean_streak": 1, "readings_seen": 2,
+            "untrusted_readings": 0, "watched_labels": ["high_ec"]}
+```
+
+- `awaiting` — watching until `deadline` (approval time + 2 h by default;
+  a rule can set `response_window_seconds`).
+- `confirmed` — N (default 3) consecutive trusted readings, all sampled after the
+  approval, showed none of the rule's labels. It does not prove the suggested
+  check was done or that it caused the recovery.
+- `not_recovered` — the window ended with enough trusted readings, but the
+  labels did not stay away for N in a row.
+- `unconfirmed` — the window ended with too few trusted readings to tell.
+
+Readings with a sensor data-quality label, readings sampled before the approval,
+repeats, and readings from another farm, zone or device never count. There is
+no actuator path: the outcome is advisory text on the card.
+
 ## Placement
 
 ```text

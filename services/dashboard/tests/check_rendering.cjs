@@ -21,12 +21,15 @@ const replies = {
   '/api/risk': {available: true, result: {sensor_quality: specialist}},
   '/api/safety': {available: true, result: {safe_alternative: attack, safety_labels: [attack]}},
   '/api/automation': {available: true, result: {suggestions: [{id: attack, rule_id: attack,
-    action: attack, message: attack, status: 'pending'}]}},
+    action: attack, message: attack, status: 'pending', outcome_status: attack},
+    {id: 'ok', rule_id: 'r', action: 'a', message: 'm', status: 'approved', outcome_status: 'confirmed'},
+    {id: 'old', rule_id: 'r', action: 'a', message: 'm', status: 'approved', outcome_status: null}]}},
   '/api/advice-cards': {available: true, result: {cards: [{card_id: attack, title: attack,
     summary: attack, severity: 'warn', status: 'pending', opportunity: attack,
     evidence: {sample_time: attack, provenance_status: attack, readings: {[attack]: attack},
       sensor_snapshot: {ph: attack}}, safe_next_checks: [attack], blocked_actions: [attack],
-    human_review_required: true}]}},
+    human_review_required: true, outcome: {status: attack, deadline: attack, clean_streak: attack,
+      required_clean_readings: attack}}]}},
   '/api/probe-health': {available: true, result: {probes: [{sensor_id: attack, status: attack, reasons: [attack],
     latest: {sensitivity_mv_per_ph: 120}, sensitivity_vs_first_pct: attack, v_at_ph7_shift_v: 0.2, calibrations: attack,
     days_since_last_calibration: attack}, {sensor_id: attack, status: 'worn', reasons: [attack], calibrations: 1,
@@ -80,6 +83,12 @@ const context = vm.createContext({
   }
   assert.ok(element('events').innerHTML.includes('<th scope="col">Farm</th>'));
   assert.ok(element('automation').innerHTML.includes(`data-id="${escaped}"`));
+  const automationHtml = element('automation').innerHTML;
+  assert.ok(automationHtml.includes('<th scope="col">Outcome</th>'));
+  assert.ok(automationHtml.includes(`<span class="badge neutral">${escaped}</span>`), 'unknown outcome is escaped, neutral');
+  assert.ok(automationHtml.includes('<span class="badge success">confirmed</span>'));
+  assert.ok(automationHtml.includes('<td>--</td><td>--</td>'), 'untracked outcome shows --');
+  assert.ok(element('advice-cards').innerHTML.includes(`Outcome: <span class="badge neutral">${escaped}</span> · clean readings ${escaped}/${escaped} · until ${escaped}`));
   assert.equal(element('air').textContent, `${attack} °C`);
   // A suggestion ID stays one URL segment when a user clicks Approve.
   const id = 'odd/id?query#fragment';

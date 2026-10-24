@@ -58,6 +58,9 @@ def suggestion_to_advice_card(suggestion: Dict[str, Any]) -> Dict[str, Any]:
         "suggestion_id": suggestion.get("id"),
         "human_review_required": True,
         "status": status,
+        "outcome": ({"status": suggestion["outcome_status"], "deadline": suggestion.get("outcome_deadline"),
+                     **(suggestion.get("outcome_evidence") or {})}
+                    if suggestion.get("outcome_status") else None),
     }
 
 

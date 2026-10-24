@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import subprocess
 from pathlib import Path
@@ -150,7 +151,7 @@ def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
     # The reading's labels also go to the alert monitor (advisory state, never an actuator).
     observed = [p["json"] for p in FakeClient.payloads if p["path"] == "/v1/automation/alerts/observe"]
     assert observed == [{"farm_id": "demo-farm", "zone_id": "greenhouse-a", "device_id": None,
-                         "sample_time": "2026-07-20T10:00:00Z", "risk_labels": []}]
+                         "sample_time": "2026-07-20T10:00:00Z", "risk_labels": [], "data_quality_labels": []}]
 
 
 def test_pipeline_survives_alert_monitor_outage(monkeypatch):
@@ -192,6 +193,31 @@ def test_pipeline_survives_alert_monitor_outage(monkeypatch):
     assert response.status_code == 200
     assert response.json()["available"] is True
     assert response.json()["result"]["pipeline_id"] == "p"
+
+
+def test_alert_feed_sends_data_quality_labels_for_outcome_confirmation(monkeypatch):
+    event = {"farm_id": "f", "zone_id": "z", "device_id": "node", "timestamp": "2026-07-20T10:00:00Z"}
+    result = {"sensor_quality": {"data_quality_labels": ["stuck_value"]}, "crop_risk": {"risk_labels": ["high_ec"]}}
+    sent = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path, json):
+            sent.append((path, json))
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    asyncio.run(dashboard_main.feed_alert_monitor(event, result))
+    assert sent == [("/v1/automation/alerts/observe", {
+        "farm_id": "f", "zone_id": "z", "device_id": "node", "sample_time": "2026-07-20T10:00:00Z",
+        "risk_labels": ["stuck_value", "high_ec"], "data_quality_labels": ["stuck_value"]})]
 
 
 def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):

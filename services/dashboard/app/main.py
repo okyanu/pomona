@@ -339,7 +339,8 @@ async def feed_alert_monitor(event: Dict[str, Any], result: Dict[str, Any]) -> N
         async with httpx.AsyncClient(base_url=settings.automation_engine_url, timeout=2.0) as client:
             await client.post("/v1/automation/alerts/observe", json={
                 "farm_id": event["farm_id"], "zone_id": event["zone_id"], "device_id": event.get("device_id"),
-                "sample_time": event["timestamp"], "risk_labels": pipeline_risk_labels(result)})
+                "sample_time": event["timestamp"], "risk_labels": pipeline_risk_labels(result),
+                "data_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", [])})
     except Exception:
         pass
 
@@ -881,6 +882,7 @@ async function renderAlerts() {
     : '';
   $('alerts').innerHTML = table + history;
 }
+const outcomeBadge = (status) => status ? badge(status, {awaiting: 'warning', confirmed: 'success', not_recovered: 'danger'}[status] || 'neutral') : '--';
 async function renderAutomation() {
   const automation = await (await scopedFetch('/api/automation')).json();
   if (!automation.available) {
@@ -892,7 +894,7 @@ async function renderAutomation() {
     $('automation').innerHTML = `<p class="status">No suggestions yet. Click "Evaluate current risk" to check the latest reading against automation rules.</p>`;
     return;
   }
-  $('automation').innerHTML = `<table><thead><tr><th scope="col">Rule</th><th scope="col">Action</th><th scope="col">Message</th><th scope="col">Status</th><th scope="col">Decision time</th><th scope="col">Reviewer (unverified)</th><th scope="col"></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${escapeHtml(s.rule_id)}</td><td>${escapeHtml(s.action)}</td><td>${escapeHtml(s.message)}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${escapeHtml(s.decided_at || '--')}</td><td>${escapeHtml(s.reviewer || '--')}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${escapeHtml(s.id)}">Approve</button> <button type="button" class="automation-reject" data-id="${escapeHtml(s.id)}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
+  $('automation').innerHTML = `<table><thead><tr><th scope="col">Rule</th><th scope="col">Action</th><th scope="col">Message</th><th scope="col">Status</th><th scope="col">Outcome</th><th scope="col">Decision time</th><th scope="col">Reviewer (unverified)</th><th scope="col"></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${escapeHtml(s.rule_id)}</td><td>${escapeHtml(s.action)}</td><td>${escapeHtml(s.message)}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${outcomeBadge(s.outcome_status)}</td><td>${escapeHtml(s.decided_at || '--')}</td><td>${escapeHtml(s.reviewer || '--')}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${escapeHtml(s.id)}">Approve</button> <button type="button" class="automation-reject" data-id="${escapeHtml(s.id)}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
   setAutomationBusy(automationBusy);
   await renderAdviceCards();
 }
@@ -918,6 +920,7 @@ async function renderAdviceCards() {
       <details><summary>Recorded evidence</summary><pre>${escapeHtml(JSON.stringify(card.evidence || {}, null, 2))}</pre></details>
       <p class="status">Blocked: ${badge((card.blocked_actions || []).join(', ') || 'none', (card.blocked_actions || []).length ? 'danger' : 'success')}</p>
       <p class="status">Status: ${badge(card.status || 'pending', card.status === 'pending' ? 'warning' : 'neutral')}</p>
+      ${card.outcome ? `<p class="status">Outcome: ${outcomeBadge(card.outcome.status)} · clean readings ${escapeHtml(card.outcome.clean_streak ?? 0)}/${escapeHtml(card.outcome.required_clean_readings ?? '--')} · until ${escapeHtml(card.outcome.deadline || '--')}</p>` : ''}
     </article>`).join('')}</div>`;
 }
 document.body.addEventListener('click', async (event) => {
