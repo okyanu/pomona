@@ -46,6 +46,25 @@ Central API and sensor ingest for Pomona.
 | GET | `/v1/sensors/events` | List recent readings |
 | GET | `/v1/sensors/events/latest` | Most recent reading |
 
+## Sample times
+
+`timestamp` is required on every full packet; Core never substitutes its receipt time. Sample
+times before `MIN_SAMPLE_TIME` (default `2020-01-01T00:00:00Z`) are rejected for packets,
+observations and corrected observations (a device clock that was never set). Stored rows are
+not re-checked.
+
+## Outcome feed
+
+When `MODEL_ROUTER_URL` and `AUTOMATION_ENGINE_URL` are both set (Docker Compose sets them),
+Core forwards each new full packet (not duplicates, retained MQTT messages, future-clock or
+stale-sequence readings) to model-router for a `rules_only` evaluation (`actor: core_feed`) and
+then gives the resulting labels to automation-engine's alert monitor, so alerts and approval
+outcomes move without the dashboard open. A background worker with a bounded queue
+(`OUTCOME_FEED_QUEUE_SIZE`) keeps ingest independent: failures are logged, a full queue drops
+readings and counts them in `/health` (`outcome_feed_dropped`). Each forwarded reading writes
+one pipeline audit line in model-router. The feed is advisory only, with no actuator path, and
+is disabled when the URLs are unset.
+
 ## Run locally (without Docker)
 
 ```bash

@@ -12,6 +12,9 @@ from app.config import settings
 from app.schemas import SensorEvent, SensorObservation, CalibrationEvent, CorrectedObservation, utc_now
 
 
+STORED = {"stored": True}  # validation context: rows already in the database skip the sample-time floor
+
+
 class SensorEventStore:
     def __init__(self, max_events: Optional[int] = None, db_path: Optional[Path] = None) -> None:
         self._max_events = max_events if max_events is not None else settings.max_events
@@ -59,7 +62,8 @@ class SensorEventStore:
         finally:
             db.close()
 
-    def _add(self, event, table):
+    def _add(self, event, table) -> bool:
+        """Store one record; True when it is new, current-eligible and not a retained MQTT message."""
         # Table names are internal constants, never API input.
         event.received_at = utc_now()
         payload = json.dumps(event.model_dump(mode="json"), separators=(",", ":"))
@@ -112,9 +116,10 @@ class SensorEventStore:
             db.execute(f"""DELETE FROM {table} WHERE farm_id=? AND zone_id=? AND id NOT IN
                 (SELECT id FROM {table} WHERE farm_id=? AND zone_id=? ORDER BY id DESC LIMIT ?)""",
                        (event.farm_id, event.zone_id, event.farm_id, event.zone_id, self._max_events))
+            return bool(eligible and not duplicate and not event.mqtt_retained)
 
-    def add(self, event: SensorEvent) -> None:
-        self._add(event, "sensor_events")
+    def add(self, event: SensorEvent) -> bool:
+        return self._add(event, "sensor_events")
 
     def add_observation(self, observation: SensorObservation) -> None:
         self._add(observation, "sensor_observations")
@@ -246,7 +251,7 @@ class SensorEventStore:
                 f"SELECT payload FROM {table}{where} ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?",
                 (*values, limit, offset),
             ).fetchall()
-        return [model.model_validate(json.loads(r["payload"])) for r in reversed(rows)]
+        return [model.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
     @staticmethod
     def _filters(farm_id=None, zone_id=None):
@@ -264,10 +269,28 @@ class SensorEventStore:
         with self._lock, self._connect() as db:
             rows = db.execute(f"SELECT payload FROM {table}{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                               (*values, limit, offset)).fetchall()
-        return [model.model_validate(json.loads(r["payload"])) for r in reversed(rows)]
+        return [model.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
     def list_events(self, limit: int = 50, farm_id=None, zone_id=None, offset=0) -> list[SensorEvent]:
         return self._list("sensor_events", SensorEvent, limit, farm_id, zone_id, offset)
+
+    def prior_events(self, event: SensorEvent, limit: int = 11) -> list[SensorEvent]:
+        """Up to `limit` packets of the same farm/zone sampled before `event`, oldest first.
+
+        Strictly earlier sample time; a packet with the same sample time counts only if it was stored
+        before `event` (lower id). Independent of how many newer packets arrived since.
+        """
+        if limit <= 0:
+            return []
+        with self._lock, self._connect() as db:
+            own = db.execute("SELECT MAX(id) FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=? AND timestamp=?",
+                             (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat())).fetchone()[0]
+            rows = db.execute("""SELECT payload FROM sensor_events WHERE farm_id=? AND zone_id=?
+                AND (julianday(timestamp) < julianday(?) OR (julianday(timestamp) = julianday(?) AND id < ?))
+                ORDER BY julianday(timestamp) DESC, id DESC LIMIT ?""",
+                              (event.farm_id, event.zone_id, event.timestamp.isoformat(), event.timestamp.isoformat(),
+                               own if own is not None else -1, limit)).fetchall()
+        return [SensorEvent.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
     def latest_event(self, farm_id=None, zone_id=None) -> Optional[SensorEvent]:
         where, values = self._filters(farm_id, zone_id)
@@ -275,7 +298,7 @@ class SensorEventStore:
         with self._lock, self._connect() as db:
             row = db.execute(f"SELECT payload FROM sensor_events{where} ORDER BY julianday(timestamp) DESC, id DESC LIMIT 1",
                              (*values, (utc_now() + timedelta(seconds=60)).isoformat())).fetchone()
-        return SensorEvent.model_validate(json.loads(row["payload"])) if row else None
+        return SensorEvent.model_validate(json.loads(row["payload"]), context=STORED) if row else None
 
     def list_observations(self, limit=50, farm_id=None, zone_id=None, offset=0):
         return self._list("sensor_observations", SensorObservation, limit, farm_id, zone_id, offset)

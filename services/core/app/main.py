@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import require_api_key
 from app.mqtt_client import mqtt_client
+from app.outcome_feed import outcome_feed
 from app.schemas import (
     HealthResponse,
     SensorEvent,
@@ -36,10 +37,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting pomona-core")
+    outcome_feed.start()
     mqtt_client.start()
     yield
     logger.info("Stopping pomona-core")
     mqtt_client.stop()
+    outcome_feed.stop()
 
 
 app = FastAPI(
@@ -57,6 +60,7 @@ def health() -> HealthResponse:
         service="pomona-core",
         mqtt_connected=mqtt_client.connected,
         events_stored=event_store.count(),
+        outcome_feed_dropped=outcome_feed.dropped,
     )
 
 
@@ -69,7 +73,8 @@ def health() -> HealthResponse:
 def ingest_sensor_event(event: SensorEvent) -> SensorEvent:
     event.mqtt_retained = False
     event.source = event.source or "http"
-    event_store.add(event)
+    if event_store.add(event):
+        outcome_feed.submit(event)
     logger.info(
         "sensor event (http) device=%s farm=%s zone=%s ph=%.2f ec=%.2f",
         event.device_id,

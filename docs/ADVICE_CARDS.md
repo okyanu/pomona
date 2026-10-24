@@ -53,6 +53,9 @@ or older suggestions):
   labels did not stay away for N in a row.
 - `unconfirmed` — the window ended with too few trusted readings to tell.
 
+Core feeds these readings itself: each new full packet is forwarded for a rules-only
+evaluation and then to the alert monitor, so outcomes advance even when no dashboard is open.
+
 Readings with a sensor data-quality label, readings sampled before the approval,
 repeats, and readings from another farm, zone or device never count. There is
 no actuator path: the outcome is advisory text on the card.

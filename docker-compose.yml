@@ -43,6 +43,10 @@ services:
       RETENTION_DAYS: ${RETENTION_DAYS:-7}
       DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-120}
       API_KEY: ${API_KEY:-}
+      MIN_SAMPLE_TIME: ${MIN_SAMPLE_TIME:-2020-01-01T00:00:00Z}
+      MODEL_ROUTER_URL: ${MODEL_ROUTER_URL:-http://model-router:8081}
+      AUTOMATION_ENGINE_URL: ${AUTOMATION_ENGINE_URL:-http://automation-engine:8085}
+      OUTCOME_FEED_QUEUE_SIZE: ${OUTCOME_FEED_QUEUE_SIZE:-1000}
     volumes:
       - core_data:/app/data
     depends_on:

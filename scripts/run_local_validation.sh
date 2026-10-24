@@ -34,6 +34,7 @@ trap cleanup EXIT
 echo "Starting local validation stack"
 start_core() {
   PYTHONPATH="${ROOT_DIR}/services/core" DB_PATH="${DB_PATH}" MQTT_HOST=127.0.0.1 \
+    MODEL_ROUTER_URL="http://127.0.0.1:${ROUTER_PORT}" AUTOMATION_ENGINE_URL="http://127.0.0.1:${AUTOMATION_ENGINE_PORT}" \
     "${PY_CORE}" -m uvicorn app.main:app --app-dir "${ROOT_DIR}/services/core" \
     --host 127.0.0.1 --port "${CORE_PORT}" >"${TMP_DIR}/core.log" 2>&1 &
   CORE_PID=$!
@@ -99,6 +100,19 @@ curl -fsS -X POST "http://127.0.0.1:${CORE_PORT}/v1/sensors/events" \
   -d '{"device_id":"local-validation-01","farm_id":"demo-farm","zone_id":"greenhouse-a","crop":"tomato","growth_stage":"fruiting","air_temperature_c":33.0,"humidity_pct":80.0,"ec_ms_cm":3.8,"ph":5.2,"soil_moisture_pct":27.0,"timestamp":"'"${VALIDATION_TIME}"'","source":"local-validation"}' \
   >"${TMP_DIR}/event.json"
 
+# Core alone feeds the alert monitor: this zone is never read through the dashboard. Sampled a minute
+# earlier so it never becomes the latest event the later checks expect.
+FEED_TIME="$("${PY_CORE}" -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())')"
+curl -fsS -X POST "http://127.0.0.1:${CORE_PORT}/v1/sensors/events" \
+  -H 'Content-Type: application/json' \
+  -d '{"device_id":"core-feed-01","farm_id":"demo-farm","zone_id":"core-feed-zone","crop":"tomato","growth_stage":"fruiting","air_temperature_c":33.0,"humidity_pct":80.0,"ec_ms_cm":3.8,"ph":5.2,"soil_moisture_pct":27.0,"timestamp":"'"${FEED_TIME}"'","source":"local-validation"}' \
+  >/dev/null
+for _ in $(seq 1 10); do
+  curl -fsS "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}/v1/automation/alerts?farm_id=demo-farm&zone_id=core-feed-zone" >"${TMP_DIR}/core-feed-alerts.json"
+  if "${PY_CORE}" -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["count"] else 1)' "${TMP_DIR}/core-feed-alerts.json"; then break; fi
+  sleep 1
+done
+
 kill "${CORE_PID}" 2>/dev/null || true
 wait "${CORE_PID}" 2>/dev/null || true
 start_core
@@ -119,7 +133,7 @@ curl -fsS -X POST "http://127.0.0.1:${ROUTER_PORT}/v1/pipeline/evaluate" \
   -d '{"scenario_id":"local-validation-lettuce-normal","farm_context":{"crop":"lettuce","system_type":"hydroponic","zone_id":"rack-1"},"sensor":{"air_temperature_c":21.0,"humidity_pct":64.0,"ph":6.1,"ec_ms_cm":1.8,"water_temperature_c":20.0,"timestamp":"'"${VALIDATION_TIME}"'"},"expected_fields":["air_temperature_c","humidity_pct","ph","ec_ms_cm","water_temperature_c"],"proposed_command":{"action_type":"continue_monitoring"},"actor":"local_validation","mode":"hybrid_guarded"}' \
   >"${TMP_DIR}/normal.json"
 
-"${PY_CORE}" - "${TMP_DIR}/pipeline.json" "${TMP_DIR}/audit.json" "${TMP_DIR}/safety.json" "${TMP_DIR}/services.json" "${TMP_DIR}/runtimes.json" "${TMP_DIR}/normal.json" "${TMP_DIR}/dashboard.html" "${TMP_DIR}/restarted-event.json" <<'PY'
+"${PY_CORE}" - "${TMP_DIR}/pipeline.json" "${TMP_DIR}/audit.json" "${TMP_DIR}/safety.json" "${TMP_DIR}/services.json" "${TMP_DIR}/runtimes.json" "${TMP_DIR}/normal.json" "${TMP_DIR}/dashboard.html" "${TMP_DIR}/restarted-event.json" "${TMP_DIR}/core-feed-alerts.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -132,6 +146,7 @@ runtimes = json.loads(Path(sys.argv[5]).read_text())
 normal = json.loads(Path(sys.argv[6]).read_text())
 dashboard = Path(sys.argv[7]).read_text()
 restarted_event = json.loads(Path(sys.argv[8]).read_text())
+core_feed_alerts = json.loads(Path(sys.argv[9]).read_text())
 assert pipeline["available"] is True
 decision = pipeline["result"]["final_decision"]
 assert decision["human_review_required"] is True
@@ -151,6 +166,7 @@ assert "Integrated guarded pipeline" in dashboard
 assert "Recent pipeline audit" in dashboard
 assert "Read-only dashboard view" in dashboard
 assert restarted_event["device_id"] == "local-validation-01"
+assert core_feed_alerts["count"] >= 1 and all(a["state"] == "pending" for a in core_feed_alerts["alerts"])
 print("Local validation passed")
 print("Pipeline:", pipeline["result"]["pipeline_id"])
 print("Risk:", decision["risk_level"])
@@ -162,4 +178,5 @@ print("Rules runtime:", runtimes["result"]["rules"]["available"])
 print("Normal path: routine")
 print("Dashboard HTML: verified")
 print("SQLite restart recovery: verified")
+print("Core outcome feed (no dashboard): alerts pending", core_feed_alerts["count"])
 PY

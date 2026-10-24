@@ -9,6 +9,7 @@ TMP_DIR="$(mktemp -d /tmp/pomona-backup-validation.XXXXXX)"
 BACKUP_PATH="${TMP_DIR}/pomona-backup.db"
 RESTORED_PATH="${TMP_DIR}/pomona-restored.db"
 DEVICE_ID="backup-validation-$(date +%s)"
+SAMPLE_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 wait_for_health() {
@@ -22,7 +23,7 @@ wait_for_health() {
 wait_for_health
 curl -fsS -X POST "${CORE_URL}/v1/sensors/events" \
   -H 'Content-Type: application/json' \
-  -d "{\"device_id\":\"${DEVICE_ID}\",\"farm_id\":\"demo-farm\",\"zone_id\":\"greenhouse-a\",\"crop\":\"tomato\",\"growth_stage\":\"flowering\",\"system_type\":\"greenhouse_substrate\",\"air_temperature_c\":25.0,\"humidity_pct\":64.0,\"ec_ms_cm\":2.0,\"ph\":6.1,\"soil_moisture_pct\":50.0,\"source\":\"backup-validation\"}" \
+  -d "{\"device_id\":\"${DEVICE_ID}\",\"farm_id\":\"demo-farm\",\"zone_id\":\"greenhouse-a\",\"crop\":\"tomato\",\"growth_stage\":\"flowering\",\"system_type\":\"greenhouse_substrate\",\"air_temperature_c\":25.0,\"humidity_pct\":64.0,\"ec_ms_cm\":2.0,\"ph\":6.1,\"soil_moisture_pct\":50.0,\"timestamp\":\"${SAMPLE_TIME}\",\"source\":\"backup-validation\"}" \
   >/dev/null
 
 docker compose cp core:/app/data/pomona.db "${BACKUP_PATH}"

@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from typing import Dict, Optional, Literal
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+from pydantic import BaseModel, Field, ConfigDict, ValidationInfo, model_validator, field_validator
+
+from app.config import settings
 
 
 class NumericReadings(BaseModel):
@@ -31,6 +33,17 @@ def check_schema_version(value: str) -> str:
     major = int(value.split(".", 1)[0])
     if major != SCHEMA_MAJOR:
         raise ValueError(f"unsupported schema_version {value}: this Core accepts {SCHEMA_MAJOR}.x")
+    return value
+
+
+def check_sample_floor(value: datetime, info: ValidationInfo) -> datetime:
+    """Reject sample times from a device clock that was never set. Stored rows are read back unchecked."""
+    floor = settings.min_sample_time
+    stored = bool(info.context and info.context.get("stored"))
+    if value.tzinfo is not None and not stored and value < floor:
+        raise ValueError(
+            f"timestamp {value.isoformat()} is before the minimum accepted sample time {floor.isoformat()}; "
+            "check the device clock, NTP sync or RTC battery")
     return value
 
 
@@ -78,7 +91,7 @@ class SensorEvent(NumericReadings):
     zone_area_m2: Optional[float] = Field(default=None, gt=0.0, le=1_000_000.0)
     crop_kc: Optional[float] = Field(default=None, ge=0.0, le=3.0)
     npk_target: Optional[NpkTargetReading] = None
-    timestamp: datetime = Field(default_factory=utc_now)
+    timestamp: datetime  # Required: Core never invents a sample time.
     source: Optional[str] = None
     received_at: Optional[datetime] = None  # Set by Core, never trusted from the sender.
     sequence: Optional[int] = Field(default=None, ge=0, strict=True)
@@ -93,10 +106,10 @@ class SensorEvent(NumericReadings):
 
     @field_validator("timestamp")
     @classmethod
-    def timezone_required(cls, value):
+    def timezone_required(cls, value, info: ValidationInfo):
         if value.tzinfo is None:
             raise ValueError("timestamp must include a timezone")
-        return value.astimezone(timezone.utc)
+        return check_sample_floor(value.astimezone(timezone.utc), info)
 
 
 class SensorObservation(NumericReadings):
@@ -124,6 +137,11 @@ class SensorObservation(NumericReadings):
     def supported_schema(cls, value):
         return check_schema_version(value)
 
+    @field_validator("timestamp")
+    @classmethod
+    def sample_time_floor(cls, value, info: ValidationInfo):
+        return check_sample_floor(value, info)
+
     @model_validator(mode="after")
     def check_measurement(self):
         bounds = {"air_temperature_c": ("C", -40, 80), "water_temperature_c": ("C", -10, 80),
@@ -149,6 +167,7 @@ class HealthResponse(BaseModel):
     service: str
     mqtt_connected: bool
     events_stored: int
+    outcome_feed_dropped: int = 0
 
 
 class CalibrationPoint(NumericReadings):
@@ -207,10 +226,10 @@ class CorrectedObservation(NumericReadings):
 
     @field_validator("timestamp")
     @classmethod
-    def timezone_required_corrected(cls, value):
+    def timezone_required_corrected(cls, value, info: ValidationInfo):
         if value.tzinfo is None:
             raise ValueError("timestamp must include a timezone")
-        return value.astimezone(timezone.utc)
+        return check_sample_floor(value.astimezone(timezone.utc), info)
 
 
 class SensorEventListResponse(BaseModel):

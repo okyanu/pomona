@@ -31,6 +31,11 @@ Devices / Simulator
 | **automation-engine** | YAML rules → suggestions | ⏳ Phase 6, partial |
 | **digital-twin** | Illustrative forecast scenarios, not hardware commands | ⏳ Local preview |
 
+Core forwards each new full packet to model-router (`rules_only`) and automation-engine
+so alerts and approval outcomes move without the dashboard open; each forwarded reading
+writes one pipeline audit line in model-router. This is advisory only, with no actuator
+path, and is disabled when `MODEL_ROUTER_URL` / `AUTOMATION_ENGINE_URL` are unset.
+
 Core uses SQLite for sensor events. Automation uses a separate SQLite file
 on a named volume in Docker Compose, with bounded history retention. Neither
 the model nor a recorded approval has a hardware execution path. Local

@@ -58,6 +58,13 @@ Supported deployment profiles are represented by `system_type`, for example
 `soil`, `greenhouse_substrate`, `hydroponic`, and `aquaponic`. The transport
 contract is shared, but each profile needs its own expected fields and rules.
 
+`timestamp` (the sample time, with a timezone) is required: Core never stamps a
+packet with its own receipt time. Sample times before `MIN_SAMPLE_TIME` (default
+`2020-01-01T00:00:00Z`) are rejected for full packets, observations and corrected
+observations, because an ESP32 without NTP reports 1970 and a dead RTC battery
+often 2000; check the device clock, NTP sync or RTC battery. Stored rows are not
+re-checked.
+
 Core rejects malformed packets and values outside these transport ranges. A
 value inside the transport range can still be agronomically suspicious; the
 Sensor Quality reasoner remains responsible for stale, conflicting, drift, or

@@ -8,6 +8,7 @@ except ModuleNotFoundError:
     mqtt = None  # type: ignore[assignment]
 
 from app.config import settings
+from app.outcome_feed import outcome_feed
 from app.schemas import SensorEvent, SensorObservation
 from app.store import event_store
 
@@ -73,7 +74,8 @@ class MqttIngestClient:
             logger.exception("Failed to process MQTT message on topic %s", message.topic)
 
     def _default_handler(self, event: SensorEvent) -> None:
-        event_store.add(event)
+        if event_store.add(event):
+            outcome_feed.submit(event)
         logger.info(
             "sensor event device=%s farm=%s zone=%s ph=%.2f ec=%.2f temp=%.1f humidity=%.0f",
             event.device_id,
