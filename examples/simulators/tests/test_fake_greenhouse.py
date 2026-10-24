@@ -1,7 +1,10 @@
 """Tests for the fake greenhouse. Run with the Core venv: it provides pytest and Core's SensorEvent."""
 
+import http.client
 import json
+import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -363,3 +366,254 @@ def test_ticks_flag_overrides_the_scenario_and_truth_log_is_not_in_events(tmp_pa
                              "--ticks", "3")
     assert len(truth.splitlines()) == 6 and len(events.splitlines()) == 6
     assert b"expect" not in events and b"true" not in events
+
+
+# --- Control page ------------------------------------------------------------------------
+
+@pytest.fixture
+def control():
+    """A simulation with a control server on a free port, driven by hand (no sleeping loop)."""
+    sim = fg.Simulation(seed=7, clock=make_clock())
+    server = fg.start_control_server(sim, "127.0.0.1", 0)
+    port = server.server_address[1]
+
+    def call(method, path, body=None, content_type="application/json", raw=None, host=None):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        headers = {"Content-Type": content_type} if content_type else {}
+        if host:
+            headers["Host"] = host
+        data = raw if raw is not None else (None if body is None else json.dumps(body))
+        conn.request(method, path, data, headers)
+        response = conn.getresponse()
+        text = response.read().decode()
+        conn.close()
+        parsed = json.loads(text) if response.getheader("Content-Type", "").startswith("application/json") else text
+        return response.status, parsed, response
+
+    yield sim, call
+    server.shutdown()
+    server.server_close()
+
+
+def numbers_and_keys(value, numbers, keys):
+    if isinstance(value, dict):
+        keys.update(value)
+        for item in value.values():
+            numbers_and_keys(item, numbers, keys)
+    elif isinstance(value, list):
+        for item in value:
+            numbers_and_keys(item, numbers, keys)
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        numbers.add(value)
+
+
+def test_control_commands_apply_at_the_next_step_and_are_recorded(control):
+    sim, call = control
+    sim.step()
+    sim.step()
+    status, body, _ = call("POST", "/api/start", {"name": "jump", "zone": B, "field": "ph", "params": {"offset": 2}})
+    assert status == 200 and body == {"ok": True, "queued": 1}
+    state = call("GET", "/api/state")[1]
+    assert (state["queued"], state["recorded"], state["tick"]) == (1, 0, 2)
+    assert state["pending"] == [{"op": "start", "name": "jump", "zone": B, "field": "ph"}]
+    assert all(not z["injections"] for z in state["zones"])  # not applied yet
+
+    readings = {r.truth["zone_id"]: r.truth for r in sim.step()}
+    fault = readings[B]["active_faults"][0]
+    assert (fault["name"], fault["field"], fault["started_tick"], fault["source"]) == ("jump", "ph", 2, "manual")
+    assert not readings[A]["active_faults"]
+    state = call("GET", "/api/state")[1]
+    assert (state["queued"], state["recorded"]) == (0, 1)
+    assert state["zones"][1]["injections"] == [
+        {"name": "jump", "field": "ph", "started_tick": 2, "stopping": False, "source": "manual"}]
+
+    call("POST", "/api/stop", {"name": "jump", "zone": B})
+    assert {r.truth["zone_id"]: r.truth for r in sim.step()}[B]["active_faults"] == []
+    steps = call("GET", "/api/scenario")[1]["steps"]
+    assert steps == [
+        {"at_tick": 2, "start": "jump", "zone": B, "field": "ph", "params": {"offset": 2}, "source": "manual"},
+        {"at_tick": 3, "stop": "jump", "zone": B, "source": "manual"}]
+
+
+def test_control_rejects_bad_requests_before_they_reach_the_tick_loop(control):
+    sim, call = control
+    ok = {"name": "jump", "zone": B, "field": "ph"}
+    assert call("POST", "/api/start", ok, content_type="text/plain")[0] == 415
+    assert call("POST", "/api/start", ok, content_type=None)[0] == 415
+    assert call("POST", "/api/start", ok, content_type="application/x-www-form-urlencoded")[0] == 415
+    assert call("POST", "/api/stop_all", {}, content_type="text/plain")[0] == 415
+    bad = [
+        {**ok, "name": "nope"}, {**ok, "zone": "greenhouse-z"}, {"name": "dry_zone", "zone": B},
+        {"name": "stuck", "zone": A}, {**ok, "params": {"offset": "big"}}, {**ok, "params": {"bogus": 1}},
+        {**ok, "params": [1]}, {**ok, "field": "water_temperature_c"}, {"name": "heat_spike", "zone": A, "field": "ph"},
+        {"name": "heat_spike", "zone": A, "params": {"ramp_min": 0}}, {"name": ["jump"], "zone": B},
+    ]
+    for body in bad:
+        status, payload, _ = call("POST", "/api/start", body)
+        assert status == 400 and payload["error"], body
+    assert call("POST", "/api/start", raw="{not json")[0] == 400
+    assert call("POST", "/api/start", body=[1, 2])[0] == 400
+    assert call("POST", "/api/stop", {"name": "nope", "zone": A})[0] == 400
+    assert call("POST", "/api/stop", {"id": 99})[0] == 400
+    assert call("POST", "/api/nope", {})[0] == 404 and call("GET", "/api/nope")[0] == 404
+    assert call("GET", "/api/state", host="evil.example")[0] == 403  # DNS rebinding guard
+    assert call("GET", "/api/state")[1]["queued"] == 0
+    assert sim.pending == []
+
+
+def test_control_state_never_exposes_the_truth_or_the_answer_key(control):
+    sim, call = control
+    call("POST", "/api/start", {"name": "heat_spike", "zone": A, "params": {"ramp_min": 5}})
+    call("POST", "/api/start", {"name": "jump", "zone": B, "field": "ph"})
+    truths = []
+    for _ in range(40):
+        truths += [r.truth for r in sim.step()]
+    state = call("GET", "/api/state")[1]
+    text = json.dumps(state)
+    numbers, keys = set(), set()
+    numbers_and_keys(state, numbers, keys)
+    assert not {"true", "expect", "expected_labels", "forbid_domain_cards_from", "sim_time", "sim_hour",
+                "level", "water_temperature_c", "vpd_kpa"} & keys
+    assert '"true"' not in text and '"expect"' not in text
+    # True values carry 4 decimals; sent values are rounded to 2, so a true value in the state would be a leak.
+    true_values = {v for t in truths for v in t["true"].values()
+                   if isinstance(v, float) and round(v, 2) != v}
+    assert true_values and not (true_values & numbers)
+    assert max(t["true"]["air_temperature_c"] for t in truths) >= 30  # the event did change the truth
+    assert state["zones"][0]["last_sent"] == truths[-2]["sent"]
+    assert call("GET", "/api/catalog")[1]["injections"]  # the catalog has no run data either
+    assert '"true"' not in json.dumps(call("GET", "/api/catalog")[1])
+
+
+def test_hidden_injections_are_anonymous_until_reveal(control):
+    sim, call = control
+    sim.step()
+    status, body, _ = call("POST", "/api/hidden", {})
+    assert status == 200 and body["id"] == 1
+    assert call("GET", "/api/state")[1]["hidden"] == [{"hidden": True, "id": 1, "queued": True}]
+    sim.step()
+    entry = sim.hidden_log[0]
+    state = call("GET", "/api/state")[1]
+    assert state["hidden"] == [{"hidden": True, "id": 1}]
+    assert all(not z["injections"] for z in state["zones"])
+    assert entry["name"] not in json.dumps(state)
+
+    # Pressing the same visible button neither merges with it nor reveals it.
+    call("POST", "/api/start", {"name": entry["name"], "zone": entry["zone"], "field": entry["field"]})
+    sim.step()
+    state = call("GET", "/api/state")[1]
+    zone = next(z for z in state["zones"] if z["zone_id"] == entry["zone"])
+    assert [i["name"] for i in zone["injections"]] == [entry["name"]] and state["hidden"] == [{"hidden": True, "id": 1}]
+    call("POST", "/api/stop", {"name": entry["name"], "zone": entry["zone"]})  # stops only the visible one
+    sim.step()
+    state = call("GET", "/api/state")[1]
+    assert state["hidden"] == [{"hidden": True, "id": 1}]
+    assert all(not z["injections"] for z in state["zones"])
+
+    status, body, _ = call("POST", "/api/reveal", {})
+    revealed = body["hidden"][0]
+    assert (revealed["name"], revealed["zone"], revealed["started_tick"], revealed["active"]) == (
+        entry["name"], entry["zone"], 1, True)
+    shown = call("GET", "/api/state")[1]["hidden"][0]
+    assert (shown["name"], shown["zone"], shown["started_tick"]) == (entry["name"], entry["zone"], 1)
+    call("POST", "/api/stop", {"id": 1})
+    sim.step()
+    hidden_after = call("GET", "/api/state")[1]["hidden"]
+    assert not hidden_after or hidden_after[0]["stopping"]  # a ramping event lingers, a fault is gone
+    recorded = call("GET", "/api/scenario")[1]["steps"]
+    assert recorded[0]["start"] == entry["name"] and recorded[0]["source"] == "hidden"
+    assert any(step.get("stop") == entry["name"] and step["source"] == "hidden" for step in recorded)
+
+
+def test_hidden_choice_is_seeded_and_never_picks_an_inapplicable_zone():
+    picks = []
+    for _ in range(2):
+        sim = fg.Simulation(seed=3, clock=make_clock())
+        for _ in range(8):
+            sim.queue_hidden()
+        picks.append([(e["name"], e["zone"], e["field"]) for e in sim.hidden_log])
+    assert picks[0] == picks[1]
+    assert not any(name == "dry_zone" and zone == B for name, zone, _ in picks[0])
+    for name, zone, field in picks[0]:
+        fg.Simulation(clock=make_clock()).validate_start(name, zone, field, {})
+
+
+def test_recorded_session_replays_to_a_byte_identical_truth_log():
+    scenario = fg.load_scenario(SIM_DIR / "scenarios" / "smoke.json")
+    live = fg.Simulation(seed=scenario["seed"], clock=make_clock(), scenario=scenario)
+    script = {
+        3: lambda: live.queue_start("heat_spike", A, None, {"ramp_min": 2}),
+        4: lambda: (live.queue_start("noisy", B, "humidity_pct", {"factor": 5}),
+                    live.queue_start("noisy", B, "humidity_pct", {"factor": 5})),
+        6: lambda: live.queue_hidden(),
+        9: lambda: live.queue_start("stuck", A, "air_temperature_c"),
+        14: lambda: live.queue_stop("heat_spike", A),
+        16: lambda: live.queue_stop_hidden(1),
+        20: lambda: live.queue_stop_all(),
+        22: lambda: live.queue_start("dry_zone", A, None, {"drying_pct_per_hour": 300}),
+        24: lambda: live.queue_hidden(),
+    }
+    live_rows = []
+    for tick in range(40):
+        if tick in script:
+            script[tick]()
+        live_rows += [(r.event, r.truth) for r in live.step()]
+    session = json.loads(json.dumps(live.session_scenario()))  # as served, then parsed
+    assert session["seed"] == scenario["seed"]
+    assert {step["source"] for step in session["steps"] if "source" in step} == {"manual", "hidden"}
+
+    replay = fg.Simulation(seed=session["seed"], clock=make_clock(), scenario=session)
+    replay_rows = [(r.event, r.truth) for _ in range(40) for r in replay.step()]
+    dump = lambda rows: "\n".join(json.dumps(t) for _, t in rows)
+    assert dump(live_rows) == dump(replay_rows)
+    assert [e for e, _ in live_rows] == [e for e, _ in replay_rows]
+    sources = {f["source"] for _, t in live_rows for f in t["active_faults"] + t["active_events"]}
+    assert sources == {"scenario", "manual", "hidden"}
+
+
+def test_control_catalog_derives_applicability_and_serves_the_page(control):
+    sim, call = control
+    catalog = call("GET", "/api/catalog")[1]
+    assert [z["zone_id"] for z in catalog["zones"]] == [A, B]
+    by_name = {i["name"]: i for i in catalog["injections"]}
+    assert set(by_name) == set(fg.REGISTRY)
+    assert by_name["dry_zone"]["zones"] == [A] and by_name["heat_spike"]["zones"] == [A, B]
+    assert by_name["stuck"]["needs_field"] and by_name["stuck"]["default_field"] is None
+    assert by_name["jump"]["default_field"] == "ph" and by_name["jump"]["default_params"] == {"offset": 1.5}
+    assert by_name["dropout"]["takes_field"] is False
+    assert all(i["description"] and i["kind"] in ("sensor_fault", "real_event") for i in by_name.values())
+    status, page, response = call("GET", "/")
+    assert status == 200 and "<title>" in page and response.getheader("Content-Type").startswith("text/html")
+    status, body, response = call("GET", "/api/scenario")
+    assert "attachment" in response.getheader("Content-Disposition") and body["seed"] == 7
+    assert call("GET", "/api/state")[1]["seconds_to_next_tick"] is None
+    sim.next_tick_due = time.monotonic() + 5
+    assert 3 <= call("GET", "/api/state")[1]["seconds_to_next_tick"] <= 5
+
+
+def test_control_flags_and_run_modes(tmp_path):
+    with pytest.raises(SystemExit):
+        fg.parse_args(["--fast", "--control-port", "8090"])
+    args = fg.parse_args([])
+    assert args.control_host == "127.0.0.1" and args.control_port is None
+    sim = fg.Simulation(clock=make_clock())
+    server = fg.start_control_server(sim, args.control_host, 0)
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+    finally:
+        server.shutdown()
+        server.server_close()
+    for control_args, sleeps in (([], []), (["--control-port", "0"], [30.0])):
+        slept = []
+        code = fg.main(["--dry-run", "--out", str(tmp_path / "e.jsonl"), "--truth-log", str(tmp_path / "t.jsonl"),
+                        "--ticks", "2", *control_args], clock=make_clock(), sleep=slept.append)
+        assert code == 0 and slept == sleeps  # dry-run sleeps only when the control page needs real time
+
+
+def test_control_page_exists_and_references_only_api_paths():
+    html = (SIM_DIR / "control_page.html").read_text()
+    assert "<!doctype html>" in html and "function esc" in html or "const esc" in html
+    assert "://" not in html and "<script src" not in html and "<link" not in html
+    paths = re.findall(r"""(?:api\(|fetch\(|href=)\s*["']([^"']+)["']""", html)
+    assert "/api/state" in paths and "/api/catalog" in paths and "/api/scenario" in paths
+    assert all(path.startswith("/api/") for path in paths)

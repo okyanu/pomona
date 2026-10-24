@@ -19,9 +19,11 @@ import math
 import os
 import random
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -122,20 +124,38 @@ class Injection:
 
     name = ""
     kind = ""
+    description = ""
     default_field: Optional[str] = None
     needs_field = False
+    default_params: Dict[str, float] = {}
+    extra_params: Tuple[str, ...] = ()  # accepted params that have no fixed default
+    source = "scenario"                 # who started it: scenario, manual or hidden
+    hidden_id: Optional[int] = None
 
     def __init__(self, zone: "Zone", field: Optional[str], params: Dict[str, Any], tick: int, now: str):
         self.zone_id = zone.cfg.zone_id
         self.field = canonical(field) or self.default_field
-        self.params = params
         self.started_tick = tick
         self.started_at = now
         self.stopping = False
+        unknown = sorted(set(params) - set(self.default_params) - set(self.extra_params))
+        if unknown:
+            accepted = sorted(set(self.default_params) | set(self.extra_params))
+            raise ValueError(f"{self.name}: unknown params {unknown}; accepted {accepted}")
+        for key, value in params.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{self.name}: param {key} must be a number")
+        self.params = {**self.default_params, **params}
+        if self.field and not self.takes_field():
+            raise ValueError(f"{self.name} takes no field")
         if self.needs_field and not self.field:
             raise ValueError(f"{self.name} needs a field")
         if self.field and self.field not in zone.cfg.sensors:
             raise ValueError(f"{self.name}: zone {self.zone_id} has no sensor field {self.field}")
+
+    @classmethod
+    def takes_field(cls) -> bool:
+        return cls.needs_field or cls.default_field is not None
 
     @property
     def finished(self) -> bool:
@@ -146,7 +166,7 @@ class Injection:
 
     def describe(self) -> Dict[str, Any]:
         return {"name": self.name, "field": self.field, "started_at": self.started_at,
-                "started_tick": self.started_tick}
+                "started_tick": self.started_tick, "source": self.source}
 
 
 class Fault(Injection):
@@ -172,6 +192,7 @@ class Fault(Injection):
 
 class Stuck(Fault):
     name, needs_field = "stuck", True
+    description = "The field freezes at its last sent value."
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
@@ -193,6 +214,8 @@ class Drift(Fault):
     """Linear drift; `rate_per_min` is in the field's unit per real minute."""
 
     name, default_field = "drift", "ec_ms_cm"
+    description = "The field drifts linearly; rate_per_min per real minute (EC 0.05, pH 0.02 by default)."
+    extra_params = ("rate_per_min",)
 
     def apply(self, field: str, value: float, last_sent: Optional[float]) -> float:
         if field != self.field:
@@ -203,15 +226,19 @@ class Drift(Fault):
 
 class Jump(Fault):
     name, default_field = "jump", "ph"
+    description = "The field is shifted by a constant offset (pH +1.5)."
+    default_params = {"offset": 1.5}
 
     def apply(self, field: str, value: float, last_sent: Optional[float]) -> float:
-        return value + float(self.params.get("offset", 1.5)) if field == self.field else value
+        return value + self.params["offset"] if field == self.field else value
 
 
 class Spike(Fault):
     """One absurd sample, then the fault removes itself."""
 
     name, default_field = "spike", "ph"
+    description = "One absurd sample (pH 13.0), then it removes itself."
+    default_params = {"value": 13.0}
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
@@ -225,33 +252,39 @@ class Spike(Fault):
         if field != self.field:
             return value
         self.fired = True
-        return float(self.params.get("value", 13.0))
+        return self.params["value"]
 
 
 class Noisy(Fault):
     name, needs_field = "noisy", True
+    description = "Noise on the field is multiplied by factor."
+    default_params = {"factor": 10.0}
 
     def noise_factor(self, field: str) -> float:
-        return float(self.params.get("factor", 10.0)) if field == self.field else 1.0
+        return self.params["factor"] if field == self.field else 1.0
 
 
 class Dropout(Fault):
     name, drops = "dropout", True
+    description = "No packets are published for the zone."
 
 
 class DeadClock(Fault):
     """The device stamps 1970-01-01. Core rejects the event; the right answer is rejected_by_core."""
 
     name, dead_clock = "dead_clock", True
+    description = "The device stamps 1970-01-01; Core rejects the packet."
 
 
 class PlausibleOffset(Fault):
     """Constant in-range offset. Pomona has no way to tell today, so detectable is false."""
 
     name, default_field, detectable = "plausible_offset", "ec_ms_cm", False
+    description = "A constant in-range offset (EC +3.0); undetectable by Pomona today."
+    default_params = {"offset": 3.0}
 
     def apply(self, field: str, value: float, last_sent: Optional[float]) -> float:
-        return value + float(self.params.get("offset", 3.0)) if field == self.field else value
+        return value + self.params["offset"] if field == self.field else value
 
 
 class Event(Injection):
@@ -278,38 +311,48 @@ class RampEvent(Event):
     """
 
     true_field = ""
-    target = 0.0
-    ramp_min = 20.0
+    extra_params = ("recover_min",)
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        if self.params["ramp_min"] <= 0 or self.params.get("recover_min", 1.0) <= 0:
+            raise ValueError(f"{self.name}: ramp_min and recover_min must be positive")
 
     @property
     def finished(self) -> bool:
         return self.stopping and self.level <= 0.0
 
     def advance(self, wall_min: float) -> None:
-        ramp = float(self.params.get("ramp_min", self.ramp_min))
+        ramp = self.params["ramp_min"]
         if self.stopping:
-            self.level = max(0.0, self.level - wall_min / float(self.params.get("recover_min", ramp)))
+            self.level = max(0.0, self.level - wall_min / self.params.get("recover_min", ramp))
         else:
             self.level = min(1.0, self.level + wall_min / ramp)
 
     def overlay(self, field: str, value: float) -> float:
         if field != self.true_field:
             return value
-        return value + self.level * max(0.0, float(self.params.get("target", self.target)) - value)
+        return value + self.level * max(0.0, self.params["target"] - value)
 
 
 class HeatSpike(RampEvent):
     # Vent failure on a sunny day.
-    name, true_field, target = "heat_spike", "air_temperature_c", 33.0
+    name, true_field = "heat_spike", "air_temperature_c"
+    description = "Air temperature ramps to about 33 C (vent failure on a sunny day)."
+    default_params = {"ramp_min": 20.0, "target": 33.0}
 
 
 class HumidNight(RampEvent):
-    name, true_field, target = "humid_night", "humidity_pct", 90.0
+    name, true_field = "humid_night", "humidity_pct"
+    description = "Humidity ramps to about 90 %."
+    default_params = {"ramp_min": 20.0, "target": 90.0}
 
 
 class NutrientOverConcentration(RampEvent):
     # A doser or top-up error: about 3 mS/cm per hour.
-    name, true_field, target, ramp_min = "nutrient_over_concentration", "ec_ms_cm", 5.0, 60.0
+    name, true_field = "nutrient_over_concentration", "ec_ms_cm"
+    description = "EC ramps to about 5.0 mS/cm (doser or top-up error)."
+    default_params = {"ramp_min": 60.0, "target": 5.0}
 
 
 class DryZone(Event):
@@ -320,11 +363,15 @@ class DryZone(Event):
     """
 
     name = "dry_zone"
+    description = "Irrigation fails and substrate moisture falls fast (demo speed). Substrate zones only."
+    default_params = {"drying_pct_per_hour": DRY_ZONE_PCT_PER_HOUR}
 
     def __init__(self, zone: "Zone", *args: Any, **kwargs: Any):
         if not zone.cfg.has_substrate:
             raise ValueError(f"dry_zone needs a substrate zone, {zone.cfg.zone_id} has none")
         super().__init__(zone, *args, **kwargs)
+        if self.params["drying_pct_per_hour"] < 0:
+            raise ValueError("dry_zone: drying_pct_per_hour must not be negative")
         self.level = 1.0
 
 
@@ -409,7 +456,7 @@ class Zone:
         rate = (0.3 + 2.4 * daylight) * demand * (1 + 0.1 * g[2])  # % moisture per hour
         dry = next((e for e in self.events if isinstance(e, DryZone)), None)
         if dry:
-            rate = max(rate, float(dry.params.get("drying_pct_per_hour", DRY_ZONE_PCT_PER_HOUR)))
+            rate = max(rate, dry.params["drying_pct_per_hour"])
         lost = min(rate * dt_h, max(self.moisture - DRY_RESIDUAL_PCT, 0.0))
         self.moisture -= lost
         self.ec += 0.015 * lost  # water leaves, salts stay
@@ -542,35 +589,59 @@ class Simulation:
                  sim_speed: float = 1.0, start_hour: float = 8.0,
                  clock: Callable[[], datetime] = utc_now, scenario: Optional[Dict[str, Any]] = None,
                  zones: Tuple[ZoneConfig, ...] = DEFAULT_ZONES):
+        self.seed = seed
         self.farm_id = farm_id
         self.interval = interval
+        self.sim_speed = sim_speed
         self.dt_h = interval * sim_speed / 3600.0
         self.start_hour = start_hour
         self.clock = clock
         self.steps = list((scenario or {}).get("steps", []))
+        self.duration_ticks = (scenario or {}).get("duration_ticks")
         self.zones = {cfg.zone_id: Zone(cfg, seed, start_hour) for cfg in zones}
         self.tick = 0
         self.now = ""
+        # Control page: commands queue up and apply at the start of the next step(), under the lock.
+        self.lock = threading.RLock()
+        self.pending: List[Dict[str, Any]] = []
+        self.recorded: List[Dict[str, Any]] = []  # manual steps, replayable as a scenario
+        self.hidden_rng = random.Random(f"{seed}:hidden")
+        self.hidden_log: List[Dict[str, Any]] = []  # answer key: every hidden injection started
+        self.revealed = False
+        self.last_sent: Dict[str, Dict[str, Any]] = {}
+        self.last_published: Dict[str, bool] = {}
+        self.next_tick_due: Optional[float] = None  # time.monotonic() of the next tick, set by run()
 
-    # Registry control (the scenario runner and, later, UI buttons both use these) -------
+    # Registry control (the scenario runner and the control page both use these) ----------
 
-    def start(self, name: str, zone_id: str, field: Optional[str] = None, **params: Any) -> Injection:
-        """Start a fault or event. Starting one that is already active returns the active one."""
+    def start(self, name: str, zone_id: str, field: Optional[str] = None, *, source: str = "scenario",
+              **params: Any) -> Injection:
+        """Start a fault or event. Starting one that is already active returns the active one.
+
+        A hidden injection never merges with a visible one, so pressing a button cannot reveal it.
+        """
         zone = self.zones[zone_id]
         injection = REGISTRY[name](zone, field, params, self.tick, self.now)
+        injection.source = source
         for existing in zone.faults + zone.events:
-            if (existing.name, existing.field) == (injection.name, injection.field):
+            if (existing.name, existing.field, existing.source == "hidden") == (
+                    injection.name, injection.field, source == "hidden"):
                 existing.stopping = False  # restarting one that is still ramping down
                 return existing
         (zone.faults if isinstance(injection, Fault) else zone.events).append(injection)
         return injection
 
-    def stop(self, name: str, zone_id: str, field: Optional[str] = None) -> None:
+    def stop(self, name: str, zone_id: str, field: Optional[str] = None, hidden: bool = False) -> int:
+        """Stop matching injections (hidden ones only when `hidden`); returns how many were running."""
         zone = self.zones[zone_id]
+        matched = 0
         for injection in zone.faults + zone.events:
-            if injection.name == name and (field is None or injection.field == canonical(field)):
+            if (injection.name == name and (injection.source == "hidden") == hidden
+                    and (field is None or injection.field == canonical(field)) and not injection.stopping):
                 injection.stop()
+                matched += 1
         self._prune()
+        return matched
 
     def _prune(self, zone: Optional[Zone] = None) -> None:
         for z in [zone] if zone else self.zones.values():
@@ -583,25 +654,215 @@ class Simulation:
     # Ticking -----------------------------------------------------------------------------
 
     def step(self) -> List[Reading]:
-        """Run one tick: scenario steps, physics, sensors. Returns one Reading per zone."""
+        """Run one tick: scenario steps, queued commands, physics, sensors. One Reading per zone."""
+        with self.lock:
+            return self._step()
+
+    def _step(self) -> List[Reading]:
         tick = self.tick
         self.now = self.clock().astimezone(timezone.utc).isoformat()
         self._prune()
         for step in self.steps:
             if step["at_tick"] == tick:
+                source = step.get("source", "scenario")
                 if "start" in step:
-                    self.start(step["start"], step["zone"], step.get("field"), **step.get("params", {}))
+                    self.start(step["start"], step["zone"], step.get("field"), source=source,
+                               **step.get("params", {}))
                 else:
-                    self.stop(step["stop"], step["zone"], step.get("field"))
+                    self.stop(step["stop"], step["zone"], step.get("field"), hidden=source == "hidden")
+        self._apply_commands(tick)
         sim_hours = self.start_hour + tick * self.dt_h
         readings = []
         for zone in self.zones.values():
             if tick > 0:
                 zone.advance(sim_hours, self.dt_h, self.interval / 60.0)
                 self._prune(zone)  # an event that has fully ramped down is over
-            readings.append(self._read_zone(zone, tick, sim_hours))
+            reading = self._read_zone(zone, tick, sim_hours)
+            readings.append(reading)
+            self.last_published[zone.cfg.zone_id] = reading.event is not None
+            if reading.event is not None:
+                self.last_sent[zone.cfg.zone_id] = reading.event
         self.tick += 1
         return readings
+
+    # Control page ------------------------------------------------------------------------
+
+    def validate_start(self, name: Any, zone_id: Any, field: Any, params: Any) -> Optional[str]:
+        """Build a throwaway injection so a bad request fails here, never in the tick loop."""
+        if not isinstance(name, str) or name not in REGISTRY:
+            raise ValueError(f"unknown injection {name!r}; known: {sorted(REGISTRY)}")
+        if not isinstance(zone_id, str) or zone_id not in self.zones:
+            raise ValueError(f"unknown zone {zone_id!r}; known: {sorted(self.zones)}")
+        if field is not None and not isinstance(field, str):
+            raise ValueError("field must be a string")
+        if params is not None and not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        return REGISTRY[name](self.zones[zone_id], field, dict(params or {}), 0, "").field
+
+    def applicable_zones(self, name: str) -> List[str]:
+        cls = REGISTRY[name]
+        zones = []
+        for zone_id, zone in self.zones.items():
+            field = cls.default_field or (zone.cfg.sensors[0] if cls.needs_field else None)
+            try:
+                cls(zone, field, {}, 0, "")
+            except ValueError:
+                continue
+            zones.append(zone_id)
+        return zones
+
+    def queue_start(self, name: Any, zone_id: Any, field: Any = None, params: Any = None) -> None:
+        self.validate_start(name, zone_id, field, params)
+        self._queue({"op": "start", "name": name, "zone": zone_id, "field": field,
+                     "params": dict(params or {}), "source": "manual"})
+
+    def queue_stop(self, name: Any, zone_id: Any, field: Any = None) -> None:
+        if not isinstance(name, str) or name not in REGISTRY:
+            raise ValueError(f"unknown injection {name!r}")
+        if not isinstance(zone_id, str) or zone_id not in self.zones:
+            raise ValueError(f"unknown zone {zone_id!r}")
+        if field is not None and not isinstance(field, str):
+            raise ValueError("field must be a string")
+        self._queue({"op": "stop", "name": name, "zone": zone_id, "field": field})
+
+    def queue_stop_hidden(self, hidden_id: Any) -> None:
+        with self.lock:
+            if not any(entry["id"] == hidden_id for entry in self.hidden_log):
+                raise ValueError(f"unknown hidden id {hidden_id!r}")
+            self.pending.append({"op": "stop_hidden", "id": hidden_id})
+
+    def queue_stop_all(self) -> None:
+        self._queue({"op": "stop_all"})
+
+    def queue_hidden(self) -> int:
+        """Queue one random applicable injection from the dedicated hidden RNG; returns its id."""
+        with self.lock:
+            taken = {(i.name, i.zone_id) for z in self.zones.values() for i in z.faults + z.events
+                     if i.source == "hidden"}
+            taken |= {(c["name"], c["zone"]) for c in self.pending if c["op"] == "start" and c["source"] == "hidden"}
+            candidates = [(name, zone_id) for name in REGISTRY for zone_id in self.applicable_zones(name)
+                          if (name, zone_id) not in taken]
+            if not candidates:
+                raise ValueError("every applicable injection is already running hidden")
+            name, zone_id = self.hidden_rng.choice(candidates)
+            cls = REGISTRY[name]
+            field = cls.default_field
+            if cls.needs_field:
+                field = self.hidden_rng.choice(list(self.zones[zone_id].cfg.sensors))
+            hidden_id = len(self.hidden_log) + 1
+            self.hidden_log.append({"id": hidden_id, "name": name, "zone": zone_id, "field": field,
+                                    "queued_tick": self.tick, "started_tick": None})
+            self.pending.append({"op": "start", "name": name, "zone": zone_id, "field": field, "params": {},
+                                 "source": "hidden", "hidden_id": hidden_id})
+            return hidden_id
+
+    def reveal(self) -> List[Dict[str, Any]]:
+        """From now on the state shows hidden injections by name. Returns every one started so far."""
+        with self.lock:
+            self.revealed = True
+            return [{**entry, "active": any(i.hidden_id == entry["id"] for z in self.zones.values()
+                                            for i in z.faults + z.events)} for entry in self.hidden_log]
+
+    def _queue(self, command: Dict[str, Any]) -> None:
+        with self.lock:
+            self.pending.append(command)
+
+    def _record(self, tick: int, op: str, name: str, zone_id: str, field: Optional[str],
+                params: Optional[Dict[str, Any]], source: str) -> None:
+        step: Dict[str, Any] = {"at_tick": tick, op: name, "zone": zone_id}
+        if field:
+            step["field"] = field
+        if params:
+            step["params"] = params
+        step["source"] = source
+        self.recorded.append(step)
+
+    def _apply_commands(self, tick: int) -> None:
+        """Apply queued commands (called under the lock, after the scenario steps) and record them."""
+        commands, self.pending = self.pending, []
+        for cmd in commands:
+            if cmd["op"] == "start":
+                try:
+                    injection = self.start(cmd["name"], cmd["zone"], cmd["field"], source=cmd["source"],
+                                           **cmd["params"])
+                except ValueError:
+                    continue
+                if cmd["source"] == "hidden" and injection.hidden_id is None:
+                    injection.hidden_id = cmd["hidden_id"]
+                    self.hidden_log[cmd["hidden_id"] - 1]["started_tick"] = tick
+                self._record(tick, "start", injection.name, cmd["zone"], injection.field, cmd["params"],
+                             cmd["source"])
+            elif cmd["op"] == "stop":
+                if self.stop(cmd["name"], cmd["zone"], cmd["field"]):
+                    self._record(tick, "stop", cmd["name"], cmd["zone"], cmd["field"], None, "manual")
+            elif cmd["op"] == "stop_hidden":
+                found = [i for z in self.zones.values() for i in z.faults + z.events
+                         if i.hidden_id == cmd["id"] and not i.stopping]
+                for injection in found:
+                    if self.stop(injection.name, injection.zone_id, injection.field, hidden=True):
+                        self._record(tick, "stop", injection.name, injection.zone_id, injection.field, None, "hidden")
+            else:  # stop_all
+                running = [(i.name, i.zone_id, i.field, i.source) for z in self.zones.values()
+                           for i in z.faults + z.events if not i.stopping]
+                for name, zone_id, field, source in running:
+                    if self.stop(name, zone_id, field, hidden=source == "hidden"):
+                        self._record(tick, "stop", name, zone_id, field, None, source)
+
+    def catalog(self) -> Dict[str, Any]:
+        return {
+            "zones": [{"zone_id": z.cfg.zone_id, "device_id": z.cfg.device_id, "system_type": z.cfg.system_type,
+                       "sensors": list(z.cfg.sensors)} for z in self.zones.values()],
+            "injections": [{"name": name, "kind": cls.kind, "description": cls.description,
+                            "takes_field": cls.takes_field(), "needs_field": cls.needs_field,
+                            "default_field": cls.default_field, "zones": self.applicable_zones(name),
+                            "default_params": cls.default_params} for name, cls in REGISTRY.items()],
+        }
+
+    def state(self) -> Dict[str, Any]:
+        """What a tester may see while running: what was sent, never the truth or the expected answers."""
+        with self.lock:
+            zones = []
+            for zone_id, zone in self.zones.items():
+                running = [i for i in zone.faults + zone.events if i.source != "hidden"]
+                zones.append({
+                    "zone_id": zone_id, "device_id": zone.cfg.device_id, "system_type": zone.cfg.system_type,
+                    "sequence": zone.sequence - 1 if zone.sequence else None,
+                    "published": self.last_published.get(zone_id),
+                    "last_sent": self.last_sent.get(zone_id),
+                    "injections": [{"name": i.name, "field": i.field, "started_tick": i.started_tick,
+                                    "stopping": i.stopping, "source": i.source} for i in running],
+                })
+            hidden = []
+            for i in (i for z in self.zones.values() for i in z.faults + z.events if i.source == "hidden"):
+                entry: Dict[str, Any] = {"hidden": True, "id": i.hidden_id}
+                if self.revealed:
+                    entry.update(name=i.name, zone=i.zone_id, field=i.field, started_tick=i.started_tick,
+                                 stopping=i.stopping)
+                hidden.append(entry)
+            for cmd in self.pending:
+                if cmd["op"] == "start" and cmd["source"] == "hidden":
+                    entry = {"hidden": True, "id": cmd["hidden_id"], "queued": True}
+                    if self.revealed:
+                        entry.update(name=cmd["name"], zone=cmd["zone"], field=cmd["field"])
+                    hidden.append(entry)
+            due = None if self.next_tick_due is None else round(max(0.0, self.next_tick_due - time.monotonic()), 1)
+            return {
+                "tick": self.tick, "interval": self.interval, "seconds_to_next_tick": due,
+                "revealed": self.revealed, "queued": len(self.pending), "recorded": len(self.recorded),
+                "pending": [{"op": c["op"], "name": c["name"], "zone": c["zone"], "field": c["field"]}
+                            for c in self.pending if c["op"] in ("start", "stop") and c.get("source") != "hidden"],
+                "zones": zones, "hidden": hidden,
+            }
+
+    def session_scenario(self) -> Dict[str, Any]:
+        """The original scenario steps merged with the manual ones. Contains the answer key."""
+        with self.lock:
+            steps = sorted([dict(s) for s in self.steps] + [dict(s) for s in self.recorded],
+                           key=lambda s: s["at_tick"])  # stable: scenario steps stay before manual ones
+            return {"seed": self.seed,
+                    "duration_ticks": self.duration_ticks if self.duration_ticks is not None else self.tick,
+                    "run": {"interval": self.interval, "sim_speed": self.sim_speed, "start_hour": self.start_hour},
+                    "steps": steps}
 
     def _read_zone(self, zone: Zone, tick: int, sim_hours: float) -> Reading:
         cfg = zone.cfg
@@ -670,6 +931,109 @@ class Simulation:
         return Reading(topic, event, truth)
 
 
+# --- Control page -------------------------------------------------------------------------
+
+CONTROL_PAGE = Path(__file__).with_name("control_page.html")
+MAX_BODY_BYTES = 65536
+
+
+class ControlHandler(BaseHTTPRequestHandler):
+    """Local control page and API. `sim` and `allowed_hosts` are set by start_control_server.
+
+    There is no auth: bind it to localhost only. POSTs must be application/json, which a
+    cross-origin page cannot send without a CORS preflight that this server never answers.
+    """
+
+    sim: Simulation
+    allowed_hosts: Optional[set]
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+    def _send(self, status: int, body: bytes, content_type: str, extra: Optional[Dict[str, str]] = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, status: int, payload: Any, extra: Optional[Dict[str, str]] = None) -> None:
+        self._send(status, json.dumps(payload).encode(), "application/json", extra)
+
+    def _host_ok(self) -> bool:
+        """Refuse foreign Host headers (DNS rebinding) unless bound to all interfaces."""
+        if self.allowed_hosts is None:
+            return True
+        header = self.headers.get("Host", "")
+        host = header if header.endswith("]") or ":" not in header else header.rsplit(":", 1)[0]
+        return host in self.allowed_hosts
+
+    def do_GET(self) -> None:
+        if not self._host_ok():
+            return self._json(403, {"error": "host not allowed"})
+        path = self.path.split("?", 1)[0]
+        if path == "/":
+            return self._send(200, CONTROL_PAGE.read_bytes(), "text/html; charset=utf-8")
+        if path == "/api/catalog":
+            return self._json(200, self.sim.catalog())
+        if path == "/api/state":
+            return self._json(200, self.sim.state())
+        if path == "/api/scenario":
+            return self._json(200, self.sim.session_scenario(), {
+                "Content-Disposition": 'attachment; filename="fake_greenhouse_session.json"'})
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self) -> None:
+        if not self._host_ok():
+            return self._json(403, {"error": "host not allowed"})
+        if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            return self._json(415, {"error": "Content-Type must be application/json"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= MAX_BODY_BYTES:
+                return self._json(413, {"error": "body too large"})
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("body must be a JSON object")
+            self._json(200, self._post(self.path.split("?", 1)[0], body))
+        except LookupError:
+            self._json(404, {"error": "not found"})
+        except ValueError as error:  # includes bad JSON
+            self._json(400, {"error": str(error)})
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        sim = self.sim
+        if path == "/api/start":
+            sim.queue_start(body.get("name"), body.get("zone"), body.get("field"), body.get("params"))
+        elif path == "/api/stop":
+            if "id" in body:
+                sim.queue_stop_hidden(body["id"])
+            else:
+                sim.queue_stop(body.get("name"), body.get("zone"), body.get("field"))
+        elif path == "/api/stop_all":
+            sim.queue_stop_all()
+        elif path == "/api/hidden":
+            return {"ok": True, "id": sim.queue_hidden()}
+        elif path == "/api/reveal":
+            return {"ok": True, "hidden": sim.reveal()}
+        else:
+            raise LookupError(path)
+        return {"ok": True, "queued": len(sim.pending)}
+
+
+def start_control_server(sim: Simulation, host: str, port: int) -> ThreadingHTTPServer:
+    """Serve the control page on a daemon thread; the tick loop stays in the caller's thread."""
+    allowed = None if host in ("0.0.0.0", "::") else {"127.0.0.1", "localhost", "[::1]", host}
+    handler = type("Handler", (ControlHandler,), {"sim": sim, "allowed_hosts": allowed})
+    server = ThreadingHTTPServer((host, port), handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    return server
+
+
 # --- Publishers and runner ----------------------------------------------------------------
 
 class MqttPublisher:
@@ -726,6 +1090,7 @@ def run(sim: Simulation, publisher: Any, truth_handle: Any, ticks: Optional[int]
         truth_handle.flush()
         done += 1
         if sleep and (ticks is None or done < ticks):
+            sim.next_tick_due = time.monotonic() + sim.interval
             sleep(sim.interval)
 
 
@@ -741,10 +1106,17 @@ def parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p.add_argument("--ticks", type=int, help="stop after N ticks (default: scenario duration, else run forever)")
     p.add_argument("--truth-log", type=Path, default=Path("data/fake_greenhouse/truth.jsonl"))
     p.add_argument("--farm-id", default=os.getenv("SIM_FARM_ID", "demo-farm"))
-    p.add_argument("--dry-run", action="store_true", help="no MQTT and no sleeping; print events as JSON lines")
+    p.add_argument("--dry-run", action="store_true",
+                   help="no MQTT; print events as JSON lines. No sleeping, unless --control-port is given")
     p.add_argument("--out", type=Path, help="with --dry-run, write the events here instead of stdout")
     p.add_argument("--fast", action="store_true", help="publish without sleeping between ticks")
-    return p.parse_args(argv)
+    p.add_argument("--control-port", type=int, help="serve the control page and API on this port (0 = any free port)")
+    p.add_argument("--control-host", default="127.0.0.1",
+                   help="control page bind address; it has no auth, do not bind wider than localhost")
+    args = p.parse_args(argv)
+    if args.fast and args.control_port is not None:
+        p.error("--fast cannot be combined with --control-port (the page needs real-time ticks)")
+    return args
 
 
 def main(argv: Optional[List[str]] = None, clock: Callable[[], datetime] = utc_now,
@@ -757,7 +1129,12 @@ def main(argv: Optional[List[str]] = None, clock: Callable[[], datetime] = utc_n
                      start_hour=args.start_hour, clock=clock, scenario=scenario)
 
     args.truth_log.parent.mkdir(parents=True, exist_ok=True)
+    server = None
+    if args.control_port is not None:
+        server = start_control_server(sim, args.control_host, args.control_port)
+        print(f"Control page: http://{args.control_host}:{server.server_address[1]}/")
     out_handle = None
+    no_sleep = args.fast or (args.dry_run and args.control_port is None)
     log = sys.stdout
     if args.dry_run:
         out_handle = open(args.out, "w") if args.out else sys.stdout
@@ -768,10 +1145,13 @@ def main(argv: Optional[List[str]] = None, clock: Callable[[], datetime] = utc_n
         print(f"Publishing to pomona/{args.farm_id}/+/sensor/+/state every {args.interval}s (Ctrl+C to stop)")
     try:
         with open(args.truth_log, "w") as truth_handle:
-            run(sim, publisher, truth_handle, ticks, None if (args.dry_run or args.fast) else sleep, log)
+            run(sim, publisher, truth_handle, ticks, None if no_sleep else sleep, log)
     except KeyboardInterrupt:
         print("\nStopped.", file=log)
     finally:
+        if server:
+            server.shutdown()
+            server.server_close()
         publisher.close()
         if out_handle and out_handle is not sys.stdout:
             out_handle.close()

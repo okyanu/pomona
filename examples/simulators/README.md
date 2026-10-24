@@ -75,7 +75,9 @@ services/core/.venv/bin/python -m pytest examples/simulators/tests -q          #
 | `--truth-log` | `data/fake_greenhouse/truth.jsonl` | Truth log path (gitignored, overwritten each run) |
 | `--farm-id` | `demo-farm` | Farm id in payloads and topic |
 | `--dry-run` | off | Print events as JSON lines (or to `--out PATH`); no MQTT, no sleeping |
-| `--fast` | off | Publish to MQTT without sleeping between ticks |
+| `--fast` | off | Publish to MQTT without sleeping between ticks (an error with `--control-port`) |
+| `--control-port` | off | Serve the control page and API on this port (0 = any free port) |
+| `--control-host` | `127.0.0.1` | Control page bind address |
 
 **Time-lapse warning.** The default is real time: a 30 s tick is 30 s of greenhouse time, so
 Pomona's per-sample checks (sensor_quality.py compares pH/EC with the first of the last 11
@@ -87,6 +89,56 @@ use it only to look at the physics (a full simulated day in 12 minutes).
 
 Topic: `pomona/{farm_id}/{zone_id}/sensor/{device_id}/state`. Event timestamps are always the
 real wall clock at publish time; the simulated time appears only in the truth log.
+
+### Control page
+
+```bash
+make fake-greenhouse        # demo scenario to MQTT, control page at http://127.0.0.1:8090/
+make fake-greenhouse-dry    # no MQTT: events to data/fake_greenhouse/events.jsonl, control page at :8090
+python3 examples/simulators/fake_greenhouse.py --dry-run --out /tmp/e.jsonl --control-port 8090
+```
+
+`--control-port` serves `control_page.html` (one self-contained page, no external files) plus a
+small JSON API on a daemon thread; the tick loop stays in the main thread. The page shows the last
+SENT reading per zone, the tick and the time to the next tick, and has a Start/Stop button for
+every fault and event that applies to the zone (a field select for faults that take one, optional
+JSON params). Top bar: **Hidden random** starts one random applicable fault or event that the page
+shows only as "Hidden #n" with a Stop button; **Reveal hidden** (asks first) shows their real names
+and ticks from then on; **Stop all**; and **Download session scenario**.
+
+The answer key stays hidden while running: the page and API never expose the true values or the
+truth log's `expect`. Testers read the truth log after the run. The session download is the
+exception: it contains the real names of hidden injections, so label it as answer key and keep it
+away from testers until the run is over. Injections started by a loaded scenario are shown by name.
+
+**There is no authentication. Keep `--control-host` on `127.0.0.1`; do not bind it wider.** POSTs
+must be `Content-Type: application/json` (anything else is 415), so a page from another origin
+cannot drive it without a CORS preflight, which is never answered, and foreign `Host` headers are
+refused while bound to localhost.
+
+With `--dry-run`, ticks sleep in real time when `--control-port` is given, so the page is usable
+without a broker. Without it a dry run still skips sleeping.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /` | The page |
+| `GET /api/catalog` | Zones (system type, sensor fields) and every injection: name, kind, description, `takes_field` / `needs_field` / `default_field`, applicable zones (found by trying to build it per zone), default params |
+| `GET /api/state` | `tick`, `interval`, `seconds_to_next_tick`, `queued`, `recorded`, `pending`, `revealed`; per zone the last sent reading (or null), `sequence`, whether the last tick `published`, and its running injections; a `hidden` list of `{"hidden": true, "id": n}` |
+| `POST /api/start` | `{name, zone, field?, params?}` |
+| `POST /api/stop` | `{name, zone, field?}`, or `{id}` for a hidden one |
+| `POST /api/stop_all` | Stop everything, hidden included |
+| `POST /api/hidden` | Start a random applicable injection from `random.Random(f"{seed}:hidden")`; returns its id |
+| `POST /api/reveal` | Show hidden injections by name from now on; returns them |
+| `GET /api/scenario` | The recorded session as scenario JSON (attachment). Contains the answer key |
+
+Requests are validated when they arrive (a throwaway injection is built, bad requests get 400),
+then queued and applied at the start of the next tick, after the scenario steps, so replays are
+exact. Each applied command is recorded as a scenario step with `"source": "manual"` (or
+`"hidden"`, under its real name). The download merges those with the original scenario steps and
+the seed; replaying it with the same seed, `--interval`, `--sim-speed`, `--start-hour` and clock
+gives a byte-identical truth log (`run` in the file lists them). Truth log injections carry
+`source`: `scenario`, `manual` or `hidden`. A hidden injection never merges with a visible one of
+the same name, and a button's Stop never stops a hidden one.
 
 ### Scenarios
 
@@ -174,4 +226,7 @@ temperature), `sent` (exactly the payload, or null), `active_faults`, `active_ev
   `nutrient_uptake_issue`, and pH, cold-stress or low-EC labels, are not listed.
 - `plausible_offset` is by design not detectable from a single reading.
 - Sequence numbers count published events, so a dropout leaves no gap in `sequence`.
+- The control page has no auth and only a Host-header guard; it is a local test tool.
+- A hidden injection shows up after the next tick, not at the click; `queued` counts it meanwhile.
+- A `--scenario` run (and so the control page) ends at the scenario's `duration_ticks`.
 - `spike` is consumed by the sample it hits, even if a `dropout` is active at the same time.

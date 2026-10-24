@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: up down logs health events sim fake-greenhouse local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
+.PHONY: up down logs health events sim fake-greenhouse fake-greenhouse-dry local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
 
 up:
 	./scripts/up.sh
@@ -42,7 +42,14 @@ sim:
 
 fake-greenhouse:
 	$(PYTHON) -m pip install -q -r examples/simulators/requirements.txt 2>/dev/null || true
-	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario examples/simulators/scenarios/demo.json
+	@echo "Control page: http://127.0.0.1:8090/"
+	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario examples/simulators/scenarios/demo.json --control-port 8090
+
+# No MQTT: events go to data/fake_greenhouse/events.jsonl, the control page runs in real time.
+fake-greenhouse-dry:
+	@mkdir -p data/fake_greenhouse
+	@echo "Control page: http://127.0.0.1:8090/"
+	$(PYTHON) examples/simulators/fake_greenhouse.py --dry-run --out data/fake_greenhouse/events.jsonl --control-port 8090
 
 local-validation:
 	./scripts/run_local_validation.sh

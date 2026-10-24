@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fake greenhouse control</title>
+<style>
+:root {
+  --bg: #f6f7f4; --card: #ffffff; --ink: #1d2a1f; --muted: #5d6b5f; --line: #d9ded6;
+  --accent: #2e7d32; --accent-ink: #ffffff; --fault: #b45309; --event: #1d4ed8; --danger: #b91c1c;
+  --stop: #b91c1c; --chip: #eef1ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141a15; --card: #1e261f; --ink: #e6ece5; --muted: #9fae9f; --line: #344035;
+    --accent: #66bb6a; --accent-ink: #0f1a10; --fault: #f59e0b; --event: #7aa2ff; --danger: #f87171;
+    --stop: #ef4444; --chip: #28322a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+h1 { margin: 0 0 6px; font-size: 1.1rem; }
+h2 { margin: 0 0 8px; font-size: 1rem; }
+h3 { margin: 14px 0 6px; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+main { padding: 12px 16px 40px; max-width: 1100px; margin: 0 auto; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 8px; color: var(--muted); }
+.bar b { color: var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button, .btn { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--ink); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-decoration: none; }
+button:disabled { opacity: .6; cursor: default; }
+button.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.stop { background: var(--stop); color: #fff; border-color: var(--stop); }
+.zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+.card, .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.panel { margin-bottom: 14px; }
+.sub { color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; }
+dt { color: var(--muted); } dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.row { border-top: 1px solid var(--line); padding: 8px 0; }
+.row .top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row .name { font-weight: 600; flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.fault .name { color: var(--fault); } .event .name { color: var(--event); }
+.desc { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+select, input[type=text] { font: inherit; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--bg); color: var(--ink); }
+details { margin-top: 4px; font-size: .85rem; } details input { width: 100%; margin-top: 4px; font-family: ui-monospace, monospace; }
+.err { color: var(--danger); font-size: .85rem; min-height: 1.2em; overflow-wrap: anywhere; }
+.hidden-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; gap: 8px; align-items: center; background: var(--chip); border-radius: 6px; padding: 4px 8px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fake greenhouse control</h1>
+  <div class="bar">
+    <span>Tick <b id="tick">-</b></span>
+    <span>Next in <b id="countdown">-</b></span>
+    <span>Queued <b id="queued">0</b></span>
+    <span>Recorded <b id="recorded">0</b></span>
+  </div>
+  <div class="actions">
+    <button id="hiddenBtn">Hidden random</button>
+    <button id="stopAllBtn">Stop all</button>
+    <button id="revealBtn">Reveal hidden</button>
+    <a class="btn" id="download" href="/api/scenario" download="fake_greenhouse_session.json">Download session scenario (contains answer key)</a>
+  </div>
+  <div class="err" id="topErr"></div>
+</header>
+<main>
+  <div class="panel" id="hiddenPanel" hidden>
+    <h2>Hidden injections</h2>
+    <div class="hidden-list" id="hiddenList"></div>
+  </div>
+  <div class="zones" id="zones"></div>
+</main>
+<script>
+"use strict";
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = (id) => document.getElementById(id);
+const VALUE_FIELDS = ["air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c", "substrate_moisture_pct"];
+let catalog = null, rows = {}, panels = {}, countdownAt = null, countdownSecs = null;
+
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  Object.entries(props || {}).forEach(([k, v]) => { if (k === "class") el.className = v; else el[k] = v; });
+  kids.forEach((kid) => el.append(kid));
+  return el;
+}
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function buildRow(zone, inj) {
+  const row = { zone: zone.zone_id, inj, active: null };
+  row.select = null;
+  if (inj.takes_field) {
+    row.select = h("select", { title: "field" });
+    zone.sensors.forEach((f) => row.select.append(h("option", { value: f, textContent: f })));
+    row.select.value = inj.default_field || zone.sensors[0];
+  }
+  row.params = h("input", { type: "text", placeholder: JSON.stringify(inj.default_params) });
+  row.details = h("details", {}, h("summary", { textContent: "params (JSON)" }), row.params);
+  row.btn = h("button", { class: "go", textContent: "Start" });
+  row.err = h("div", { class: "err" });
+  row.btn.onclick = () => press(row);
+  const top = h("div", { class: "top" }, h("span", { class: "name", textContent: inj.name }));
+  if (row.select) top.append(row.select);
+  top.append(row.btn);
+  row.el = h("div", { class: "row " + (inj.kind === "sensor_fault" ? "fault" : "event") }, top,
+    h("div", { class: "desc", textContent: inj.description }), row.details, row.err);
+  return row;
+}
+
+function build() {
+  const root = $("zones");
+  catalog.zones.forEach((zone) => {
+    const values = h("dl");
+    const faults = h("div"), events = h("div");
+    const panel = { values, status: h("div", { class: "sub" }) };
+    catalog.injections.filter((inj) => inj.zones.includes(zone.zone_id)).forEach((inj) => {
+      const row = buildRow(zone, inj);
+      rows[zone.zone_id + "|" + inj.name] = row;
+      (inj.kind === "sensor_fault" ? faults : events).append(row.el);
+    });
+    panels[zone.zone_id] = panel;
+    root.append(h("section", { class: "card" },
+      h("h2", { textContent: zone.zone_id }),
+      h("div", { class: "sub", textContent: zone.device_id + " / " + zone.system_type }),
+      panel.status, values,
+      h("h3", { textContent: "Sensor faults (reading wrong)" }), faults,
+      h("h3", { textContent: "Real events (plant affected)" }), events));
+  });
+}
+
+async function press(row) {
+  row.err.textContent = "";
+  try {
+    if (row.active) {
+      await api("/api/stop", { name: row.inj.name, zone: row.zone, field: row.active.field || undefined });
+    } else {
+      let params;
+      if (row.params.value.trim()) {
+        try { params = JSON.parse(row.params.value); } catch (e) { throw new Error("params is not valid JSON"); }
+      }
+      await api("/api/start", { name: row.inj.name, zone: row.zone, field: row.select ? row.select.value : undefined, params });
+    }
+    await refresh();
+  } catch (e) { row.err.textContent = e.message; }
+}
+
+function renderValues(zone) {
+  const panel = panels[zone.zone_id], sent = zone.last_sent;
+  if (!sent) { panel.values.innerHTML = "<dt>No reading yet</dt><dd></dd>"; }
+  else {
+    const keys = VALUE_FIELDS.filter((k) => k in sent).concat(["timestamp", "sequence"]);
+    panel.values.innerHTML = keys.map((k) => "<dt>" + esc(k) + "</dt><dd>" + esc(sent[k]) + "</dd>").join("");
+  }
+  panel.status.textContent = "Last tick " + (zone.published === null ? "-" : zone.published ? "published" : "not published (no packet)");
+}
+
+function renderRow(zone, row, state) {
+  const active = zone.injections.find((i) => i.name === row.inj.name) || null;
+  const pend = state.pending.find((p) => p.zone === zone.zone_id && p.name === row.inj.name);
+  row.active = active;
+  row.btn.disabled = !!pend;
+  row.details.hidden = !!active || !!pend;
+  if (row.select) row.select.hidden = !!active || !!pend;
+  if (pend) { row.btn.textContent = pend.op === "start" ? "Queued: start" : "Queued: stop"; row.btn.className = ""; }
+  else if (active) {
+    row.btn.textContent = "Stop" + (active.field ? " (" + active.field + ")" : "") + (active.stopping ? " - ramping down" : "");
+    row.btn.className = "stop";
+  } else { row.btn.textContent = "Start"; row.btn.className = "go"; }
+}
+
+function renderHidden(state) {
+  $("hiddenPanel").hidden = state.hidden.length === 0;
+  const list = $("hiddenList");
+  list.replaceChildren();
+  state.hidden.forEach((item) => {
+    const label = state.revealed && item.name
+      ? "Hidden #" + item.id + ": " + item.name + " / " + item.zone + (item.field ? " / " + item.field : "") + (item.started_tick != null ? " (tick " + item.started_tick + ")" : "")
+      : "Hidden #" + item.id + (item.queued ? " (queued)" : "");
+    const stop = h("button", { class: "stop", textContent: "Stop", disabled: !!item.queued });
+    stop.onclick = () => act(() => api("/api/stop", { id: item.id }));
+    list.append(h("span", { class: "chip" }, h("span", { textContent: label }), stop));
+  });
+}
+
+function render(state) {
+  $("tick").textContent = state.tick;
+  $("queued").textContent = state.queued;
+  $("recorded").textContent = state.recorded;
+  countdownAt = performance.now();
+  countdownSecs = state.seconds_to_next_tick;
+  state.zones.forEach((zone) => {
+    renderValues(zone);
+    catalog.injections.forEach((inj) => { const row = rows[zone.zone_id + "|" + inj.name]; if (row) renderRow(zone, row, state); });
+  });
+  renderHidden(state);
+  $("revealBtn").disabled = state.revealed;
+}
+
+function tickCountdown() {
+  if (countdownSecs === null) { $("countdown").textContent = "-"; return; }
+  $("countdown").textContent = Math.max(0, countdownSecs - (performance.now() - countdownAt) / 1000).toFixed(0) + " s";
+}
+
+async function refresh() {
+  try { render(await api("/api/state")); $("topErr").textContent = ""; }
+  catch (e) { $("topErr").textContent = "State: " + e.message; }
+}
+
+async function act(fn) {
+  $("topErr").textContent = "";
+  try { await fn(); await refresh(); } catch (e) { $("topErr").textContent = e.message; }
+}
+
+$("hiddenBtn").onclick = () => act(() => api("/api/hidden", {}));
+$("stopAllBtn").onclick = () => act(() => api("/api/stop_all", {}));
+$("revealBtn").onclick = () => {
+  if (!confirm("Reveal the hidden injections? Their real names and ticks will show from now on.")) return;
+  act(() => api("/api/reveal", {}));
+};
+
+(async () => {
+  try { catalog = await api("/api/catalog"); build(); await refresh(); }
+  catch (e) { $("topErr").textContent = "Catalog: " + e.message; return; }
+  setInterval(refresh, 2000);
+  setInterval(tickCountdown, 250);
+})();
+</script>
+</body>
+</html>
