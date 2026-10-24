@@ -1,0 +1,11 @@
+{
+  "seed": 7,
+  "duration_ticks": 12,
+  "steps": [
+    {"at_tick": 2, "start": "jump", "zone": "greenhouse-b", "field": "ph", "params": {"offset": 1.5}},
+    {"at_tick": 5, "stop": "jump", "zone": "greenhouse-b"},
+    {"at_tick": 6, "start": "heat_spike", "zone": "greenhouse-a", "params": {"ramp_min": 2}},
+    {"at_tick": 8, "start": "dropout", "zone": "greenhouse-b"},
+    {"at_tick": 10, "stop": "dropout", "zone": "greenhouse-b"}
+  ]
+}

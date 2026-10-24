@@ -1,0 +1,29 @@
+{
+  "seed": 7,
+  "duration_ticks": 420,
+  "steps": [
+    {"at_tick": 30, "start": "spike", "zone": "greenhouse-a", "field": "ph", "params": {"value": 13.0}},
+    {"at_tick": 30, "start": "jump", "zone": "greenhouse-b", "field": "ph", "params": {"offset": 1.5}},
+    {"at_tick": 45, "start": "drift", "zone": "greenhouse-a", "field": "ec_ms_cm"},
+    {"at_tick": 50, "stop": "jump", "zone": "greenhouse-b"},
+    {"at_tick": 65, "start": "noisy", "zone": "greenhouse-b", "field": "humidity_pct", "params": {"factor": 10}},
+    {"at_tick": 75, "stop": "drift", "zone": "greenhouse-a"},
+    {"at_tick": 90, "stop": "noisy", "zone": "greenhouse-b"},
+    {"at_tick": 90, "start": "stuck", "zone": "greenhouse-a", "field": "air_temperature_c"},
+    {"at_tick": 105, "start": "dropout", "zone": "greenhouse-b"},
+    {"at_tick": 110, "stop": "stuck", "zone": "greenhouse-a"},
+    {"at_tick": 120, "stop": "dropout", "zone": "greenhouse-b"},
+    {"at_tick": 125, "start": "dead_clock", "zone": "greenhouse-b"},
+    {"at_tick": 125, "start": "plausible_offset", "zone": "greenhouse-a", "field": "ec_ms_cm", "params": {"offset": 3.0}},
+    {"at_tick": 135, "stop": "dead_clock", "zone": "greenhouse-b"},
+    {"at_tick": 150, "start": "humid_night", "zone": "greenhouse-b"},
+    {"at_tick": 155, "stop": "plausible_offset", "zone": "greenhouse-a"},
+    {"at_tick": 175, "start": "heat_spike", "zone": "greenhouse-a"},
+    {"at_tick": 245, "stop": "heat_spike", "zone": "greenhouse-a"},
+    {"at_tick": 250, "stop": "humid_night", "zone": "greenhouse-b"},
+    {"at_tick": 270, "start": "dry_zone", "zone": "greenhouse-a"},
+    {"at_tick": 275, "start": "nutrient_over_concentration", "zone": "greenhouse-b"},
+    {"at_tick": 365, "stop": "dry_zone", "zone": "greenhouse-a"},
+    {"at_tick": 405, "stop": "nutrient_over_concentration", "zone": "greenhouse-b"}
+  ]
+}

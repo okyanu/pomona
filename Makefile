@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: up down logs health events sim local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
+.PHONY: up down logs health events sim fake-greenhouse local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
 
 up:
 	./scripts/up.sh
@@ -40,6 +40,10 @@ split-ml:
 sim:
 	./scripts/sim.sh
 
+fake-greenhouse:
+	$(PYTHON) -m pip install -q -r examples/simulators/requirements.txt 2>/dev/null || true
+	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario examples/simulators/scenarios/demo.json
+
 local-validation:
 	./scripts/run_local_validation.sh
 
@@ -64,6 +68,7 @@ commit-plan:
 test-local:
 	services/model-router/.venv/bin/python -m pytest scripts/datasets/tests -q
 	services/core/.venv/bin/python -m pytest services/core/tests services/dashboard/tests services/safety-checker/tests services/digital-twin/tests -q
+	services/core/.venv/bin/python -m pytest examples/simulators/tests -q
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
 
