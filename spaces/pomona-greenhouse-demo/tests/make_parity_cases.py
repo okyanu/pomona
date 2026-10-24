@@ -66,7 +66,9 @@ print(f"{len(cases)} tomato cases ({low_vpd} reach fungal_pressure only through 
 # -- sensor quality -> veto -> tomato chain --------------------------------------------------------
 NOW = datetime(2026, 10, 6, 9, 0, 0, tzinfo=timezone.utc)
 chain_rng = random.Random(2711)
-chain_systems = ["greenhouse_substrate", "greenhouse_substrate", "controlled_greenhouse", "hydroponic", "soil_field"]
+# Only system types the page offers or classifies the same way as the platform (the platform expects a moisture
+# probe on soil_field and unknown types; the page's expectedFieldsFor does not, and it offers neither).
+chain_systems = ["greenhouse_substrate", "greenhouse_substrate", "controlled_greenhouse", "hydroponic", "hydroponic_greenhouse"]
 NOMINAL = {"air_temperature_c": 24.0, "humidity_pct": 60.0, "ph": 6.2, "ec_ms_cm": 2.5,
            "substrate_temperature_c": 22.0, "substrate_moisture_pct": 45.0}
 # Ranges wide enough to cross every sensor-quality limit and every tomato threshold.
@@ -180,10 +182,8 @@ for system in ("greenhouse_substrate", "controlled_greenhouse"):
 
 def python_chain(system_type, sensor):
     """The Python chain, run through the platform pipeline itself (water/nutrient/safety outputs are ignored)."""
-    fields = [f for f in pipeline.DEFAULT_EXPECTED_FIELDS
-              if system_type == "greenhouse_substrate" or f != "substrate_moisture_pct"]
     farm = {"crop": "tomato", "system_type": system_type, "growth_stage": "vegetative"}
-    result = asyncio.run(pipeline.evaluate_pipeline(farm, sensor, fields, None, "parity", "rules_only"))
+    result = asyncio.run(pipeline.evaluate_pipeline(farm, sensor, [], None, "parity", "rules_only"))
     quality = {key: result["sensor_quality"][key] for key in (
         "data_quality_labels", "missing_fields", "suspect_fields", "safe_next_checks", "human_review_required", "rationale")}
     return farm, {"sensor_quality": quality, "trust_gate": result["trust_gate"], "crop_risk": result["crop_risk"]}

@@ -236,9 +236,6 @@ async def risk() -> RiskResponse:
                         "zone_id": event.get("zone_id", "unknown"),
                     },
                     "sensor": sensor,
-                    "expected_fields": [
-                        "air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "soil_moisture_pct"
-                    ],
                     "proposed_command": {"action_type": "continue_monitoring"},
                     "actor": "dashboard",
                     "mode": "hybrid_guarded",
@@ -302,9 +299,6 @@ async def pipeline() -> PipelineResponse:
                     },
                     "sensor": event,
                     "history": history,
-                    "expected_fields": [
-                        "air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "soil_moisture_pct"
-                    ],
                     "proposed_command": {"action_type": "continue_monitoring"},
                     "actor": "dashboard",
                     "mode": "hybrid_guarded",

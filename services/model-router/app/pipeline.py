@@ -18,6 +18,7 @@ from app.agronomy_calc import (
 )
 from app.audit import write_pipeline_audit
 from app.config import settings
+from app.expected_fields import expected_fields_for
 from app.nutrient_ph_ec import route_nutrient_ph_ec_reasoner
 from app.safety_triage import route_safety_triage_reasoner
 from app.sensor_quality import route_sensor_quality_reasoner
@@ -106,7 +107,7 @@ async def evaluate_pipeline(
     """Evaluate all deterministic specialists, then apply the final gate."""
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
-    fields = expected_fields or DEFAULT_EXPECTED_FIELDS
+    fields = expected_fields or expected_fields_for(farm_context, sensor)
     specialist_input: dict[str, Any] = {
         "farm_context": farm_context,
         "sensor": sensor,

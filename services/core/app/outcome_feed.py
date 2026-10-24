@@ -20,7 +20,6 @@ from app.store import SensorEventStore, event_store
 logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 12
-EXPECTED_FIELDS = ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "soil_moisture_pct"]
 TIMEOUT_SECONDS = 5.0
 
 
@@ -125,7 +124,6 @@ class OutcomeFeed:
             },
             "sensor": sensor,
             "history": self._history(event),
-            "expected_fields": EXPECTED_FIELDS,
             "proposed_command": {"action_type": "continue_monitoring"},
             "actor": "core_feed",
             "mode": "rules_only",

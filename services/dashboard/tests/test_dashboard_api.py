@@ -148,10 +148,52 @@ def test_pipeline_proxy_is_read_only_and_uses_latest_event(monkeypatch):
     assert FakeClient.last_payload["json"]["proposed_command"] == {"action_type": "continue_monitoring"}
     assert FakeClient.last_payload["json"]["actor"] == "dashboard"
     assert "source" not in FakeClient.last_payload["json"]["sensor"]
+    assert "expected_fields" not in FakeClient.last_payload["json"]  # the pipeline picks them from the system type
     # The reading's labels also go to the alert monitor (advisory state, never an actuator).
     observed = [p["json"] for p in FakeClient.payloads if p["path"] == "/v1/automation/alerts/observe"]
     assert observed == [{"farm_id": "demo-farm", "zone_id": "greenhouse-a", "device_id": None,
                          "sample_time": "2026-07-20T10:00:00Z", "risk_labels": [], "data_quality_labels": []}]
+
+
+def test_risk_proxy_lets_the_router_choose_expected_fields(monkeypatch):
+    event = {"farm_id": "demo-farm", "zone_id": "greenhouse-a", "crop": "tomato", "system_type": "hydroponic",
+             "timestamp": "2026-07-20T10:00:00Z", "air_temperature_c": 22.0, "humidity_pct": 60.0, "ph": 5.9,
+             "ec_ms_cm": 1.8}
+
+    async def fake_overview():
+        return dashboard_main.OverviewResponse(core_available=True, latest_event=event, recent_events=[event])
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"mode": "hybrid_guarded"}
+
+    class FakeClient:
+        payloads = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path, json):
+            FakeClient.payloads.append({"path": path, "json": json})
+            return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main, "overview", fake_overview)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    response = client.get("/api/risk")
+
+    assert response.status_code == 200 and response.json()["available"] is True
+    assert FakeClient.payloads[0]["path"] == "/v1/reasoners/shared-chain"
+    assert "expected_fields" not in FakeClient.payloads[0]["json"]
 
 
 def test_pipeline_survives_alert_monitor_outage(monkeypatch):

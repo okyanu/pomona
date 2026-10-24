@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List
 
+from app.expected_fields import expected_fields_for
 from app.sensor_quality import derive_sensor_quality
 from app.trust_gate import apply_sensor_veto, neutral_specialists
 from app.water_irrigation import derive_water_irrigation_risk
@@ -43,6 +44,7 @@ def run_shared_reasoner_chain(
     if selected not in {"rules_only", "hybrid_guarded"}:
         raise NotImplementedError("shared chain model_only mode is not wired yet")
 
+    expected_fields = expected_fields or expected_fields_for(farm_context, sensor)
     quality_input = {
         "farm_context": farm_context,
         "sensor": sensor,

@@ -96,7 +96,9 @@ def test_new_reading_feeds_one_pipeline_call_then_one_observe_call(client, calls
     pipeline, observe = calls[0][2], calls[1][2]
     assert pipeline["mode"] == "rules_only" and pipeline["actor"] == "core_feed" and pipeline["scenario_id"] == "core_feed"
     assert pipeline["proposed_command"] == {"action_type": "continue_monitoring"}
-    assert pipeline["expected_fields"] == ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "soil_moisture_pct"]
+    assert "expected_fields" not in pipeline  # the pipeline picks them from the system type
+    # Core packets carry the unused moisture key as null; the router must pick soil_moisture_pct from this shape.
+    assert pipeline["sensor"]["soil_moisture_pct"] == 40.0 and pipeline["sensor"]["substrate_moisture_pct"] is None
     assert pipeline["history"] == []
     assert pipeline["farm_context"] == {"crop": "tomato", "system_type": "greenhouse_substrate", "zone_id": "a",
                                         "weather": None, "zone_area_m2": None, "crop_kc": None, "npk_target": None}
