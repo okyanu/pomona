@@ -850,7 +850,7 @@ const markUnavailable = (message) => {
   telemetryUnavailable = true;
   twinPreview = null;
   $('status').textContent = `STALE / unavailable: ${message}`;
-  ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'probe-health', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
+  ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
   setAutomationBusy(automationBusy);
 };
 const setAutomationBusy = (busy) => {

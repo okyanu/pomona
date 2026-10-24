@@ -118,6 +118,10 @@ const context = vm.createContext({
   replies['/api/overview'].core_available = false;
   await vm.runInContext('refresh()', context);
   assert.ok(element('status').textContent.includes('STALE'));
+  // Probe health comes from stored calibrations, not the latest full packet: a zone with only modular
+  // observations (the cress logger) has no latest packet and must still show it.
+  assert.ok(element('probe-health').innerHTML.includes(escaped), 'probe health must survive a missing latest packet');
+  assert.ok(!element('probe-health').textContent.includes('Unavailable'), 'probe health must not be blanked as stale');
   assert.equal(element('automation-evaluate').disabled, true);
   const beforeUnavailableClick = requests.length;
   await listeners.click(evaluateClick);
