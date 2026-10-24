@@ -44,6 +44,8 @@ docker compose logs -f core
 
 ## Fake greenhouse (faults, events and a truth log)
 
+Short walkthrough, including grading Pomona against the truth log: [docs/FAKE_GREENHOUSE.md](../../docs/FAKE_GREENHOUSE.md).
+
 `fake_greenhouse.py` is a deterministic, physically plausible greenhouse for testing how
 Pomona handles broken sensors versus real problems. It runs two zones of farm `demo-farm`:
 `greenhouse-a` (`fake-substrate-01`, `greenhouse_substrate`) and `greenhouse-b`
@@ -75,6 +77,7 @@ services/core/.venv/bin/python -m pytest examples/simulators/tests -q          #
 | `--truth-log` | `data/fake_greenhouse/truth.jsonl` | Truth log path (gitignored, overwritten each run) |
 | `--farm-id` | `demo-farm` | Farm id in payloads and topic |
 | `--dry-run` | off | Print events as JSON lines (or to `--out PATH`); no MQTT, no sleeping |
+| `--core-url` | off | POST events to this Core (REST, no broker) instead of MQTT; the truth log records `delivery`. Bearer key from `POMONA_API_KEY` or `API_KEY`. An error with `--dry-run` |
 | `--fast` | off | Publish to MQTT without sleeping between ticks (an error with `--control-port`) |
 | `--control-port` | off | Serve the control page and API on this port (0 = any free port) |
 | `--control-host` | `127.0.0.1` | Control page bind address |
@@ -154,8 +157,11 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   event, realistic timing. Items in the same zone are at least 12 ticks apart so Pomona's
   11-sample history is clean again, and the real events last long enough to pass the 30 minute
   humidity and 10 minute default debounces.
-- `scenarios/quick.json`: 56 ticks (about 28 minutes): a few sensor faults and one fast
-  `heat_spike` (`ramp_min` 5). Quick, but less realistic than the demo.
+- `scenarios/quick.json`: 60 ticks (about 30 minutes): a few sensor faults and one fast `dry_zone`
+  (400 %/h) that stays dry long enough for the 10 minute water-level debounce. Quick, but less
+  realistic than the demo (a real EC ramp is too slow for a quick run: a fast one trips Pomona's
+  baseline-drift veto).
+- `scenarios/validation.json`: 15 ticks at `--interval 1`, used by `make local-validation`.
 - `scenarios/smoke.json`: 12 ticks, used by the tests.
 
 ### Sensor faults (the truth is unchanged, the reading is wrong)
@@ -207,6 +213,19 @@ temperature), `sent` (exactly the payload, or null), `active_faults`, `active_ev
 - `recovering_from`: names of sensor faults that stopped within the last 11 published samples on
   that zone. Pomona's history still holds the bad values, so a sensor check on such a `normal`
   frame is expected lingering, not a false alarm.
+
+With `--core-url` each truth line also has `delivery`: `{"status": 201}` for what Core answered
+(422 for a dead clock), or the error status and message.
+
+### Scoring Pomona
+
+`scripts/score_fake_greenhouse.py --truth PATH` grades the alerts Pomona raised against the truth
+log: `--automation-url URL [--core-url URL]` reads a running stack, `--offline` replays the
+Core-accepted events through the real pipeline and alert monitor in-process (model-router venv).
+`--json PATH` writes the full report (with metric definitions), `--report PATH` a markdown
+timeline of episodes next to Pomona's cards, `--fail-on-miss` exits 1 on a missed real episode or a
+wrong card. `make fake-greenhouse-score` runs a no-Docker stack and scores it both ways; see
+[docs/FAKE_GREENHOUSE.md](../../docs/FAKE_GREENHOUSE.md).
 
 ### Limits
 

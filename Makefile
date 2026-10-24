@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: up down logs health events sim fake-greenhouse fake-greenhouse-dry local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
+.PHONY: up down logs health events sim fake-greenhouse fake-greenhouse-dry fake-greenhouse-score local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
 
 up:
 	./scripts/up.sh
@@ -51,6 +51,10 @@ fake-greenhouse-dry:
 	@echo "Control page: http://127.0.0.1:8090/"
 	$(PYTHON) examples/simulators/fake_greenhouse.py --dry-run --out data/fake_greenhouse/events.jsonl --control-port 8090
 
+# Real-time run against a no-Docker stack, then the scorer. SCENARIO=... INTERVAL=30 CONTROL_PORT=8090 (optional).
+fake-greenhouse-score:
+	./scripts/run_fake_greenhouse_score.sh
+
 local-validation:
 	./scripts/run_local_validation.sh
 
@@ -76,6 +80,7 @@ test-local:
 	services/model-router/.venv/bin/python -m pytest scripts/datasets/tests -q
 	services/core/.venv/bin/python -m pytest services/core/tests services/dashboard/tests services/safety-checker/tests services/digital-twin/tests -q
 	services/core/.venv/bin/python -m pytest examples/simulators/tests -q
+	services/model-router/.venv/bin/python -m pytest scripts/tests -q
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
 

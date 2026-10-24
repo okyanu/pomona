@@ -4,11 +4,13 @@ import http.client
 import json
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 ROOT = Path(__file__).resolve().parents[3]
 SIM_DIR = ROOT / "examples" / "simulators"
@@ -617,3 +619,79 @@ def test_control_page_exists_and_references_only_api_paths():
     paths = re.findall(r"""(?:api\(|fetch\(|href=)\s*["']([^"']+)["']""", html)
     assert "/api/state" in paths and "/api/catalog" in paths and "/api/scenario" in paths
     assert all(path.startswith("/api/") for path in paths)
+
+
+# --- Core REST publisher ---------------------------------------------------------------
+
+class FakeCore(BaseHTTPRequestHandler):
+    """Accepts events with 201, answers 422 to a 1970 timestamp like Core's dead-clock floor."""
+
+    received = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeCore.received.append((self.path, self.headers.get("Authorization"), body))
+        status = 422 if body["timestamp"].startswith("1970") else 201
+        data = json.dumps({"detail": "timestamp is before the minimum accepted sample time"} if status == 422 else {}).encode()
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+@pytest.fixture
+def fake_core():
+    FakeCore.received = []
+    server = HTTPServer(("127.0.0.1", 0), FakeCore)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def test_core_publisher_posts_events_and_reports_the_answer(fake_core):
+    publisher = fg.CorePublisher(fake_core, api_key="secret")
+    good = json.dumps({"timestamp": "2026-06-01T12:00:00+00:00"})
+    assert publisher.publish("topic", good) == {"status": 201}
+    bad = publisher.publish("topic", json.dumps({"timestamp": "1970-01-01T00:00:00Z"}))
+    assert bad["status"] == 422 and "minimum accepted sample time" in bad["error"]
+    assert [(path, auth) for path, auth, _ in FakeCore.received] == [("/v1/sensors/events", "Bearer secret")] * 2
+    dead = fg.CorePublisher("http://127.0.0.1:9", timeout=1.0).publish("topic", good)  # nothing listens on port 9
+    assert dead["status"] is None and dead["error"]
+    with pytest.raises(ValueError):
+        fg.CorePublisher("ftp://core")
+
+
+def test_main_with_core_url_records_the_delivery_in_the_truth_log(tmp_path, fake_core, monkeypatch):
+    monkeypatch.setenv("API_KEY", "from-env")
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text(json.dumps({"seed": 7, "duration_ticks": 6, "steps": [
+        {"at_tick": 2, "start": "dead_clock", "zone": B}, {"at_tick": 4, "stop": "dead_clock", "zone": B},
+        {"at_tick": 4, "start": "dropout", "zone": A}]}))
+    truth = tmp_path / "truth.jsonl"
+    code = fg.main(["--core-url", fake_core, "--fast", "--truth-log", str(truth), "--scenario", str(scenario)],
+                   clock=make_clock())
+    assert code == 0
+    rows = [json.loads(line) for line in truth.read_text().splitlines()]
+    by = {(r["zone_id"], r["tick"]): r for r in rows}
+    assert by[(A, 0)]["delivery"] == {"status": 201}
+    assert by[(B, 2)]["delivery"]["status"] == 422 and by[(B, 2)]["expect"]["kind"] == "rejected_by_core"
+    assert "delivery" not in by[(A, 4)] and by[(A, 4)]["published"] is False  # a dropout is never posted
+    assert len(FakeCore.received) == 12 - 2 and all(auth == "Bearer from-env" for _, auth, _ in FakeCore.received)
+    assert all(e["sent"] is None or e["delivery"] for e in rows if e["published"] or e["sent"])
+
+
+def test_core_url_is_an_error_with_dry_run():
+    with pytest.raises(SystemExit):
+        fg.parse_args(["--dry-run", "--core-url", "http://127.0.0.1:8080"])
+    assert fg.parse_args([]).core_url is None
+
+
+def test_dry_run_truth_has_no_delivery_field(tmp_path):
+    truth = tmp_path / "truth.jsonl"
+    fg.main(["--dry-run", "--out", str(tmp_path / "e.jsonl"), "--truth-log", str(truth), "--ticks", "2"],
+            clock=make_clock())
+    assert all("delivery" not in json.loads(line) for line in truth.read_text().splitlines())

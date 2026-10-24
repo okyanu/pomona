@@ -498,9 +498,10 @@ def observe_alerts(request: AlertObserveRequest) -> AlertObserveResponse:
 
 @app.get("/v1/automation/alerts", response_model=AlertListResponse)
 def list_alerts(farm_id: Optional[str] = Query(default=None, max_length=128),
-                zone_id: Optional[str] = Query(default=None, max_length=128)) -> AlertListResponse:
+                zone_id: Optional[str] = Query(default=None, max_length=128),
+                limit: int = Query(default=50, ge=1, le=10000)) -> AlertListResponse:
     alerts = alert_monitor.states(farm_id, zone_id)
-    return AlertListResponse(count=len(alerts), alerts=alerts, events=alert_monitor.events(farm_id, zone_id))
+    return AlertListResponse(count=len(alerts), alerts=alerts, events=alert_monitor.events(farm_id, zone_id, limit))
 
 
 @app.get("/v1/automation/suggestions", response_model=SuggestionListResponse)

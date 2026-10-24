@@ -12,6 +12,7 @@ Public docs for contributors and users.
 | [CODE_OF_CONDUCT.md](https://github.com/okyanu/pomona/blob/main/CODE_OF_CONDUCT.md) | Community standards |
 | [HF_USAGE.md](./HF_USAGE.md) | **Why stub default + how to use HF model** |
 | [GETTING_STARTED.md](./GETTING_STARTED.md) | Quick run + expectations |
+| [FAKE_GREENHOUSE.md](./FAKE_GREENHOUSE.md) | Try Pomona without hardware: faults, events and a scorer |
 | [PROJECT_STATUS.md](./PROJECT_STATUS.md) | What's done / current phase |
 | [NEXT_MODELS_AND_HF.md](./NEXT_MODELS_AND_HF.md) | Sequenced next steps for models / Hugging Face |
 | [REPOS.md](./REPOS.md) | Platform vs ML vs Hugging Face |

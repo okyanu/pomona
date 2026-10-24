@@ -155,6 +155,22 @@ def test_api_observe_and_list(client):
     assert client.get("/v1/automation/suggestions").json()["count"] == 0
 
 
+def test_api_alert_events_limit(client):
+    """Each incident adds a raised and a recovered event; `limit` pages past the default 50."""
+    for i in range(30):
+        for minute, labels in ((0, ["high_ec"]), (20, []), (40, [])):
+            body = {"farm_id": "farm", "zone_id": "zone", "device_id": "node", "risk_labels": labels,
+                    "sample_time": (T0 + timedelta(hours=i, minutes=minute)).isoformat()}
+            assert client.post("/v1/automation/alerts/observe", json=body).status_code == 200
+    listing = client.get("/v1/automation/alerts", params={"zone_id": "zone"}).json()
+    assert len(listing["events"]) == 50
+    everything = client.get("/v1/automation/alerts", params={"zone_id": "zone", "limit": 10000}).json()["events"]
+    assert len(everything) > 50 and everything[0] == listing["events"][0]
+    assert len(client.get("/v1/automation/alerts", params={"limit": 3}).json()["events"]) == 3
+    for bad in (0, 10001, "x"):
+        assert client.get("/v1/automation/alerts", params={"limit": bad}).status_code == 422
+
+
 @pytest.mark.parametrize("update", [{"sample_time": "2026-10-04T06:00:00"}, {"farm_id": ""}, {"risk_labels": "high_ec"}])
 def test_api_observe_validates_input(client, update):
     body = {"farm_id": "farm", "zone_id": "zone", "sample_time": T0.isoformat(), "risk_labels": [], **update}

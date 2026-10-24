@@ -23,7 +23,7 @@
     {"at_tick": 250, "stop": "humid_night", "zone": "greenhouse-b"},
     {"at_tick": 270, "start": "dry_zone", "zone": "greenhouse-a"},
     {"at_tick": 275, "start": "nutrient_over_concentration", "zone": "greenhouse-b"},
-    {"at_tick": 365, "stop": "dry_zone", "zone": "greenhouse-a"},
+    {"at_tick": 385, "stop": "dry_zone", "zone": "greenhouse-a"},
     {"at_tick": 405, "stop": "nutrient_over_concentration", "zone": "greenhouse-b"}
   ]
 }

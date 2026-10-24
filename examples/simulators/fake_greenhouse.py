@@ -21,6 +21,8 @@ import random
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1036,6 +1038,33 @@ def start_control_server(sim: Simulation, host: str, port: int) -> ThreadingHTTP
 
 # --- Publishers and runner ----------------------------------------------------------------
 
+class CorePublisher:
+    """POST each event to Core's REST ingest (no broker needed) and report what Core answered."""
+
+    def __init__(self, base_url: str, api_key: str = "", timeout: float = 5.0):
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError(f"--core-url must be http(s), got {base_url!r}")
+        self.url = base_url.rstrip("/") + "/v1/sensors/events"
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def publish(self, topic: str, payload: str) -> Dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        request = urllib.request.Request(self.url, data=payload.encode(), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 (http/https checked)
+                return {"status": response.status}
+        except urllib.error.HTTPError as error:
+            return {"status": error.code, "error": error.read().decode(errors="replace")[:300]}
+        except (urllib.error.URLError, OSError) as error:
+            return {"status": None, "error": str(error)}
+
+    def close(self) -> None:
+        pass
+
+
 class MqttPublisher:
     def __init__(self, host: str, port: int):
         import paho.mqtt.client as mqtt  # lazy: the model and its tests do not need paho
@@ -1045,7 +1074,7 @@ class MqttPublisher:
         self.client.loop_start()
 
     def publish(self, topic: str, payload: str) -> None:
-        self.client.publish(topic, payload, qos=0)
+        self.client.publish(topic, payload, qos=0)  # fire and forget: no delivery result
 
     def close(self) -> None:
         self.client.loop_stop()
@@ -1070,6 +1099,9 @@ def summary_line(reading: Reading) -> str:
     marks = [f"{f['name']}({f['field']})" if f["field"] else f["name"] for f in truth["active_faults"]]
     marks += [e["name"] for e in truth["active_events"]]
     suffix = f" [{', '.join(marks)}]" if marks else ""
+    delivery = truth.get("delivery")
+    if delivery and delivery["status"] not in (200, 201):
+        suffix += f" core={delivery['status']}"
     if event is None:
         return f"tick {truth['tick']} {truth['zone_id']} not published ({truth['reason']}){suffix}"
     return (f"tick {truth['tick']} {truth['zone_id']} seq={event['sequence']} "
@@ -1084,7 +1116,9 @@ def run(sim: Simulation, publisher: Any, truth_handle: Any, ticks: Optional[int]
     while ticks is None or done < ticks:
         for reading in sim.step():
             if reading.event is not None:
-                publisher.publish(reading.topic, json.dumps(reading.event))
+                delivery = publisher.publish(reading.topic, json.dumps(reading.event))
+                if delivery is not None:
+                    reading.truth["delivery"] = delivery
             truth_handle.write(json.dumps(reading.truth) + "\n")
             print(summary_line(reading), file=log)
         truth_handle.flush()
@@ -1108,12 +1142,16 @@ def parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p.add_argument("--farm-id", default=os.getenv("SIM_FARM_ID", "demo-farm"))
     p.add_argument("--dry-run", action="store_true",
                    help="no MQTT; print events as JSON lines. No sleeping, unless --control-port is given")
+    p.add_argument("--core-url", help="POST events to this Core (e.g. http://127.0.0.1:8080) instead of MQTT; "
+                                      "the Bearer key comes from POMONA_API_KEY or API_KEY; the answer goes in the truth log")
     p.add_argument("--out", type=Path, help="with --dry-run, write the events here instead of stdout")
     p.add_argument("--fast", action="store_true", help="publish without sleeping between ticks")
     p.add_argument("--control-port", type=int, help="serve the control page and API on this port (0 = any free port)")
     p.add_argument("--control-host", default="127.0.0.1",
                    help="control page bind address; it has no auth, do not bind wider than localhost")
     args = p.parse_args(argv)
+    if args.dry_run and args.core_url:
+        p.error("--dry-run cannot be combined with --core-url (it would publish)")
     if args.fast and args.control_port is not None:
         p.error("--fast cannot be combined with --control-port (the page needs real-time ticks)")
     return args
@@ -1140,6 +1178,9 @@ def main(argv: Optional[List[str]] = None, clock: Callable[[], datetime] = utc_n
         out_handle = open(args.out, "w") if args.out else sys.stdout
         publisher: Any = JsonlPublisher(out_handle)
         log = sys.stdout if args.out else sys.stderr  # keep stdout clean for the JSON lines
+    elif args.core_url:
+        publisher = CorePublisher(args.core_url, os.getenv("POMONA_API_KEY") or os.getenv("API_KEY", ""))
+        print(f"Posting to {publisher.url} every {args.interval}s (Ctrl+C to stop)")
     else:
         publisher = MqttPublisher(os.getenv("MQTT_HOST", "localhost"), int(os.getenv("MQTT_PORT", "1883")))
         print(f"Publishing to pomona/{args.farm_id}/+/sensor/+/state every {args.interval}s (Ctrl+C to stop)")

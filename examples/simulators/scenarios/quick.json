@@ -1,13 +1,13 @@
 {
   "seed": 7,
-  "duration_ticks": 56,
+  "duration_ticks": 60,
   "steps": [
-    {"at_tick": 8, "start": "jump", "zone": "greenhouse-b", "field": "ph", "params": {"offset": 1.5}},
-    {"at_tick": 10, "start": "spike", "zone": "greenhouse-a", "field": "ph", "params": {"value": 13.0}},
+    {"at_tick": 6, "start": "jump", "zone": "greenhouse-b", "field": "ph", "params": {"offset": 1.5}},
+    {"at_tick": 8, "start": "spike", "zone": "greenhouse-a", "field": "ph", "params": {"value": 13.0}},
+    {"at_tick": 14, "start": "dry_zone", "zone": "greenhouse-a", "params": {"drying_pct_per_hour": 400}},
     {"at_tick": 16, "stop": "jump", "zone": "greenhouse-b"},
-    {"at_tick": 20, "start": "heat_spike", "zone": "greenhouse-b", "params": {"ramp_min": 5}},
-    {"at_tick": 24, "start": "drift", "zone": "greenhouse-a", "field": "ec_ms_cm", "params": {"rate_per_min": 0.3}},
-    {"at_tick": 32, "stop": "drift", "zone": "greenhouse-a"},
-    {"at_tick": 46, "stop": "heat_spike", "zone": "greenhouse-b"}
+    {"at_tick": 30, "start": "drift", "zone": "greenhouse-b", "field": "ec_ms_cm", "params": {"rate_per_min": 0.3}},
+    {"at_tick": 40, "stop": "drift", "zone": "greenhouse-b"},
+    {"at_tick": 56, "stop": "dry_zone", "zone": "greenhouse-a"}
   ]
 }
