@@ -27,7 +27,7 @@
   button { cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: #21262d; color: var(--text); padding: 9px 16px; font-size: 14px; }
   button.primary { background: var(--accent); color: #0d1117; font-weight: 600; border: none; }
   button:hover { filter: brightness(1.1); }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; margin: 2px 4px 2px 0; }
+  .badge { display: inline-block; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; margin: 2px 4px 2px 0; }
   .badge.success { background: var(--success-bg); color: var(--success); }
   .badge.warning { background: var(--warning-bg); color: var(--warning); }
   .badge.danger { background: var(--danger-bg); color: var(--danger); }
@@ -35,17 +35,21 @@
   pre { background: #0d1117; border: 1px solid var(--border-soft); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 13px; }
   a { color: #58a6ff; }
   .status { color: var(--text-dim); font-size: 13px; }
+  .card .trust-line { font-size: 15px; overflow-wrap: anywhere; }
+  .card h2 { font-size: 17px; margin: 0 0 8px; }
+  .card li { overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
 <main>
   <h1>🌱 Pomona -- Guarded Greenhouse & Hydroponic Risk Demo</h1>
-  <p class="subtitle">Enter a tomato sensor reading from a substrate/soil greenhouse or a hydroponic system and get back risk labels, safe next checks, and any blocked actions.</p>
+  <p class="subtitle">Enter a tomato sensor reading from a substrate/soil greenhouse or a hydroponic system and get back a sensor-trust verdict, risk labels, safe next checks, and any blocked actions.</p>
   <p class="status"><strong>Tomato only.</strong> These are tomato thresholds. In the full platform, other crops (for example the watercress monitoring pilot) get <code>not_applicable</code> instead of tomato advice.</p>
 
   <div class="card safety-note">
     <p><b>Advisory only.</b> This demo never controls irrigation, dosing, or any other hardware. It never issues a pesticide or fertigation command and never gives a definitive disease diagnosis -- those are always <b>blocked actions</b> that require a human to review and decide.</p>
-    <p class="status">This demo runs the <a href="https://github.com/okyanu/pomona">Pomona platform</a>'s deterministic tomato rules in your browser -- the same rules path the platform uses, not a simplified stand-in. The full platform can also run the tomato model locally through Ollama, always checked by those same rules; that model path is not part of this static demo.</p>
+    <p class="status">This demo runs the <a href="https://github.com/okyanu/pomona">Pomona platform</a>'s deterministic chain in your browser -- a sensor-quality check, a sensor veto, then the tomato rules -- the same rules path the platform uses, not a simplified stand-in. The full platform can also run the tomato model locally through Ollama, always checked by those same rules; that model path is not part of this static demo.</p>
+    <p class="status"><strong>Not in this demo:</strong> the water-irrigation and nutrient specialists, any model, and the checks that need a log of earlier readings (stuck, flat-line and drift). This page sees one reading at a time, so use the <a href="https://huggingface.co/spaces/Okyanus/pomona-sensor-data-checker">Sensor Data Checker</a> for those. The sample is stamped with the current time, so a stale or future timestamp cannot occur here.</p>
     <p class="status">Links: <a href="https://github.com/okyanu/pomona">GitHub platform</a> · <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9">Hugging Face Collection</a> · <a href="https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora">Model card</a> · <a href="https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data">Dataset</a></p>
   </div>
 
@@ -55,6 +59,7 @@
       <button id="preset-routine">Routine reading</button>
       <button id="preset-nutrient">Hydroponic nutrient / pH risk</button>
       <button id="preset-missing">Missing / suspect data</button>
+      <button id="preset-brokenph">Broken pH probe</button>
     </div>
 
     <div class="grid">
@@ -84,15 +89,20 @@
     <button class="primary" id="run">Run analysis</button>
   </div>
 
+  <div class="card" id="trust"></div>
   <div class="card" id="result"></div>
   <div class="card"><label>Raw response</label><pre id="raw"></pre></div>
 </main>
 
+<script src="rules.js"></script>
+<script src="trust_gate.js"></script>
 <script>
 // Deterministic tomato risk reasoner -- ported 1:1 from
 // services/model-router/app/tomato_reasoner.py in github.com/okyanu/pomona
 // (includes the vapour-pressure-deficit rule added in commit 8b4a7ad).
-// This is the exact guarded logic the Pomona platform runs today.
+// This is the exact guarded logic the Pomona platform runs today. It runs after the sensor-quality
+// check (rules.js, a copy of the Sensor Data Checker's port) and the sensor veto (trust_gate.js),
+// like services/model-router/app/pipeline.py; evaluateChain() below ties the three together.
 const ALLOWED_BLOCKED_ACTIONS = new Set([
   'direct_pesticide_dosage', 'autonomous_fertigation_change', 'direct_actuator_control',
   'definitive_disease_diagnosis', 'unsafe_chemical_recommendation',
@@ -122,7 +132,8 @@ function addUnique(items, value) { if (!items.includes(value)) items.push(value)
 function missingInputFields(d) {
   const critical = ['air_temperature_c', 'humidity_pct', 'ph', 'ec_ms_cm'];
   if (d.system_type === 'greenhouse_substrate') critical.push('substrate_temperature_c', 'substrate_moisture_pct');
-  return critical.filter((f) => d[f] === null || d[f] === undefined);
+  const vetoed = d.vetoed_fields || []; // set by the sensor-quality veto: already reported there
+  return critical.filter((f) => (d[f] === null || d[f] === undefined) && !vetoed.includes(f));
 }
 
 function isActuatorConflict(d) {
@@ -199,15 +210,56 @@ function deriveTomatoRisk(d) {
   };
 }
 
+// Expected fields: pipeline.py DEFAULT_EXPECTED_FIELDS, minus the substrate moisture probe when the
+// system has no substrate (recirculating/hydroponic), as the platform's sensor-quality datasets do.
+const DEFAULT_EXPECTED_FIELDS = ['air_temperature_c', 'humidity_pct', 'ph', 'ec_ms_cm', 'substrate_moisture_pct'];
+function expectedFieldsFor(systemType) {
+  return systemType === 'greenhouse_substrate' ? DEFAULT_EXPECTED_FIELDS.slice() : DEFAULT_EXPECTED_FIELDS.filter((f) => f !== 'substrate_moisture_pct');
+}
+
+// The demo chain, same order as pipeline.py: sensor quality -> sensor veto -> tomato rules on the masked
+// packet (vetoed fields removed and not reported as missing); a cannot_confirm packet gets the neutral
+// tomato result. nowUs is the current time in microseconds (BigInt); there is no history in the demo.
+function evaluateChain(farm, sensor, nowUs) {
+  const expected = expectedFieldsFor(farm.system_type);
+  const quality = PomonaRules.deriveSensorQuality(farm, sensor, expected, nowUs, []);
+  const veto = PomonaTrustGate.applySensorVeto(sensor, [], quality, expected);
+  const tomato = veto.gate.trust_verdict === 'cannot_confirm'
+    ? PomonaTrustGate.neutralTomato()
+    : deriveTomatoRisk({ ...farm, ...veto.sensor, vetoed_fields: veto.gate.vetoed_fields });
+  return { quality, gate: veto.gate, tomato, expected_fields: expected };
+}
+
 // -- UI wiring --
 const $ = (id) => document.getElementById(id);
 const num = (id) => { const v = $(id).value; return v === '' ? null : Number(v); };
-const badge = (text, severity) => `<span class="badge ${severity}">${text}</span>`;
+const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const badge = (text, severity) => `<span class="badge ${esc(severity)}">${esc(text)}</span>`;
+const FIELD_NAMES = {
+  ph: 'pH', previous_ph: 'previous pH', ec_ms_cm: 'EC', air_temperature_c: 'air temperature', backup_air_temperature_c: 'backup air temperature',
+  temperature_f: 'temperature (F)', humidity_pct: 'humidity', substrate_temperature_c: 'substrate temperature',
+  substrate_moisture_pct: 'substrate moisture', water_temperature_c: 'water temperature', timestamp: 'timestamp',
+};
+const fieldName = (field) => FIELD_NAMES[field] || field;
+const GLOBAL_REASONS = {
+  stale_reading: 'the reading is too old', insufficient_context: 'the packet is incomplete or invalid', unit_mismatch: 'the temperature units conflict',
+};
+const TRUST_BADGES = { trusted: ['trusted', 'success'], partial: ['partial', 'warning'], cannot_confirm: ['cannot confirm', 'danger'] };
+
+// One plain sentence for the sensor-trust result.
+function trustText(quality, gate) {
+  const unused = gate.vetoed_fields.map(fieldName).join(', ');
+  if (gate.trust_verdict === 'trusted') return 'Trusted: every expected reading passed the sensor check.';
+  if (gate.trust_verdict === 'partial') return `Partial: ${unused} not used -- check the ${gate.vetoed_fields.length > 1 ? 'probes' : 'probe'}. The other readings are still reasoned on.`;
+  const why = quality.data_quality_labels.filter((l) => GLOBAL_REASONS[l]).map((l) => GLOBAL_REASONS[l]).join(', ') || 'every expected reading failed the sensor check';
+  return `Can't confirm: ${why}. No readings were used, so the tomato rules were skipped.`;
+}
 
 const PRESETS = {
   routine: { system_type: 'greenhouse_substrate', growth_stage: 'vegetative', air_temperature_c: 24, humidity_pct: 60, ph: 6.2, ec_ms_cm: 2.5, substrate_temperature_c: 22, substrate_moisture_pct: 45 },
   nutrient: { system_type: 'controlled_greenhouse', growth_stage: 'fruiting', air_temperature_c: 26, humidity_pct: 65, ph: 7.6, ec_ms_cm: 4.8, substrate_temperature_c: 24, substrate_moisture_pct: 40 },
   missing: { system_type: 'greenhouse_substrate', growth_stage: 'flowering', air_temperature_c: 25, humidity_pct: 62, ph: '', ec_ms_cm: '', substrate_temperature_c: 23, substrate_moisture_pct: 42 },
+  brokenph: { system_type: 'greenhouse_substrate', growth_stage: 'vegetative', air_temperature_c: 24, humidity_pct: 60, ph: 13, ec_ms_cm: 2.5, substrate_temperature_c: 22, substrate_moisture_pct: 45 },
 };
 
 function loadPreset(name) {
@@ -217,36 +269,65 @@ function loadPreset(name) {
 }
 
 function runAnalysis() {
-  const input = {
-    system_type: $('system_type').value,
-    crop: 'tomato',
-    growth_stage: $('growth_stage').value,
+  const now = Date.now(); // one clock reading: the sample is stamped "now", so it is neither stale nor from the future
+  const farm = { crop: 'tomato', system_type: $('system_type').value, growth_stage: $('growth_stage').value };
+  const sensor = {
     air_temperature_c: num('air_temperature_c'),
     humidity_pct: num('humidity_pct'),
     ph: num('ph'),
     ec_ms_cm: num('ec_ms_cm'),
     substrate_temperature_c: num('substrate_temperature_c'),
     substrate_moisture_pct: num('substrate_moisture_pct'),
+    timestamp: new Date(now).toISOString(),
   };
-  const result = deriveTomatoRisk(input);
-  const checks = result.safe_next_checks.map((c) => `<li>${c}</li>`).join('');
-  $('result').innerHTML = `
-    <p><b>Risk labels:</b> ${badge(result.risk_labels.join(', ') || 'normal', result.risk_labels.length ? 'warning' : 'success')}</p>
+  const { quality, gate, tomato: result, expected_fields: expectedFields } = evaluateChain(farm, sensor, BigInt(now) * 1000n);
+  const skipped = gate.trust_verdict === 'cannot_confirm';
+  // Display only: as in the platform, the final human-review flag is the OR of the sensor-quality and tomato results,
+  // so a partial verdict must not read as "not required" in the tomato card. The tomato result itself is unchanged.
+  const partial = gate.trust_verdict === 'partial';
+  const untrusted = gate.trust_verdict !== 'trusted';
+  const withoutNote = partial ? ` (without ${gate.vetoed_fields.map(fieldName).join(', ')})` : '';
+  const tomatoReview = untrusted
+    ? badge('required (sensor check)', 'warning')
+    : badge(result.human_review_required ? 'required' : 'not required', result.human_review_required ? 'warning' : 'success');
+  const [trustLabel, trustSeverity] = TRUST_BADGES[gate.trust_verdict];
+  const qualityChecks = quality.safe_next_checks.map((c) => `<li>${esc(c)}</li>`).join('');
+  const checks = result.safe_next_checks.map((c) => `<li>${esc(c)}</li>`).join('');
+  $('trust').innerHTML = `
+    <h2>Sensor trust</h2>
+    <p class="trust-line">${badge(trustLabel, trustSeverity)} ${esc(trustText(quality, gate))}</p>
+    <p><b>Sensor-quality labels:</b> ${badge(quality.data_quality_labels.join(', ') || 'none', quality.data_quality_labels.length ? 'warning' : 'success')}</p>
+    <p><b>Readings not used:</b> ${badge(gate.vetoed_fields.map(fieldName).join(', ') || 'none', gate.vetoed_fields.length ? 'danger' : 'success')}</p>
+    <p><b>Human review:</b> ${badge(quality.human_review_required ? 'required' : 'not required', quality.human_review_required ? 'warning' : 'success')}</p>
+    <p><b>Safe next checks (sensors):</b></p>
+    <ul>${qualityChecks}</ul>
+    <p class="status">Fields checked: ${esc(expectedFields.map(fieldName).join(', '))}. Checks that need earlier readings (stuck, flat-line, drift) are not run here.</p>
+  `;
+  $('result').innerHTML = skipped ? `
+    <h2>Tomato risk</h2>
+    <p><b>Risk labels:</b> ${badge('not assessed', 'warning')}</p>
+    <p><b>Safe next checks:</b></p>
+    <ul>${checks}</ul>
+    <p class="status">The sensor check could not confirm this reading, so the tomato rules were not run. Fix the sensor flags above first.</p>
+  ` : `
+    <h2>Tomato risk</h2>
+    <p><b>Risk labels:</b> ${badge((result.risk_labels.join(', ') || 'normal') + withoutNote, result.risk_labels.length ? 'warning' : 'success')}</p>
     <p><b>Missing critical data:</b> ${badge(result.missing_data.join(', ') || 'none', result.missing_data.length ? 'danger' : 'success')}</p>
     <p><b>Vapour-pressure deficit:</b> ${badge(result.vpd_kpa === null ? 'n/a' : result.vpd_kpa.toFixed(2) + ' kPa', result.vpd_kpa !== null && (result.vpd_kpa < LOW_VPD_KPA || result.vpd_kpa >= HIGH_VPD_KPA) ? 'warning' : 'success')}</p>
-    <p><b>Human review:</b> ${badge(result.human_review_required ? 'required' : 'not required', result.human_review_required ? 'warning' : 'success')}</p>
+    <p><b>Human review:</b> ${tomatoReview}</p>
     <p><b>Blocked actions:</b> ${badge(result.blocked_actions.join(', ') || 'none', result.blocked_actions.length ? 'danger' : 'success')}</p>
     <p><b>Safe next checks:</b></p>
     <ul>${checks}</ul>
-    <p class="status">Deterministic rules only -- local LoRA inference is not yet wired into the Pomona platform runtime, so this demo shows the platform's real current behavior, not a simplified stand-in.</p>
+    <p class="status">Deterministic rules only -- local LoRA inference is not yet wired into the Pomona platform runtime, so this demo shows the platform's real current behavior, not a simplified stand-in. Readings that failed the sensor check are left out of these rules.</p>
   `;
-  $('raw').textContent = JSON.stringify({ ...result, input }, null, 2);
+  $('raw').textContent = JSON.stringify({ sensor_quality: quality, trust_gate: gate, tomato: result, input: { ...farm, ...sensor } }, null, 2);
 }
 
 $('run').addEventListener('click', runAnalysis);
 $('preset-routine').addEventListener('click', () => loadPreset('routine'));
 $('preset-nutrient').addEventListener('click', () => loadPreset('nutrient'));
 $('preset-missing').addEventListener('click', () => loadPreset('missing'));
+$('preset-brokenph').addEventListener('click', () => loadPreset('brokenph'));
 runAnalysis();
 </script>
 </body>

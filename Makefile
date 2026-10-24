@@ -80,7 +80,8 @@ test-checker:
 	node spaces/sensor-data-checker/tests/checker.test.mjs
 
 .PHONY: test-demo
-# Greenhouse demo Space: the page's own JavaScript tomato rules must match the Python rules.
+# Greenhouse demo Space: the page's own JavaScript (tomato rules, and the sensor check -> veto -> tomato chain)
+# must match the Python rules; its rules.js must be an exact copy of the Sensor Data Checker's.
 test-demo:
 	services/model-router/.venv/bin/python spaces/pomona-greenhouse-demo/tests/make_parity_cases.py
 	node spaces/pomona-greenhouse-demo/tests/parity.test.cjs
