@@ -704,7 +704,7 @@ def test_shared_reasoner_chain_missing_data_blocks_command():
         "/v1/reasoners/shared-chain",
         json={
             "farm_context": {"crop": "tomato", "system_type": "greenhouse_substrate"},
-            "sensor": {"air_temperature_c": 24.0, "humidity_pct": 68.0, "ph": None, "ec_ms_cm": 0.18, "substrate_moisture_pct": 24.0},
+            "sensor": {"air_temperature_c": 24.0, "humidity_pct": 68.0, "ph": None, "ec_ms_cm": 0.18, "substrate_moisture_pct": 24.0, "timestamp": datetime.now(timezone.utc).isoformat()},
             "expected_fields": ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "substrate_moisture_pct"],
             "proposed_command": {"action_type": "start_irrigation"},
             "mode": "hybrid_guarded",
@@ -733,6 +733,7 @@ def test_pipeline_evaluate_integrates_specialists_and_audit_output():
                 "ec_ms_cm": 3.8,
                 "substrate_moisture_pct": 27.0,
                 "substrate_temperature_c": 27.0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
             "expected_fields": ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm", "substrate_moisture_pct", "substrate_temperature_c"],
             "proposed_command": {"action_type": "start_irrigation"},
@@ -818,7 +819,7 @@ def test_pipeline_uses_configured_guarded_water_backend(monkeypatch):
         json={
             "scenario_id": "test-configured-water-runtime",
             "farm_context": {"crop": "tomato", "system_type": "greenhouse_substrate"},
-            "sensor": {"substrate_moisture_pct": 50.0},
+            "sensor": {"substrate_moisture_pct": 50.0, "timestamp": datetime.now(timezone.utc).isoformat()},
             "expected_fields": ["substrate_moisture_pct"],
             "proposed_command": {"action_type": "continue_monitoring"},
         },

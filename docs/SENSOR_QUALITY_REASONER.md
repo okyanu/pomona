@@ -88,6 +88,33 @@ This model is crop-agnostic and useful across:
 ]
 ```
 
+## Veto and trust verdict
+
+A reading that failed the sensor check is not reasoned on. After the sensor-quality
+reasoner runs, `services/model-router/app/trust_gate.py` removes every field in
+`suspect_fields` and `missing_fields` (plus companions of the same measurement,
+such as `previous_ph` or `backup_air_temperature_c`) from the sensor packet and
+from every history frame before the water, nutrient and tomato specialists see
+it. An impossible pH 13 therefore no longer becomes a `high_ph` label, and a
+drifted EC no longer becomes `high_ec`. The actuator/safety gate still receives
+the original packet and the quality result.
+
+The gate returns `{trust_verdict, vetoed_fields, global_veto, reason}`, copied into
+`final_decision` of `/v1/pipeline/evaluate` (and `trust_gate` of the shared chain):
+
+| `trust_verdict` | Meaning |
+|---|---|
+| `trusted` | The sensor check found nothing. Specialists see the whole packet. |
+| `partial` | Some fields are vetoed; the other expected fields are still reasoned on. |
+| `cannot_confirm` | Nothing can be confirmed: a stale/invalid timestamp, `stale_reading`, `insufficient_context` or `unit_mismatch` (global veto), or every expected field is vetoed. Specialists return empty results (`source: "sensor_veto"`). |
+
+`partial` and `cannot_confirm` keep `human_review_required` true and `risk_level`
+"high". The automation engine turns any sensor-check label into a `sensor_check`
+card instead of a dosing card. `make fault-replay` measures how many wrong domain
+labels are still shown as trusted per injected fault
+([SENSOR_FAULT_REPLAY.md](./SENSOR_FAULT_REPLAY.md)). The veto cannot help when the
+sensor check itself raises nothing, for example a constant in-range offset.
+
 ## Related design drafts
 
 - Temporal stuck / flatline / baseline drift: [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md) (implemented locally in deterministic rules)

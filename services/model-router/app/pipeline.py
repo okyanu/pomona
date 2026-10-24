@@ -23,6 +23,7 @@ from app.safety_triage import route_safety_triage_reasoner
 from app.sensor_quality import route_sensor_quality_reasoner
 from app.shared_chain import derive_actuator_gate
 from app.tomato_reasoner import derive_tomato_risk
+from app.trust_gate import NUTRIENT_MODEL_ID, WATER_MODEL_ID, apply_sensor_veto, neutral_specialists
 from app.water_irrigation import route_water_irrigation_reasoner
 
 
@@ -120,29 +121,28 @@ async def evaluate_pipeline(
         "pomona-sensor-quality-reasoner-v0.1",
         now=evaluated_at,
     )
-    water_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
-    water = await route_water_irrigation_reasoner(
-        specialist_input,
-        specialist_mode,
-        water_backend,
-        "pomona-water-irrigation-risk-reasoner-v0.1",
-    )
-    nutrient_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
-    nutrient = await route_nutrient_ph_ec_reasoner(
-        specialist_input,
-        specialist_mode,
-        "pomona-nutrient-ph-ec-reasoner-v0.1",
-        nutrient_backend,
-    )
+    masked_sensor, masked_history, gate = apply_sensor_veto(sensor, history, quality, fields)
+    if gate["trust_verdict"] == "cannot_confirm":
+        water, nutrient, tomato = neutral_specialists(specialist_mode)
+    else:
+        # Domain specialists only see readings that passed the sensor check.
+        gated_input = {**specialist_input, "sensor": masked_sensor,
+                       "expected_fields": [f for f in fields if f not in gate["vetoed_fields"]]}
+        if history:
+            gated_input["history"] = masked_history
+        water_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
+        water = await route_water_irrigation_reasoner(gated_input, specialist_mode, water_backend, WATER_MODEL_ID)
+        nutrient_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
+        nutrient = await route_nutrient_ph_ec_reasoner(gated_input, specialist_mode, NUTRIENT_MODEL_ID, nutrient_backend)
+        crop_input = {**_combined_input(farm_context, masked_sensor), "vetoed_fields": gate["vetoed_fields"]}
+        tomato = derive_tomato_risk(crop_input) if farm_context.get("crop") == "tomato" else {
+            "risk_labels": [],
+            "missing_data": [],
+            "safe_next_checks": ["use a crop-specific reasoner for this crop"],
+            "blocked_actions": [],
+            "human_review_required": False,
+        }
     agronomy_calc = _agronomy_estimate(farm_context)
-    crop_input = _combined_input(farm_context, sensor)
-    tomato = derive_tomato_risk(crop_input) if farm_context.get("crop") == "tomato" else {
-        "risk_labels": [],
-        "missing_data": [],
-        "safe_next_checks": ["use a crop-specific reasoner for this crop"],
-        "blocked_actions": [],
-        "human_review_required": False,
-    }
 
     all_risk_labels = list(dict.fromkeys([
         *quality["data_quality_labels"],
@@ -191,7 +191,7 @@ async def evaluate_pipeline(
     }
     advisor = await explain(
         "Explain the guarded Pomona software-validation result.",
-        sensor,
+        masked_sensor,
         backend="stub",
         guarded_context=guarded_context,
     )
@@ -217,9 +217,12 @@ async def evaluate_pipeline(
             "explanation": advisor["explanation"],
             "safety_note": advisor["safety_note"],
         },
+        "trust_gate": gate,
         "safety": safety,
         "safety_triage": safety_triage,
         "final_decision": {
+            "trust_verdict": gate["trust_verdict"],
+            "vetoed_fields": gate["vetoed_fields"],
             "risk_level": "high" if blocked_actions or human_review else "routine",
             "blocked_actions": blocked_actions,
             "human_review_required": human_review,

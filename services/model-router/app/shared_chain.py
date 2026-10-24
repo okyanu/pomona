@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from app.sensor_quality import derive_sensor_quality
+from app.trust_gate import apply_sensor_veto, neutral_specialists
 from app.water_irrigation import derive_water_irrigation_risk
 
 
@@ -53,7 +54,14 @@ def run_shared_reasoner_chain(
         expected_fields,
     )
 
-    water = derive_water_irrigation_risk(quality_input)
+    masked_sensor, _, gate = apply_sensor_veto(sensor, None, quality, expected_fields)
+    if gate["trust_verdict"] == "cannot_confirm":
+        water = neutral_specialists(selected)[0]
+    else:
+        water = derive_water_irrigation_risk({
+            **quality_input, "sensor": masked_sensor,
+            "expected_fields": [field for field in expected_fields if field not in gate["vetoed_fields"]],
+        })
     safety_input = {
         "farm_context": farm_context,
         "sensor": sensor,
@@ -76,6 +84,7 @@ def run_shared_reasoner_chain(
         "sensor_quality": quality,
         "water_irrigation": water,
         "actuator_safety": safety,
+        "trust_gate": gate,
         "blocked_actions": blocked_actions,
         "human_review_required": review_required,
         "fallback_reason": (

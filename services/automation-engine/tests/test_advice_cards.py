@@ -50,6 +50,16 @@ def test_suggestion_maps_to_advice_card():
     assert card["human_review_required"] is True
     assert "autonomous_irrigation_change" in card["blocked_actions"]
     assert card["evidence"]["zone_id"] == "greenhouse-a"
+    assert card["evidence"]["trust_verdict"] is None and card["evidence"]["vetoed_fields"] == []
+
+
+def test_sensor_check_card_carries_trust_verdict():
+    card = suggestion_to_advice_card({
+        "id": "s1", "action": "check_sensor", "message": "Check the sensor.", "status": "pending",
+        "context": {"trust_verdict": "partial", "vetoed_fields": ["ph"], "sensor_quality_labels": ["impossible_ph"]},
+    })
+    assert card["severity"] == "warn"
+    assert card["evidence"]["trust_verdict"] == "partial" and card["evidence"]["vetoed_fields"] == ["ph"]
 
 
 def test_advice_cards_endpoint(client):

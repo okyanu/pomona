@@ -57,6 +57,17 @@ Readings with a sensor data-quality label, readings sampled before the approval,
 repeats, and readings from another farm, zone or device never count. There is
 no actuator path: the outcome is advisory text on the card.
 
+Sensor-check card: when a reading fails the sensor check, the trust gate keeps
+the specialists from reasoning on it, so no dosing or irrigation card is made
+from it. The `sensor_check` rule (`check_sensor`) makes this card instead:
+"a reading could not be confirmed; check the flagged probe or timestamp before
+acting on any advice that uses it". Every card's `evidence` carries
+`trust_verdict` and `vetoed_fields`, and the dashboard shows a "Sensor trust:"
+line. For a `sensor_check` card the outcome differs: a later reading with one of
+its watched sensor labels is a trusted reading showing the problem persists
+(`readings_seen` grows, `clean_streak` resets to 0), not an untrusted one; a
+reading with some other sensor label still does not count.
+
 ## Placement
 
 ```text

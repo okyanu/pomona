@@ -410,6 +410,7 @@ LANDING_PAGE = """<!doctype html>
     <div class="rule-row"><span class="rule-trigger">high_ec / low_ec</span><span class="rule-arrow">&rarr;</span><span class="rule-action">Review nutrient dosing</span></div>
     <div class="rule-row"><span class="rule-trigger">fungal_pressure</span><span class="rule-arrow">&rarr;</span><span class="rule-action">Consider ventilation, inspect canopy</span></div>
     <div class="rule-row"><span class="rule-trigger">water_level_risk</span><span class="rule-arrow">&rarr;</span><span class="rule-action">Check the irrigation system</span></div>
+    <div class="rule-row"><span class="rule-trigger">sensor-check labels (impossible, stale, missing, drift&hellip;)</span><span class="rule-arrow">&rarr;</span><span class="rule-action">Check the flagged probe before acting on advice that uses it</span></div>
   </section>
 
   <section>

@@ -259,6 +259,7 @@ class SharedReasonerChainResponse(BaseModel):
     sensor_quality: Dict[str, Any]
     water_irrigation: Dict[str, Any]
     actuator_safety: Dict[str, Any]
+    trust_gate: Optional[Dict[str, Any]] = None
     blocked_actions: List[str]
     human_review_required: bool
     fallback_reason: Optional[str] = None
@@ -300,6 +301,7 @@ class PipelineEvaluateResponse(BaseModel):
     crop_risk: Dict[str, Any]
     agronomy_calc: Optional[Dict[str, Any]] = None
     agronomist: Dict[str, Any]
+    trust_gate: Optional[Dict[str, Any]] = None
     safety: Dict[str, Any]
     safety_triage: Dict[str, Any]
     final_decision: Dict[str, Any]

@@ -8,7 +8,7 @@ const escaped = '&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt; &amp; 
 const event = Object.fromEntries([
   'timestamp', 'farm_id', 'zone_id', 'crop', 'air_temperature_c', 'humidity_pct',
 ].map(key => [key, attack]));
-const decision = {risk_level: attack, blocked_actions: [attack]};
+const decision = {risk_level: attack, blocked_actions: [attack], trust_verdict: attack, vetoed_fields: [attack]};
 const specialist = {source: attack, data_quality_labels: [attack]};
 const replies = {
   '/api/devices': {available: true, result: {devices: [{device_id: attack, last_seen: attack, quality: attack}]}},
@@ -18,7 +18,8 @@ const replies = {
     sensor_quality: specialist, agronomy_calc: {irrigation: {reference_et_mm_day: attack},
       fertilizer: {urea_g: attack}}}},
   '/api/audit': {available: true, result: {events: [{evaluated_at: attack, scenario_id: attack, ...decision}]}},
-  '/api/risk': {available: true, result: {sensor_quality: specialist}},
+  '/api/risk': {available: true, result: {sensor_quality: specialist,
+    trust_gate: {trust_verdict: attack, vetoed_fields: [attack]}}},
   '/api/safety': {available: true, result: {safe_alternative: attack, safety_labels: [attack]}},
   '/api/automation': {available: true, result: {suggestions: [{id: attack, rule_id: attack,
     action: attack, message: attack, status: 'pending', outcome_status: attack},
@@ -27,6 +28,7 @@ const replies = {
   '/api/advice-cards': {available: true, result: {cards: [{card_id: attack, title: attack,
     summary: attack, severity: 'warn', status: 'pending', opportunity: attack,
     evidence: {sample_time: attack, provenance_status: attack, readings: {[attack]: attack},
+      trust_verdict: attack, vetoed_fields: [attack],
       sensor_snapshot: {ph: attack}}, safe_next_checks: [attack], blocked_actions: [attack],
     human_review_required: true, outcome: {status: attack, deadline: attack, clean_streak: attack,
       required_clean_readings: attack}}]}},
@@ -89,6 +91,10 @@ const context = vm.createContext({
   assert.ok(automationHtml.includes('<span class="badge success">confirmed</span>'));
   assert.ok(automationHtml.includes('<td>--</td><td>--</td>'), 'untracked outcome shows --');
   assert.ok(element('advice-cards').innerHTML.includes(`Outcome: <span class="badge neutral">${escaped}</span> · clean readings ${escaped}/${escaped} · until ${escaped}`));
+  const trustAttack = `<span class="badge neutral">${escaped}</span> Can&#39;t confirm: ${escaped} not used`;
+  for (const id of ['pipeline', 'risk', 'advice-cards']) {
+    assert.ok(element(id).innerHTML.includes(`Sensor trust: ${trustAttack}`), `${id} shows the escaped sensor trust line`);
+  }
   assert.equal(element('air').textContent, `${attack} °C`);
   // A suggestion ID stays one URL segment when a user clicks Approve.
   const id = 'odd/id?query#fragment';
@@ -121,6 +127,13 @@ const context = vm.createContext({
   replies['/api/explanation'].result.explanation = 'Tomato pH < 6 & EC > 2';
   await vm.runInContext('refresh()', context);
   assert.ok(element('explanation').innerHTML.includes('Tomato pH &lt; 6 &amp; EC &gt; 2'));
+  const trust = (verdict, fields) => vm.runInContext(`trustLine(${JSON.stringify(verdict)}, ${JSON.stringify(fields)})`, context);
+  assert.equal(trust('cannot_confirm', ['ph', 'previous_ph', 'ec_ms_cm']),
+    `<span class="badge danger">cannot confirm</span> Can&#39;t confirm: pH, EC not used`);
+  assert.ok(trust('partial', ['humidity_pct']).startsWith('<span class="badge warning">partial</span>'));
+  assert.equal(trust('trusted', []), '<span class="badge success">trusted</span> All readings passed the sensor check');
+  assert.equal(trust(undefined, []), 'not reported');
+  assert.ok(trust('partial', ['constructor']).includes('Can&#39;t confirm: constructor not used'), 'inherited keys are not field names');
   assert.equal(vm.runInContext("escapeHtml(null)", context), '');
   assert.equal(vm.runInContext("escapeHtml(0)", context), '0');
   assert.ok(vm.runInContext("badge('routine', 'success')", context).includes('class="badge success"'));

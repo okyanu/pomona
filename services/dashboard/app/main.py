@@ -431,13 +431,16 @@ async def automation_evaluate() -> AutomationResponse:
                         "farm_id": pipeline_data.sensor_snapshot.get("farm_id"),
                         "zone_id": pipeline_data.sensor_snapshot.get("zone_id"),
                         "sensor_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", []),
+                        "trust_verdict": (result.get("final_decision") or {}).get("trust_verdict"),
+                        "vetoed_fields": (result.get("final_decision") or {}).get("vetoed_fields")
+                        or (result.get("trust_gate") or {}).get("vetoed_fields", []),
                         "risk_labels": risk_labels,
                         "blocked_actions": blocked_actions,
                         "reasoner_ids": list(dict.fromkeys(part["model_id"] for name in (
                             "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk")
                             if isinstance(part := result.get(name), dict) and part.get("model_id"))),
                         "reasoner_snapshot": {name: result.get(name) for name in (
-                            "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk", "final_decision")},
+                            "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk", "trust_gate", "final_decision")},
                         **request_scope.get(),
                     },
                 },
@@ -796,6 +799,18 @@ const riskSeverity = (level) => {
   if (l.includes('medium') || l.includes('moderate')) return 'warning';
   return 'success';
 };
+const trustTone = new Map([['trusted', 'success'], ['partial', 'warning'], ['cannot_confirm', 'danger']]);
+const trustFields = new Map([['ph', 'pH'], ['previous_ph', 'pH'], ['ec_ms_cm', 'EC'], ['humidity_pct', 'humidity'],
+  ['air_temperature_c', 'air temperature'], ['backup_air_temperature_c', 'air temperature'], ['temperature_f', 'air temperature'],
+  ['water_temperature_c', 'water temperature'], ['substrate_temperature_c', 'substrate temperature'],
+  ['substrate_moisture_pct', 'moisture'], ['soil_moisture_pct', 'moisture'], ['timestamp', 'timestamp']]);
+// Plain-language sensor trust: a badge for the verdict plus which readings were not used.
+const trustLine = (verdict, fields) => {
+  if (!verdict) return 'not reported';
+  const names = [...new Set((fields || []).map(field => trustFields.get(field) || field))].join(', ');
+  const text = verdict === 'trusted' ? 'All readings passed the sensor check' : `Can't confirm: ${names || 'some readings'} not used`;
+  return `${badge(String(verdict).replace(/_/g, ' '), trustTone.get(verdict) || 'neutral')} ${escapeHtml(text)}`;
+};
 const listSeverity = (list) => (list && list.length ? 'warning' : 'success');
 const boolSeverity = (flag) => (flag ? 'warning' : 'success');
 const sparkline = (values, color) => {
@@ -914,6 +929,7 @@ async function renderAdviceCards() {
       <div class="label">${escapeHtml(card.opportunity || 'operations')} · ${badge(card.severity || 'warn', card.severity === 'info' ? 'neutral' : 'warning')}</div>
       <div class="value" style="font-size:1.05rem">${escapeHtml(card.title || card.summary || '--')}</div>
       <p class="status">${escapeHtml(card.summary || '')}</p>
+      <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields)}</p>
       <p class="status">Checks: ${escapeHtml((card.safe_next_checks || []).join('; ') || 'none')}</p>
       <p class="status">Sample: ${escapeHtml((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
       <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
@@ -993,7 +1009,7 @@ async function refreshData() {
     const safety = result.safety || {};
     const waterNutrientLabels = [...(water.irrigation_risk_labels || []), ...(nutrient.nutrient_risk_labels || [])];
     const blockedActions = decision.blocked_actions || [];
-    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${badge(decision.risk_level || '--', riskSeverity(decision.risk_level))}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${badge(waterNutrientLabels.join(', ') || 'normal', listSeverity(waterNutrientLabels))}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(decision.human_review_required ? 'required' : 'not required', boolSeverity(decision.human_review_required))}</div></div></div><p class="status">Pipeline: ${escapeHtml(result.pipeline_id || '--')} · Blocked actions: ${badge(blockedActions.join(', ') || 'none', blockedActions.length ? 'danger' : 'success')}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
+    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${badge(decision.risk_level || '--', riskSeverity(decision.risk_level))}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${badge(waterNutrientLabels.join(', ') || 'normal', listSeverity(waterNutrientLabels))}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(decision.human_review_required ? 'required' : 'not required', boolSeverity(decision.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustLine(decision.trust_verdict, decision.vetoed_fields)}</p><p class="status">Pipeline: ${escapeHtml(result.pipeline_id || '--')} · Blocked actions: ${badge(blockedActions.join(', ') || 'none', blockedActions.length ? 'danger' : 'success')}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
     const specialistRows = [
       ['Sensor quality', quality.data_quality_labels || [], quality.source || 'deterministic_rules', quality.human_review_required],
       ['Water / irrigation', water.irrigation_risk_labels || [], water.source || 'deterministic_rules', water.human_review_required],
@@ -1035,7 +1051,7 @@ async function refreshData() {
     const water = result.water_irrigation || {};
     const safety = result.actuator_safety || {};
     const riskBlocked = result.blocked_actions || [];
-    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${badge((water.irrigation_risk_labels || []).join(', ') || 'normal', listSeverity(water.irrigation_risk_labels))}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${badge(safety.decision || '--', (safety.decision || '').toLowerCase() === 'allowed' ? 'success' : 'danger')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p class="status">Blocked actions: ${badge(riskBlocked.join(', ') || 'none', riskBlocked.length ? 'danger' : 'success')}</p>`;
+    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${badge((water.irrigation_risk_labels || []).join(', ') || 'normal', listSeverity(water.irrigation_risk_labels))}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${badge(safety.decision || '--', (safety.decision || '').toLowerCase() === 'allowed' ? 'success' : 'danger')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustLine((result.trust_gate || {}).trust_verdict, (result.trust_gate || {}).vetoed_fields)}</p><p class="status">Blocked actions: ${badge(riskBlocked.join(', ') || 'none', riskBlocked.length ? 'danger' : 'success')}</p>`;
   }
   const safetyResponse = await scopedFetch('/api/safety');
   const safetyData = await safetyResponse.json();

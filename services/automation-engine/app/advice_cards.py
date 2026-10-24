@@ -13,6 +13,7 @@ SEVERITY_BY_ACTION = {
     "consider_ventilation": "info",
     "inspect_canopy": "info",
     "check_irrigation_system": "warn",
+    "check_sensor": "warn",
 }
 
 
@@ -41,6 +42,8 @@ def suggestion_to_advice_card(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             "reasoner_ids": context.get("reasoner_ids") or [],
             "sensor_quality_labels": context.get("sensor_quality_labels") or [],
             "risk_labels": context.get("risk_labels") or [],
+            "trust_verdict": context.get("trust_verdict"),
+            "vetoed_fields": context.get("vetoed_fields") or [],
             "sensor_event_id": context.get("sensor_event_id"),
             "sensor_snapshot": context.get("sensor_snapshot") or {},
             "history_sha256": context.get("history_sha256"),

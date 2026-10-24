@@ -375,7 +375,8 @@ def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatc
                 "water_irrigation": {"irrigation_risk_labels": ["low_moisture"]},
                 "nutrient_ph_ec": {"nutrient_risk_labels": ["high_ec"]},
                 "crop_risk": {"risk_labels": []},
-                "final_decision": {"blocked_actions": ["direct_actuator_control"]},
+                "final_decision": {"blocked_actions": ["direct_actuator_control"],
+                                   "trust_verdict": "cannot_confirm", "vetoed_fields": ["timestamp"]},
             },
         )
 
@@ -418,6 +419,9 @@ def test_automation_evaluate_derives_risk_labels_from_latest_pipeline(monkeypatc
     assert payload["context"]["history_sha256"] == "history-hash"
     assert payload["context"]["sensor_quality_labels"] == ["stale_reading"]
     assert payload["context"]["blocked_actions"] == ["direct_actuator_control"]
+    assert payload["context"]["trust_verdict"] == "cannot_confirm"
+    assert payload["context"]["vetoed_fields"] == ["timestamp"]
+    assert payload["context"]["reasoner_snapshot"]["final_decision"]["trust_verdict"] == "cannot_confirm"
 
 
 def test_automation_evaluate_without_pipeline_result_is_unavailable(monkeypatch):

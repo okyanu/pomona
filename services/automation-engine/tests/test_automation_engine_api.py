@@ -232,3 +232,30 @@ def test_api_event_id_retry_is_idempotent(client):
     payload = {"event_id": "farm-a/device-a/1", "risk_labels": ["high_ec"]}
     first = client.post("/v1/automation/evaluate", json=payload).json()
     assert client.post("/v1/automation/evaluate", json=payload).json() == first
+
+
+SENSOR_QUALITY_LABELS = {
+    "impossible_ph", "impossible_ec", "impossible_humidity", "impossible_temperature", "sensor_drift_possible",
+    "baseline_drift_possible", "stuck_value", "flatline_possible", "noisy_signal_possible", "conflicting_readings",
+    "unit_mismatch", "stale_reading", "insufficient_context",
+    "missing_ph", "missing_ec", "missing_temperature", "missing_humidity", "missing_moisture",
+}
+
+
+def test_sensor_check_rule_matches_every_sensor_quality_label_and_only_those():
+    rules = load_rules(SERVICE_DIR / "app" / "rules.yaml")
+    rule = next(r for r in rules if r["id"] == "sensor_check")
+    assert rule["action"] == "check_sensor" and rule["action"] not in FORBIDDEN_ACTIONS
+    assert set(rule["match_any_labels"]) == SENSOR_QUALITY_LABELS
+    assert not any(r["id"] != "sensor_check" and set(r["match_any_labels"]) & SENSOR_QUALITY_LABELS for r in rules)
+
+
+def test_sensor_quality_label_creates_a_sensor_check_card_not_a_dosing_card(client: TestClient):
+    response = client.post("/v1/automation/evaluate", json={
+        "risk_labels": ["impossible_ph"],
+        "context": {"zone_id": "greenhouse-a", "trust_verdict": "partial", "vetoed_fields": ["ph"]}})
+    suggestions = response.json()["suggestions"]
+    assert [s["rule_id"] for s in suggestions] == ["sensor_check"]
+    assert "could not be confirmed" in suggestions[0]["message"]
+    card = client.get("/v1/automation/advice-cards").json()["cards"][0]
+    assert card["evidence"]["trust_verdict"] == "partial" and card["evidence"]["vetoed_fields"] == ["ph"]

@@ -296,3 +296,47 @@ def test_api_flow_from_approval_to_confirmed_outcome(client, clock):
     assert client.post("/v1/automation/alerts/observe", json={
         "farm_id": "farm", "zone_id": "zone", "sample_time": T0.isoformat(),
         "data_quality_labels": "x"}).status_code == 422
+
+
+SENSOR_RULES = [{"id": "sensor_check", "match_any_labels": ["impossible_ph", "stale_reading"], "action": "check_sensor",
+                 "message": "Check the sensor."}]
+
+
+def approved_sensor_check(store):
+    item = store.add("sensor_check", "check_sensor", "check", dict(CONTEXT))
+    return store.decide(item["id"], "approved", rules=SENSOR_RULES)
+
+
+def test_watched_quality_label_is_a_trusted_reading_that_is_not_clean(store):
+    item = approved_sensor_check(store)
+    observe(store, 5)
+    observe(store, 10, labels=["impossible_ph"], quality=["impossible_ph"])
+    status, evidence = outcome(store, item)
+    assert (evidence["readings_seen"], evidence["clean_streak"], evidence["untrusted_readings"]) == (2, 0, 0)
+    observe(store, 15, quality=["stale_reading", "stuck_value"])  # one watched label is enough
+    assert outcome(store, item)[1]["readings_seen"] == 3 and outcome(store, item)[1]["clean_streak"] == 0
+    for minute in (20, 25, 30):
+        observe(store, minute)
+    assert outcome(store, item)[0] == "confirmed"
+
+
+def test_unwatched_quality_label_stays_untrusted_for_a_sensor_check(store):
+    item = approved_sensor_check(store)
+    observe(store, 5)
+    observe(store, 10, quality=["stuck_value"])
+    evidence = outcome(store, item)[1]
+    assert (evidence["readings_seen"], evidence["clean_streak"], evidence["untrusted_readings"]) == (1, 1, 1)
+
+
+def test_watched_quality_label_without_a_matching_rule_stays_untrusted(store):
+    item = approved(store)  # watches high_ec only
+    observe(store, 5, quality=["impossible_ph"])
+    evidence = outcome(store, item)[1]
+    assert (evidence["readings_seen"], evidence["untrusted_readings"]) == (0, 1)
+
+
+def test_sensor_check_never_expires_into_not_recovered_without_enough_trusted_readings(store, clock):
+    item = approved_sensor_check(store)
+    observe(store, 5, quality=["impossible_ph"])
+    clock.now = T0 + timedelta(hours=3)
+    assert outcome(store, item)[0] == "unconfirmed"  # 1 trusted reading < 3 required

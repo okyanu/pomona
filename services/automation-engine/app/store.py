@@ -161,9 +161,10 @@ class SuggestionStore:
                          risk_labels: Iterable[str], data_quality_labels: Iterable[str] = ()) -> None:
         """Judge one reading against approved suggestions awaiting an outcome. Uses sample time; readings
         from before the approval, repeats, future clocks and untrusted (data-quality-flagged) readings
-        never count toward recovery."""
+        never count toward recovery, except a data-quality label the suggestion itself watches (a sensor_check
+        card): that is a trusted reading showing the sensor problem persists."""
         t = sample_time.astimezone(timezone.utc)
-        labels, untrusted = set(risk_labels), bool(list(data_quality_labels))
+        labels, quality = set(risk_labels), set(data_quality_labels)
         with self._lock, self._db:
             self._expire()
             now = datetime.fromisoformat(utc_now_iso())
@@ -182,11 +183,12 @@ class SuggestionStore:
                     self._finalize_outcome(row["id"], evidence)
                     continue
                 evidence["last_sample_time"] = t.isoformat()
-                if untrusted:
+                watched = set(evidence["watched_labels"])
+                if quality and not quality & watched:
                     evidence["untrusted_readings"] += 1
                 else:
                     evidence["readings_seen"] += 1
-                    evidence["clean_streak"] = 0 if labels & set(evidence["watched_labels"]) else evidence["clean_streak"] + 1
+                    evidence["clean_streak"] = 0 if (labels | quality) & watched else evidence["clean_streak"] + 1
                 status = row["outcome_status"]
                 if evidence["clean_streak"] >= evidence["required_clean_readings"]:
                     status, evidence["resolved_sample_time"] = "confirmed", t.isoformat()

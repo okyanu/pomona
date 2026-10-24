@@ -45,3 +45,30 @@ rules:
     message: >-
       Substrate moisture out of the expected range. Confirm with a second
       reading and check the irrigation system for blockages or leaks.
+
+  # Sensor-check labels from the sensor-quality reasoner. The trust gate stops the specialists from
+  # reasoning on a reading that failed the check, so this card is what the operator sees instead.
+  - id: sensor_check
+    match_any_labels:
+      - impossible_ph
+      - impossible_ec
+      - impossible_humidity
+      - impossible_temperature
+      - sensor_drift_possible
+      - baseline_drift_possible
+      - stuck_value
+      - flatline_possible
+      - noisy_signal_possible
+      - conflicting_readings
+      - unit_mismatch
+      - stale_reading
+      - insufficient_context
+      - missing_ph
+      - missing_ec
+      - missing_temperature
+      - missing_humidity
+      - missing_moisture
+    action: check_sensor
+    message: >-
+      A sensor reading could not be confirmed. Check the flagged probe or
+      timestamp before acting on any advice that uses it.
