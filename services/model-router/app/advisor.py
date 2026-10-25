@@ -4,6 +4,11 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import SENSOR_FIELDS, settings
+from app.explanation_check import (
+    format_number,
+    permitted_numbers,
+    unsupported_numbers,
+)
 
 
 def format_sensor_summary(sensor: Dict[str, Any]) -> str:
@@ -168,6 +173,28 @@ async def _huggingface_explanation(
     }
 
 
+def _check_numbers(
+    result: Dict[str, Any],
+    label: str,
+    instruction: str,
+    sensor: Dict[str, Any],
+    guarded_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Keep model text only if every number in it was given to the model."""
+    permitted = permitted_numbers(instruction, sensor, guarded_context)
+    bad = unsupported_numbers(str(result.get("explanation", "")), permitted)
+    if not bad:
+        return result
+    listed = ", ".join(dict.fromkeys(format_number(v) for v in bad))
+    fallback = _stub_explanation(instruction, sensor, guarded_context)
+    fallback["backend"] = "stub"
+    fallback["fallback_reason"] = (
+        f"{label} explanation quoted numbers not in the readings or guarded context: "
+        f"{listed}; deterministic explanation used instead"
+    )
+    return fallback
+
+
 async def explain(
     instruction: str,
     sensor: Dict[str, Any],
@@ -178,7 +205,7 @@ async def explain(
 
     if selected == "huggingface":
         try:
-            return await _huggingface_explanation(instruction, sensor, guarded_context)
+            result = await _huggingface_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
             result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
@@ -188,14 +215,16 @@ async def explain(
                 f"See docs/HF_USAGE.md and https://huggingface.co/{settings.hf_model_id}"
             )
             return result
+        return _check_numbers(result, "Hugging Face", instruction, sensor, guarded_context)
 
     if selected == "ollama":
         try:
-            return await _ollama_explanation(instruction, sensor, guarded_context)
+            result = await _ollama_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
             result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
             result["fallback_reason"] = f"ollama unavailable: {exc}"
             return result
+        return _check_numbers(result, "ollama", instruction, sensor, guarded_context)
 
     return _stub_explanation(instruction, sensor, guarded_context)

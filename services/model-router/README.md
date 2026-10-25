@@ -35,6 +35,10 @@ Currently implements:
 `/v1/advisor/explain` accepts optional `guarded_context` from the reasoner chain.
 When present, the advisor explains that validated context and must not invent
 actions outside its safe checks. All advisor output remains advisory-only.
+Model-written explanations (Ollama, Hugging Face) are checked after generation:
+if they quote a number that was not in the readings, guarded context or
+instruction, the model text is dropped and the deterministic explanation is
+returned with a `fallback_reason`.
 
 ## Backends (`POMONA_LLM_BACKEND`)
 
