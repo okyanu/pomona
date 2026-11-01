@@ -127,6 +127,7 @@ class AlertState(BaseModel):
     message: Optional[str] = None
     state: Literal["pending", "active", "recovering"]
     since: str
+    consecutive: Optional[int] = None  # readings in a row carrying the label while pending
     raised_at: Optional[str] = None
     recovering_since: Optional[str] = None
 

@@ -183,8 +183,9 @@ PY
 
 # Fake greenhouse plumbing: the simulator posts to Core, the pipeline and alert monitor see it, and the
 # scorer reads it back. Last, so its readings never become the "latest event" the checks above expect.
-# A pH jump on greenhouse-a keeps a sensor-check label up for the rest of the run (a lone spike would cancel
-# its own pending alert); greenhouse-b gets a dead clock that Core must reject. 15 ticks at 1 s.
+# A pH jump on greenhouse-a keeps a sensor-check label up for the rest of the run, so the sensor_check alert is
+# raised after 3 flagged readings (a lone spike would cancel its own pending alert); greenhouse-b gets a dead
+# clock that Core must reject. 15 ticks at 1 s.
 FG_DIR="${TMP_DIR}/fake-greenhouse"
 mkdir -p "${FG_DIR}"
 "${PY_CORE}" "${ROOT_DIR}/examples/simulators/fake_greenhouse.py" --core-url "http://127.0.0.1:${CORE_PORT}" \
@@ -199,7 +200,8 @@ sleep 2
 curl -fsS "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}/v1/automation/alerts?farm_id=validation-farm&zone_id=greenhouse-a" >"${FG_DIR}/alerts-a.json"
 curl -fsS "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}/v1/automation/alerts?farm_id=validation-farm&zone_id=greenhouse-b" >"${FG_DIR}/alerts-b.json"
 curl -fsS "http://127.0.0.1:${CORE_PORT}/v1/sensors/events?farm_id=validation-farm&limit=500" >"${FG_DIR}/stored.json"
-"${PY_CORE}" - "${FG_DIR}/truth.jsonl" "${FG_DIR}/alerts-a.json" "${FG_DIR}/alerts-b.json" "${FG_DIR}/stored.json" <<'PY'
+curl -fsS "http://127.0.0.1:${CORE_PORT}/v1/sensors/calibrations?farm_id=validation-farm" >"${FG_DIR}/calibrations.json"
+"${PY_CORE}" - "${FG_DIR}/truth.jsonl" "${FG_DIR}/alerts-a.json" "${FG_DIR}/alerts-b.json" "${FG_DIR}/stored.json" "${FG_DIR}/calibrations.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -208,6 +210,7 @@ truth = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()
 alerts_a = json.loads(Path(sys.argv[2]).read_text())
 alerts_b = json.loads(Path(sys.argv[3]).read_text())
 stored = json.loads(Path(sys.argv[4]).read_text())
+calibrations = json.loads(Path(sys.argv[5]).read_text())
 dead = [r for r in truth if r["expect"]["kind"] == "rejected_by_core"]
 accepted = [r for r in truth if r["published"] and r["expect"]["kind"] != "rejected_by_core"]
 assert len(truth) == 30 and len(dead) == 3, (len(truth), len(dead))
@@ -215,10 +218,15 @@ assert all(r["delivery"]["status"] == 422 for r in dead)
 assert all(r["delivery"]["status"] == 201 for r in accepted)
 assert stored["count"] == len(accepted) == 27, (stored["count"], len(accepted))
 assert not any(e["timestamp"].startswith("1970") for e in stored["events"])
-assert any(a["rule_id"] == "sensor_check" and a["state"] == "pending" for a in alerts_a["alerts"]), alerts_a
+confirmed = [c for r in truth for c in r.get("calibrations", [])]  # a calibration is not a reading: 30 lines stay 30
+assert len(confirmed) == 1 and confirmed[0]["delivery"]["status"] == 201, confirmed
+assert calibrations["count"] == 1 and calibrations["calibrations"][0]["measurement"] == "ph", calibrations
+# The jump is flagged on consecutive readings, so the sensor_check alert is raised after 3 of them (not after 10 minutes).
+assert any(a["rule_id"] == "sensor_check" and a["state"] == "active" for a in alerts_a["alerts"]), alerts_a
+assert any(e["rule_id"] == "sensor_check" and e["event"] == "raised" for e in alerts_a["events"]), alerts_a
 assert all(a["rule_id"] == "sensor_check" for a in alerts_b["alerts"]), alerts_b  # no domain alert on b
-print("Fake greenhouse plumbing: Core stored", stored["count"], "of 30 (3 dead clocks rejected with 422);",
-      "greenhouse-a sensor_check pending, greenhouse-b no domain alert")
+print("Fake greenhouse plumbing: Core stored", stored["count"], "of 30 (3 dead clocks rejected with 422), 1 calibration;",
+      "greenhouse-a sensor_check raised, greenhouse-b no domain alert")
 PY
 "${PY_CORE}" "${ROOT_DIR}/scripts/score_fake_greenhouse.py" --truth "${FG_DIR}/truth.jsonl" \
   --automation-url "http://127.0.0.1:${AUTOMATION_ENGINE_PORT}" --core-url "http://127.0.0.1:${CORE_PORT}" \

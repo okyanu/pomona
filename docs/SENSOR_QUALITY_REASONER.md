@@ -109,11 +109,50 @@ The gate returns `{trust_verdict, vetoed_fields, global_veto, reason}`, copied i
 | `cannot_confirm` | Nothing can be confirmed: a stale/invalid timestamp, `stale_reading`, `insufficient_context` or `unit_mismatch` (global veto), or every expected field is vetoed. Specialists return empty results (`source: "sensor_veto"`). |
 
 `partial` and `cannot_confirm` keep `human_review_required` true and `risk_level`
-"high". The automation engine turns any sensor-check label into a `sensor_check`
-card instead of a dosing card. `make fault-replay` measures how many wrong domain
+"high". The automation engine turns any sensor-check label into a sensor card (`sensor_check`; the softer
+`flatline_possible` hint has its own rule, `sensor_flatline`, which waits the usual 10 minutes) instead of a dosing card. `make fault-replay` measures how many wrong domain
 labels are still shown as trusted per injected fault
 ([SENSOR_FAULT_REPLAY.md](./SENSOR_FAULT_REPLAY.md)). The veto cannot help when the
 sensor check itself raises nothing, for example a constant in-range offset.
+
+## Sticky trusted reference (Core feed only)
+
+The temporal checks above only remember the last 11 packets, so a step or a frozen probe becomes
+the new "normal" within minutes and the flag stops (about 8 consecutive readings at 30 s) while the
+fault is still there. Core's outcome feed therefore sends an optional `stream_baseline` with each
+evaluation (`POST /v1/pipeline/evaluate`): per field `{median, n, window_s, spread, last_change_at}`.
+
+- `median`: the median of that probe's earlier readings in which the field was **not vetoed**, within
+  2 h (`TRUST_BASELINE_WINDOW_S`) of the newest **trusted** reading (not of "now"), from the latest
+  calibration for that probe on. At least 6 trusted readings (`TRUST_BASELINE_MIN_N`) are needed. A probe
+  that has been broken for six hours is therefore still judged against the readings from before it broke.
+  Core records each reading's verdict in the `event_trust` table and builds the reference with
+  `services/core/app/trusted_baseline.py` (stdlib only, shared with the fake-greenhouse scorer).
+- `spread`: the window's 10th-to-90th percentile range, how far the probe normally wanders.
+- `last_change_at`: when the current run of identical values began, over all readings.
+
+With it the router flags `baseline_drift_possible` while pH differs from the trusted median by 0.35 or
+EC by 0.4 (the existing thresholds) **and** by 3 times the probe's own spread, so the flag lasts as long
+as the fault, the veto holds, and no wrong domain card follows; and `stuck_value` when a reading repeats
+for longer than 45 min (air temperature), 30 min (humidity), 6 h (substrate temperature) or 3 h (water
+temperature). The check text tells the operator to verify with a meter and, if the reading is right, to
+record a calibration (`POST /v1/sensors/calibrations`) for that probe: a calibration resets the
+reference (after 6 trusted readings at the new level the flag clears and the domain card can raise).
+**A flagged level stays "can't confirm" until a calibration**, however long that takes and however
+many hours the fault lasts; its `sensor_check` incident stays open meanwhile. An operator can opt into a
+lapse with `TRUST_BASELINE_MAX_AGE_S` (seconds after the newest trusted reading; the probe is then judged by
+the 11-packet checks again and trusted silently). Without `stream_baseline` the rules are exactly the
+11-packet rules above. The dashboard's pipeline view and the shared chain send no stream state, so they do
+not have the sticky check yet.
+
+The limits come from the real logs (`make real-replay`, whose "sticky" pass replays them the way Core's
+feed does): pH and EC are not checked for "stuck" because drain and tank probes sit on one value for
+hours as a matter of course (80 % of real readings are beyond 20 minutes); air temperature and humidity
+limits keep real-log false flags under 0.15 % of readings; substrate temperature needs 6 h because real
+slab probes hold one 0.1 C value for up to 9 h; and a drift needs 3 times the probe's own spread because real
+drain pH and EC leave their 2 h median by 0.35 / 0.4 on 1 to 3 % of readings. Moisture has no persistent
+check (a hydroponic zone sends a constant placeholder). The unattended numbers are high on historical logs
+for a reason that is not a defect, see [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md#longer-memory-in-cores-feed).
 
 ## Related design drafts
 

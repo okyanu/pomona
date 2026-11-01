@@ -161,8 +161,8 @@ class SuggestionStore:
                          risk_labels: Iterable[str], data_quality_labels: Iterable[str] = ()) -> None:
         """Judge one reading against approved suggestions awaiting an outcome. Uses sample time; readings
         from before the approval, repeats, future clocks and untrusted (data-quality-flagged) readings
-        never count toward recovery, except a data-quality label the suggestion itself watches (a sensor_check
-        card): that is a trusted reading showing the sensor problem persists."""
+        never count toward recovery, except a data-quality label the suggestion itself watches (a sensor-rule
+        card, sensor_check or sensor_flatline): that is a trusted reading showing the sensor problem persists."""
         t = sample_time.astimezone(timezone.utc)
         labels, quality = set(risk_labels), set(data_quality_labels)
         with self._lock, self._db:

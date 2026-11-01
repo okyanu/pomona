@@ -29,7 +29,7 @@ Definitions (also in the JSON `metric_definitions`):
 
 - **faulty frames**: frames where a fault was injected, whether or not a detector can catch it.
 - **wrong (labels)**: the frame's domain labels differ (either direction) from the clean counterpart's.
-- **wrong cards**: the same, restricted to *card labels*, the labels matched by a rule in `services/automation-engine/app/rules.yaml` other than `sensor_check` (loaded from the YAML). Only these make an advice card.
+- **wrong cards**: the same, restricted to *card labels*, the labels matched by a rule in `services/automation-engine/app/rules.yaml` other than the sensor rules (`sensor_check`, `sensor_flatline`: action `check_sensor`) (loaded from the YAML). Only these make an advice card.
 - **trusted-wrong ungated**: wrong on the raw faulty reading and the sensor check raised nothing.
 - **trusted-wrong gated**: wrong after the veto and `trust_verdict` is not `cannot_confirm`, so a wrong label (or card) is still shown as reliable.
 - **cannot confirm / partial**: faulty frames with that verdict.

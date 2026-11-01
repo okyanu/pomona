@@ -73,6 +73,10 @@ LIMITS = {"air_temperature_c": (-40.0, 80.0), "substrate_temperature_c": (-40.0,
           "soil_moisture_pct": (0.0, 100.0)}
 # One moisture probe is published under two names (the tomato reasoner reads the second).
 FIELD_ALIASES = {"substrate_moisture_pct": "soil_moisture_pct"}
+# Probes Core can record a calibration for (CalibrationEvent.measurement); a calibration tells Pomona that a
+# meter confirmed the probe, which accepts a new level after a flagged step. Substrate temperature has none.
+CALIBRATABLE = ("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct")
+CALIBRATION_METHOD = "fake_greenhouse_confirm"
 
 
 @dataclass(frozen=True)
@@ -410,6 +414,7 @@ class Zone:
         self.dosed = False
         self.next_pulse_h = start_hour + 0.5
         self.recovery: List[List[Any]] = []  # [fault name, published samples left] after a sensor fault stops
+        self.calibrations: List[Dict[str, Any]] = []  # asked for since the last reading: {field, at, source}
         self.substrate_temp = self._air(start_hour) - SUBSTRATE_OFFSET_C
 
     # Truth ----------------------------------------------------------------------------
@@ -536,6 +541,10 @@ class Zone:
     def placeholder_fields(self) -> List[str]:
         return [] if self.cfg.has_substrate else ["soil_moisture_pct"]
 
+    @property
+    def calibratable(self) -> List[str]:
+        return [f for f in CALIBRATABLE if f in self.cfg.sensors]
+
 
 def zone_context() -> Dict[str, Any]:
     """Zone-level FAO-56/NPK context, same shape as greenhouse_tomato.py, held steady."""
@@ -571,6 +580,7 @@ class Reading:
     topic: str
     event: Optional[Dict[str, Any]]  # None when nothing was published
     truth: Dict[str, Any]
+    calibrations: Optional[List[Dict[str, Any]]] = None  # {field, at, raw, reference}, for the Core publisher
 
 
 def utc_now() -> datetime:
@@ -581,7 +591,10 @@ def load_scenario(path: Path) -> Dict[str, Any]:
     scenario = json.loads(Path(path).read_text())
     for step in scenario.get("steps", []):
         name = step.get("start") or step.get("stop")
-        if name not in REGISTRY or "at_tick" not in step or "zone" not in step:
+        if "calibrate" in step:
+            if step["calibrate"] not in CALIBRATABLE + tuple(FIELD_ALIASES) or "at_tick" not in step or "zone" not in step:
+                raise ValueError(f"bad scenario step: {step}")
+        elif name not in REGISTRY or "at_tick" not in step or "zone" not in step:
             raise ValueError(f"bad scenario step: {step}")
     return scenario
 
@@ -645,6 +658,19 @@ class Simulation:
         self._prune()
         return matched
 
+    def calibrate(self, zone_id: str, field: str, source: str = "scenario") -> str:
+        """Confirm a probe with a meter (not an injection: the truth is unchanged). Returns the field.
+
+        The calibration is stamped with this tick's wall time and rides on this tick's truth line; the
+        Core publisher also posts it as a CalibrationEvent.
+        """
+        field = canonical(field)
+        zone = self.zones[zone_id]
+        if field not in zone.calibratable:
+            raise ValueError(f"zone {zone_id} has no calibratable probe {field!r}; known: {zone.calibratable}")
+        zone.calibrations.append({"field": field, "at": self.now, "source": source})
+        return field
+
     def _prune(self, zone: Optional[Zone] = None) -> None:
         for z in [zone] if zone else self.zones.values():
             for fault in z.faults:
@@ -667,7 +693,9 @@ class Simulation:
         for step in self.steps:
             if step["at_tick"] == tick:
                 source = step.get("source", "scenario")
-                if "start" in step:
+                if "calibrate" in step:
+                    self.calibrate(step["zone"], step["calibrate"], source)
+                elif "start" in step:
                     self.start(step["start"], step["zone"], step.get("field"), source=source,
                                **step.get("params", {}))
                 else:
@@ -733,6 +761,13 @@ class Simulation:
                 raise ValueError(f"unknown hidden id {hidden_id!r}")
             self.pending.append({"op": "stop_hidden", "id": hidden_id})
 
+    def queue_calibrate(self, zone_id: Any, field: Any) -> None:
+        if not isinstance(zone_id, str) or zone_id not in self.zones:
+            raise ValueError(f"unknown zone {zone_id!r}; known: {sorted(self.zones)}")
+        if not isinstance(field, str) or canonical(field) not in self.zones[zone_id].calibratable:
+            raise ValueError(f"{field!r} cannot be calibrated in {zone_id}; known: {self.zones[zone_id].calibratable}")
+        self._queue({"op": "calibrate", "zone": zone_id, "field": canonical(field)})
+
     def queue_stop_all(self) -> None:
         self._queue({"op": "stop_all"})
 
@@ -797,6 +832,9 @@ class Simulation:
             elif cmd["op"] == "stop":
                 if self.stop(cmd["name"], cmd["zone"], cmd["field"]):
                     self._record(tick, "stop", cmd["name"], cmd["zone"], cmd["field"], None, "manual")
+            elif cmd["op"] == "calibrate":
+                self.calibrate(cmd["zone"], cmd["field"], "manual")
+                self._record(tick, "calibrate", cmd["field"], cmd["zone"], None, None, "manual")
             elif cmd["op"] == "stop_hidden":
                 found = [i for z in self.zones.values() for i in z.faults + z.events
                          if i.hidden_id == cmd["id"] and not i.stopping]
@@ -813,7 +851,7 @@ class Simulation:
     def catalog(self) -> Dict[str, Any]:
         return {
             "zones": [{"zone_id": z.cfg.zone_id, "device_id": z.cfg.device_id, "system_type": z.cfg.system_type,
-                       "sensors": list(z.cfg.sensors)} for z in self.zones.values()],
+                       "sensors": list(z.cfg.sensors), "calibratable": z.calibratable} for z in self.zones.values()],
             "injections": [{"name": name, "kind": cls.kind, "description": cls.description,
                             "takes_field": cls.takes_field(), "needs_field": cls.needs_field,
                             "default_field": cls.default_field, "zones": self.applicable_zones(name),
@@ -886,6 +924,8 @@ class Simulation:
                     entry[1] -= 1
                 zone.recovery = [e for e in zone.recovery if e[1] > 0]
 
+        calibrations = [{**c, "raw": sent[c["field"]], "reference": true[c["field"]]} for c in zone.calibrations]
+        zone.calibrations = []
         wrong = sorted({name for f in zone.faults for name in f.wrong_fields()})
         onset_step = any(f.name == "plausible_offset" and 0 < f.started_tick and tick - f.started_tick < RECOVERY_SAMPLES
                          for f in zone.faults)
@@ -929,8 +969,10 @@ class Simulation:
                 "recovering_from": recovering,
             },
         }
+        if calibrations:  # only on the tick a calibration happened, so other truth lines stay as they were
+            truth["calibrations"] = [{"field": c["field"], "at": c["at"], "source": c["source"]} for c in calibrations]
         topic = f"pomona/{self.farm_id}/{cfg.zone_id}/sensor/{cfg.device_id}/state"
-        return Reading(topic, event, truth)
+        return Reading(topic, event, truth, calibrations or None)
 
 
 # --- Control page -------------------------------------------------------------------------
@@ -1015,6 +1057,8 @@ class ControlHandler(BaseHTTPRequestHandler):
                 sim.queue_stop_hidden(body["id"])
             else:
                 sim.queue_stop(body.get("name"), body.get("zone"), body.get("field"))
+        elif path == "/api/calibrate":
+            sim.queue_calibrate(body.get("zone"), body.get("field"))
         elif path == "/api/stop_all":
             sim.queue_stop_all()
         elif path == "/api/hidden":
@@ -1045,14 +1089,26 @@ class CorePublisher:
         if not base_url.startswith(("http://", "https://")):
             raise ValueError(f"--core-url must be http(s), got {base_url!r}")
         self.url = base_url.rstrip("/") + "/v1/sensors/events"
+        self.calibration_url = base_url.rstrip("/") + "/v1/sensors/calibrations"
         self.api_key = api_key
         self.timeout = timeout
 
     def publish(self, topic: str, payload: str) -> Dict[str, Any]:
+        return self._post(self.url, payload)
+
+    def calibrate(self, farm_id: str, zone_id: str, device_id: str, calibration: Dict[str, Any]) -> Dict[str, Any]:
+        """Record a CalibrationEvent: a meter confirmed this probe (Pomona then accepts its current level)."""
+        body = {"device_id": device_id, "farm_id": farm_id, "zone_id": zone_id, "sensor_id": calibration["field"],
+                "measurement": calibration["field"], "method": CALIBRATION_METHOD,
+                "points": [{"reference": calibration["reference"], "raw": calibration["raw"]}],
+                "performed_at": calibration["at"], "performed_by": "fake_greenhouse"}
+        return self._post(self.calibration_url, json.dumps(body))
+
+    def _post(self, url: str, payload: str) -> Dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(self.url, data=payload.encode(), headers=headers, method="POST")
+        request = urllib.request.Request(url, data=payload.encode(), headers=headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 (http/https checked)
                 return {"status": response.status}
@@ -1115,6 +1171,10 @@ def run(sim: Simulation, publisher: Any, truth_handle: Any, ticks: Optional[int]
     done = 0
     while ticks is None or done < ticks:
         for reading in sim.step():
+            for entry, calibration in zip(reading.truth.get("calibrations", []), reading.calibrations or []):
+                if hasattr(publisher, "calibrate"):  # before the reading, so Core has it when it evaluates it
+                    entry["delivery"] = publisher.calibrate(sim.farm_id, reading.truth["zone_id"],
+                                                            reading.truth["device_id"], calibration)
             if reading.event is not None:
                 delivery = publisher.publish(reading.topic, json.dumps(reading.event))
                 if delivery is not None:

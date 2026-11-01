@@ -69,7 +69,7 @@ def test_real_episode_caught_with_delay_in_seconds_and_samples():
     assert ep["outcome"] == "caught" and ep["rule"] == "high_ec_alert" and ep["events"] == ["ev"]
     assert (ep["raised"]["delay_s"], ep["raised"]["delay_samples"]) == (660.0, 22)
     assert report["summary"]["real_episodes"] == {"total": 1, "caught": 1, "missed": 0, "too_short_to_raise": 0,
-                                                  "no_card_rule": 0, "max_delay_s": 660.0}
+                                                  "no_card_rule": 0, "max_delay_s": 660.0, "caught_cant_confirm": 0}
     assert report["summary"]["false_alarms"] == 0
 
 
@@ -230,6 +230,79 @@ def test_markdown_report_has_timeline_and_summary():
     assert "sensor fault jump on ph" in text and "## Summary" in text
 
 
+# --- Can't-confirm: the safe catch -----------------------------------------------------------
+
+def frame_info(zone, ticks, vetoed):
+    return {(zone, t): {"labels": [], "trust": "partial", "vetoed_fields": list(vetoed), "card_labels": [],
+                        "sensor_check_labels": ["baseline_drift_possible"]} for t in ticks}
+
+
+def test_real_episode_with_only_a_sensor_check_is_caught_as_cant_confirm():
+    rows = real_rows(zone=A)  # high_ec from tick 10 to 60
+    report = grade(rows, [raised(A, "sensor_check", 14)])
+    (ep,) = report["real_episodes"]
+    assert ep["outcome"] == "caught_cant_confirm" and ep["raised"]["rule"] == "sensor_check"
+    assert ep["field_vetoed"] is None  # stack mode cannot see per-reading vetoes
+    assert report["summary"]["real_episodes"]["caught_cant_confirm"] == 1 and report["summary"]["real_episodes"]["missed"] == 0
+    assert score.failures(report) == 0 and report["summary"]["false_alarms"] == 0  # a safe catch, not a false alarm
+    text = score.markdown(report, "stack", Path("truth.jsonl"))
+    assert "caught as can't-confirm (safe)" in text
+
+
+def test_offline_the_episodes_field_must_have_been_vetoed():
+    rows = real_rows(zone=A)
+    events = [raised(A, "sensor_check", 14)]
+    ec = score.Grader(rows, events, RULES, DEFAULTS, frame_info(A, range(10, 61), ["ec_ms_cm"])).report()
+    assert ec["real_episodes"][0]["outcome"] == "caught_cant_confirm" and ec["real_episodes"][0]["field_vetoed"] is True
+    other = score.Grader(rows, events, RULES, DEFAULTS, frame_info(A, range(10, 61), ["ph"])).report()
+    assert other["real_episodes"][0]["outcome"] == "missed"  # the check was about a different probe
+
+
+def test_a_sensor_check_card_that_began_before_the_crossing_counts_and_is_not_a_false_alarm():
+    rows = []
+    for t in range(80):  # the event ramps from tick 2 (no label yet), the label holds from tick 20
+        rows.append(row(t, A, expected=["high_ec"] if 20 <= t <= 70 else [], events=["ev"] if 2 <= t <= 75 else []))
+    report = grade(rows, [raised(A, "sensor_check", 6)])
+    ep = report["real_episodes"][0]
+    assert ep["outcome"] == "caught_cant_confirm" and ep["raised"]["already_active"] is True
+    assert report["summary"]["false_alarms"] == 0
+    assert "sensor_check already active since 12:03:00" in score.markdown(report, "stack", Path("t"))
+    # Without a real event under way the same raise is a false alarm.
+    assert grade([row(t, A) for t in range(80)], [raised(A, "sensor_check", 6)])["summary"]["false_alarms"] == 1
+
+
+def test_domain_card_after_a_calibration_is_caught_with_a_note_on_when_cant_confirm_began():
+    rows = real_rows(start=20, end=70, total=90)
+    report = grade(rows, [raised(A, "sensor_check", 12), raised(A, "high_ec_alert", 48)])
+    (ep,) = report["real_episodes"]
+    assert ep["outcome"] == "caught" and ep["raised"]["rule"] == "high_ec_alert" and ep["raised"]["delay_s"] == 840.0
+    assert ep["cant_confirm_from"]["rule"] == "sensor_check" and ep["cant_confirm_from"]["already_active"] is True
+    text = score.markdown(report, "stack", Path("t"))
+    assert "can't-confirm (sensor_check) since 12:06:00 (before the crossing)" in text and "| caught |" in text
+
+
+def test_a_card_active_from_an_earlier_fault_counts_only_if_this_fault_was_flagged():
+    rows = [row(t, A, faults=[("stuck", "air_temperature_c")] if 40 <= t <= 60 else [],
+                forbid=["air_temperature_c"] if 40 <= t <= 60 else [],
+                recovering=["stuck"] if 61 <= t <= 71 else []) for t in range(90)]
+    events = [raised(A, "sensor_check", 5)]  # raised long before, never recovered in the log
+    stack = grade(rows, events)
+    assert stack["fault_episodes"][0]["outcome"] == "caught" and stack["fault_episodes"][0]["raised"]["already_active"]
+    flagged = score.Grader(rows, events, RULES, DEFAULTS, frame_info(A, range(44, 52), ["air_temperature_c"])).report()
+    assert flagged["fault_episodes"][0]["outcome"] == "caught"
+    silent = score.Grader(rows, events, RULES, DEFAULTS, {(A, 3): frame_info(A, [3], [])[(A, 3)]}).report()
+    assert silent["fault_episodes"][0]["outcome"] == "missed"  # nothing flagged in this fault's window
+
+
+def test_aftermath_of_a_real_event_is_counted_apart_offline():
+    rows = [row(t, A, events=["ev"] if 5 <= t <= 15 else []) for t in range(60)]
+    info = {(A, t): {"labels": ["baseline_drift_possible"], "trust": "partial", "vetoed_fields": ["ec_ms_cm"],
+                     "card_labels": [], "sensor_check_labels": ["baseline_drift_possible"]} for t in (30, 31, 50)}
+    level = score.Grader(rows, [], RULES, DEFAULTS, info).reading_level()
+    # ticks 30 and 31 are within an hour of the event's end; all three are (60 frames = 30 minutes).
+    assert level["normal_with_sensor_check_event_aftermath"] == 3 and level["normal_with_sensor_check_outside_tail"] == 0
+
+
 # --- Stack mode against a fake automation-engine / Core -------------------------------------
 
 class FakeStack(BaseHTTPRequestHandler):
@@ -331,7 +404,8 @@ def test_offline_replay_on_a_generated_run_is_stable(tmp_path):
     assert report["mode"] == "offline" and report["frames"] == {"total": 120, "accepted_by_core": 118, "published": 120}
     assert report["reading_level"] == {
         "normal_frames": 117, "normal_with_card": 0, "normal_with_sensor_check_outside_tail": 0,
-        "normal_with_sensor_check_inside_tail": 0, "normal_tail_frames": 11, "faulty_frames": 1,
+        "normal_with_sensor_check_inside_tail": 0, "normal_with_sensor_check_event_aftermath": 0,
+        "normal_tail_frames": 11, "faulty_frames": 1,
         "wrong_cards": 0, "trusted_wrong_cards": 0, "cannot_confirm_frames": 0, "partial_frames": 1}
     s = report["summary"]
     assert s["dead_clock"] == {"total": 1, "rejected_by_core": 1, "accepted_by_core": 0}
@@ -341,3 +415,93 @@ def test_offline_replay_on_a_generated_run_is_stable(tmp_path):
     assert spike["sensor_check_frames"] == 1  # the sensor check fired on the one bad reading, then nothing lasted
     assert "nothing raised (sensor check seen on 1 readings" in (tmp_path / "r.md").read_text()
     assert report["alerts_now"] == []  # the one-sample spike cancelled its own pending alert
+
+
+def test_offline_cant_confirm_then_calibration_flow(tmp_path):
+    """A fast EC rise: Pomona says can't-confirm; once a calibration accepts the level the high_ec card follows."""
+    def run(steps, name):
+        scenario = tmp_path / f"{name}.json"
+        scenario.write_text(json.dumps({"seed": 7, "duration_ticks": 100, "steps": steps}))
+        truth, out = tmp_path / f"{name}-truth.jsonl", tmp_path / f"{name}.json.out"
+        assert fg.main(["--dry-run", "--out", str(tmp_path / f"{name}-e.jsonl"), "--truth-log", str(truth),
+                        "--scenario", str(scenario)], clock=fake_clock()) == 0
+        assert score.main(["--truth", str(truth), "--offline", "--json", str(out)]) == 0
+        return json.loads(out.read_text())
+
+    ramp = {"at_tick": 20, "start": "nutrient_over_concentration", "zone": B, "params": {"ramp_min": 10}}
+    alone = run([ramp], "alone")["real_episodes"][0]
+    assert alone["outcome"] == "caught_cant_confirm" and alone["field_vetoed"] is True and alone["raised"]["already_active"]
+    confirmed = run([ramp, {"at_tick": 48, "calibrate": "ec_ms_cm", "zone": B}], "confirmed")
+    ep = confirmed["real_episodes"][0]
+    assert ep["outcome"] == "caught" and ep["raised"]["rule"] == "high_ec_alert"
+    assert ep["cant_confirm_from"]["rule"] == "sensor_check" and ep["raised"]["time"] > ep["cant_confirm_from"]["time"]
+    assert confirmed["summary"]["false_alarms"] == 0 and confirmed["summary"]["real_episodes"]["missed"] == 0
+
+
+def test_offline_pomona_flags_a_ph_jump_for_as_long_as_it_lasts(tmp_path):
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text(json.dumps({"seed": 7, "duration_ticks": 90, "steps": [
+        {"at_tick": 20, "start": "jump", "zone": B, "field": "ph", "params": {"offset": 1.5}},
+        {"at_tick": 70, "stop": "jump", "zone": B}]}))
+    truth, out = tmp_path / "truth.jsonl", tmp_path / "out.json"
+    fg.main(["--dry-run", "--out", str(tmp_path / "e.jsonl"), "--truth-log", str(truth), "--scenario", str(scenario)],
+            clock=fake_clock())
+    assert score.main(["--truth", str(truth), "--offline", "--json", str(out)]) == 0
+    report = json.loads(out.read_text())
+    (ep,) = report["fault_episodes"]
+    assert ep["outcome"] == "caught" and ep["raised"]["delay_samples"] <= 3 and ep["wrong_cards"] == []
+    # 50 samples (25 minutes) of the fault: every reading after the first was flagged (the 11-packet check alone
+    # stopped after about eight), so the sensor check card stayed up and no high_ph card was shown.
+    assert ep["sensor_check_frames"] >= 49
+    assert report["reading_level"]["trusted_wrong_cards"] <= 1 and report["summary"]["false_alarms"] == 0
+
+
+def run_offline(tmp_path, name, steps, ticks):
+    scenario = tmp_path / f"{name}.json"
+    scenario.write_text(json.dumps({"seed": 7, "duration_ticks": ticks, "steps": steps}))
+    truth, out = tmp_path / f"{name}-truth.jsonl", tmp_path / f"{name}-out.json"
+    assert fg.main(["--dry-run", "--out", str(tmp_path / f"{name}-e.jsonl"), "--truth-log", str(truth),
+                    "--scenario", str(scenario)], clock=fake_clock()) == 0
+    assert score.main(["--truth", str(truth), "--offline", "--json", str(out)]) == 0
+    return json.loads(out.read_text())
+
+
+def test_offline_a_six_hour_ph_fault_stays_flagged_with_one_open_incident(tmp_path):
+    report = run_offline(tmp_path, "six-hours", [{"at_tick": 20, "start": "jump", "zone": B, "field": "ph",
+                                                  "params": {"offset": 1.5}}], 6 * 120)
+    (ep,) = report["fault_episodes"]
+    assert ep["outcome"] == "caught" and ep["wrong_cards"] == [] and ep["raised"]["delay_samples"] <= 3
+    assert ep["sensor_check_frames"] >= 6 * 120 - 20 - 2  # flagged on every reading of the fault, hour after hour
+    sensor_events = [e for e in report["alert_events"] if e["zone_id"] == B]
+    assert [(e["rule_id"], e["event"]) for e in sensor_events] == [("sensor_check", "raised")]  # never recovered
+    assert [(a["rule_id"], a["state"]) for a in report["alerts_now"] if a["zone_id"] == B] == [("sensor_check", "active")]
+    assert report["reading_level"]["trusted_wrong_cards"] == 0 and report["summary"]["false_alarms"] == 0
+
+
+def test_offline_a_calibration_clears_the_flag_and_the_domain_card_raises(tmp_path):
+    report = run_offline(tmp_path, "calibrated", [
+        {"at_tick": 20, "start": "jump", "zone": B, "field": "ph", "params": {"offset": 1.5}},
+        {"at_tick": 60, "calibrate": "ph", "zone": B}], 140)
+    events = [(e["rule_id"], e["event"], e["sample_time"]) for e in report["alert_events"] if e["zone_id"] == B]
+    assert [(rule, kind) for rule, kind, _ in events] == [
+        ("sensor_check", "raised"), ("ph_out_of_range", "raised"), ("sensor_check", "recovered")]
+    check_raised, card_raised, check_recovered = (score.parse_ts(when) for _, _, when in events)
+    calibrated = score.parse_ts(next(r["calibrations"][0]["at"] for r in score.load_truth(tmp_path / "calibrated-truth.jsonl")
+                                    if r.get("calibrations")))
+    assert check_raised < calibrated < card_raised < check_recovered  # the card follows the confirmation, not before
+    assert (card_raised - calibrated).total_seconds() <= 12 * 60 and [a for a in report["alerts_now"] if a["zone_id"] == B
+                                                                      and a["rule_id"] == "sensor_check"] == []
+
+
+def test_sensor_flatline_is_a_sensor_card_not_a_domain_card():
+    assert "sensor_flatline" in score.Grader([], [], RULES, DEFAULTS).sensor_rules
+    assert "flatline_possible" not in score.Grader([], [], RULES, DEFAULTS).label_rule
+    quiet = [row(t) for t in range(60)]
+    assert grade(quiet, [raised(A, "sensor_flatline", 25)])["summary"]["false_alarms"] == 1  # chance flatline: a false alarm
+    faulty = fault_rows("stuck", "air_temperature_c", forbid=("air_temperature_c",), start=5, end=45, tail=11, total=80)
+    report = grade(faulty, [raised(A, "sensor_flatline", 30)])
+    assert report["fault_episodes"][0]["outcome"] == "caught" and report["summary"]["false_alarms"] == 0
+    assert report["fault_episodes"][0]["wrong_cards"] == []  # not a wrong domain card
+    # During a real event it is the safe can't-confirm, like sensor_check.
+    ep = grade(real_rows(zone=A), [raised(A, "sensor_flatline", 14)])["real_episodes"][0]
+    assert ep["outcome"] == "caught_cant_confirm"

@@ -242,12 +242,26 @@ SENSOR_QUALITY_LABELS = {
 }
 
 
-def test_sensor_check_rule_matches_every_sensor_quality_label_and_only_those():
+def test_sensor_rules_match_every_sensor_quality_label_and_only_those():
     rules = load_rules(SERVICE_DIR / "app" / "rules.yaml")
-    rule = next(r for r in rules if r["id"] == "sensor_check")
-    assert rule["action"] == "check_sensor" and rule["action"] not in FORBIDDEN_ACTIONS
-    assert set(rule["match_any_labels"]) == SENSOR_QUALITY_LABELS
-    assert not any(r["id"] != "sensor_check" and set(r["match_any_labels"]) & SENSOR_QUALITY_LABELS for r in rules)
+    family = [r for r in rules if r["action"] == "check_sensor"]  # the sensor-rule family
+    assert {r["id"] for r in family} == {"sensor_check", "sensor_flatline"}
+    assert all(r["action"] not in FORBIDDEN_ACTIONS for r in family)
+    assert set().union(*(set(r["match_any_labels"]) for r in family)) == SENSOR_QUALITY_LABELS
+    sensor_check = next(r for r in family if r["id"] == "sensor_check")
+    flatline = next(r for r in family if r["id"] == "sensor_flatline")
+    assert set(sensor_check["match_any_labels"]) == SENSOR_QUALITY_LABELS - {"flatline_possible"}
+    assert flatline["match_any_labels"] == ["flatline_possible"]
+    # The softer hint waits the default windows; only the detector labels raise on a count of readings.
+    assert "raise_after_samples" not in flatline and "raise_after_seconds" not in flatline
+    assert "stuck or clipped" in flatline["message"]
+    assert not any(r["action"] != "check_sensor" and set(r["match_any_labels"]) & SENSOR_QUALITY_LABELS for r in rules)
+
+
+def test_flatline_label_makes_the_flatline_card_not_a_dosing_card(client: TestClient):
+    response = client.post("/v1/automation/evaluate", json={
+        "risk_labels": ["flatline_possible"], "context": {"zone_id": "greenhouse-a", "trust_verdict": "partial"}})
+    assert [s["rule_id"] for s in response.json()["suggestions"]] == ["sensor_flatline"]
 
 
 def test_sensor_quality_label_creates_a_sensor_check_card_not_a_dosing_card(client: TestClient):

@@ -634,7 +634,7 @@ class FakeCore(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         FakeCore.received.append((self.path, self.headers.get("Authorization"), body))
-        status = 422 if body["timestamp"].startswith("1970") else 201
+        status = 422 if str(body.get("timestamp", "")).startswith("1970") else 201
         data = json.dumps({"detail": "timestamp is before the minimum accepted sample time"} if status == 422 else {}).encode()
         self.send_response(status)
         self.send_header("Content-Length", str(len(data)))
@@ -695,3 +695,76 @@ def test_dry_run_truth_has_no_delivery_field(tmp_path):
     fg.main(["--dry-run", "--out", str(tmp_path / "e.jsonl"), "--truth-log", str(truth), "--ticks", "2"],
             clock=make_clock())
     assert all("delivery" not in json.loads(line) for line in truth.read_text().splitlines())
+
+
+# --- Calibration (a meter confirms a probe; not an injection) ---------------------------------
+
+def test_calibrate_step_records_the_confirmation_and_leaves_the_truth_alone():
+    base = run_sim(12)
+    cal = run_sim(12, {"steps": [{"at_tick": 5, "calibrate": "ec_ms_cm", "zone": B}]})
+    for (b_event, b_truth), (c_event, c_truth) in zip(base, cal):
+        assert c_event == b_event and c_truth["true"] == b_truth["true"]
+        assert c_truth["active_faults"] == [] and c_truth["active_events"] == []
+        assert c_truth["expect"] == b_truth["expect"]
+        if (c_truth["zone_id"], c_truth["tick"]) == (B, 5):
+            (entry,) = c_truth["calibrations"]
+            assert entry == {"field": "ec_ms_cm", "at": c_truth["wall_timestamp"], "source": "scenario"}
+        else:
+            assert "calibrations" not in c_truth
+
+
+def test_calibrate_rejects_probes_that_cannot_be_calibrated():
+    sim = fg.Simulation(clock=make_clock())
+    sim.step()
+    assert sim.calibrate(A, "substrate_moisture_pct") == "soil_moisture_pct"  # the alias of the one moisture probe
+    for zone, field in ((A, "substrate_temperature_c"), (B, "soil_moisture_pct"), (B, "water_temperature_c")):
+        with pytest.raises(ValueError):
+            sim.calibrate(zone, field)
+        with pytest.raises(ValueError):
+            sim.queue_calibrate(zone, field)
+    with pytest.raises(ValueError):
+        sim.queue_calibrate("greenhouse-z", "ph")
+
+
+def test_core_publisher_posts_the_calibration_before_the_reading(tmp_path, fake_core):
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text(json.dumps({"seed": 7, "duration_ticks": 4, "steps": [
+        {"at_tick": 2, "calibrate": "ph", "zone": B}]}))
+    truth = tmp_path / "truth.jsonl"
+    assert fg.main(["--core-url", fake_core, "--fast", "--truth-log", str(truth), "--scenario", str(scenario)],
+                   clock=make_clock()) == 0
+    rows = [json.loads(line) for line in truth.read_text().splitlines()]
+    entry = next(r for r in rows if r["zone_id"] == B and r["tick"] == 2)["calibrations"][0]
+    assert entry["delivery"] == {"status": 201}
+    posted = [(path, body) for path, _, body in FakeCore.received]
+    index = next(i for i, (path, _) in enumerate(posted) if path == "/v1/sensors/calibrations")
+    path, body = posted[index]
+    assert body["measurement"] == "ph" and body["method"] == "fake_greenhouse_confirm" and body["zone_id"] == B
+    assert body["sensor_id"] == "ph" and body["device_id"] == "fake-hydro-01" and body["performed_by"] == "fake_greenhouse"
+    assert body["performed_at"] == entry["at"] and set(body["points"][0]) == {"reference", "raw"}
+    reading_b2 = next(i for i, (p, b) in enumerate(posted) if p == "/v1/sensors/events" and b["zone_id"] == B
+                      and b["timestamp"] == entry["at"])
+    assert index < reading_b2  # Core has the calibration when the feed evaluates that reading
+
+
+def test_control_page_can_calibrate_and_the_session_replays_it(control):
+    sim, call = control
+    sim.step()
+    assert call("POST", "/api/calibrate", {"zone": B, "field": "ec_ms_cm"})[0] == 200
+    assert call("POST", "/api/calibrate", {"zone": B, "field": "soil_moisture_pct"})[0] == 400
+    assert call("POST", "/api/calibrate", {"zone": "nope", "field": "ph"})[0] == 400
+    assert call("POST", "/api/calibrate", {"zone": B, "field": "ph"}, content_type="text/plain")[0] == 415
+    rows = sim.step()
+    assert next(r for r in rows if r.truth["zone_id"] == B).truth["calibrations"][0]["source"] == "manual"
+    assert call("GET", "/api/scenario")[1]["steps"] == [
+        {"at_tick": 1, "calibrate": "ec_ms_cm", "zone": B, "source": "manual"}]
+    catalog = call("GET", "/api/catalog")[1]["zones"]
+    assert catalog[0]["calibratable"] == ["ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct"]
+    assert "soil_moisture_pct" not in catalog[1]["calibratable"]
+    # State exposes nothing about calibrations beyond the queue count.
+    assert "calibrat" not in json.dumps(call("GET", "/api/state")[1])
+    live_rows = [json.dumps(r.truth) for r in sim.step() + sim.step()]  # two more ticks of the live session
+    replay = fg.Simulation(seed=7, clock=make_clock(), scenario=json.loads(json.dumps(call("GET", "/api/scenario")[1])))
+    replayed = [json.dumps(r.truth) for _ in range(4) for r in replay.step()]
+    assert replayed[4:] == live_rows and any('"calibrations"' in line for line in replayed)
+    assert replayed[2:4] == [json.dumps(r.truth) for r in rows]  # tick 1 of the replay is the live tick 1

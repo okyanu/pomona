@@ -53,6 +53,26 @@ STUCK_MIN_DURATION = {
     "water_temperature_c": timedelta(hours=3),
     "substrate_temperature_c": timedelta(hours=3),
 }
+# Persistent stuck check, only when Core supplies a trusted per-stream reference (`stream_baseline`): a field
+# whose value has not changed for longer than its limit is stuck, however much earlier variation it showed.
+# The 11-packet check above stops flagging once the frozen run fills its whole window. The limits come from
+# the real logs (datasets/raw, make real-replay): the share of readings that would exceed them there was
+# kept under 0.15 %, the same ballpark as the existing stuck-value guards.
+#   air temperature 45 min: real 0.1 C-resolution probes repeat for 20-30 min on up to 1.7 % of readings
+#                           (nights at the heating set-point); 45 min leaves 0.15 %, 60 min 0.04 %.
+#   humidity 30 min:        real runs are shorter (0.1 % beyond 30 min).
+#   substrate temperature 6 h, water temperature 3 h: thermal mass. Real slab probes hold one 0.1 C value
+#                           for up to 9 h (3 h would flag 0.1-1.3 % of readings); a real pond holds one
+#                           0.0625 C step up to 6 h (3 h: 0.2 %), as STUCK_MIN_DURATION already says.
+# pH and EC are NOT checked: a drain or tank probe only changes when water flows past it, and real logs sit on
+# one value for hours as a matter of course (80 % of readings are beyond 20 min). Moisture is left out too: a
+# hydroponic zone sends a constant placeholder and slab moisture can sit still overnight.
+PERSISTENT_STUCK_LIMITS = {
+    "air_temperature_c": timedelta(minutes=45),
+    "humidity_pct": timedelta(minutes=30),
+    "substrate_temperature_c": timedelta(hours=6),
+    "water_temperature_c": STUCK_MIN_DURATION["water_temperature_c"],
+}
 # A pH/EC probe whose typical step between samples is as large as the drift threshold
 # is too noisy to judge drift (e.g. an unshielded PH-4502C swinging ~1.6 pH in 5 min;
 # commercial greenhouse drain sensors stay at <= 0.1).
@@ -235,6 +255,57 @@ def apply_temporal_checks(
             )
 
 
+# A persistent drift must also be far outside how far the probe normally wanders (`spread`, the 10th to 90th
+# percentile range of its trusted window). Real drain pH and EC swing with every irrigation; without this,
+# 1 to 3 % of real readings sit 0.35 / 0.4 from their 2 h median and each one would start a flag.
+DRIFT_SPREAD_FACTOR = 3.0
+CALIBRATION_HINT = "if a meter agrees with the reading, it is real: record a calibration for this probe to accept it"
+
+
+def apply_persistent_checks(
+    sensor: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    stream_baseline: Any,
+    labels: List[str],
+    suspect_fields: List[str],
+    checks: List[str],
+) -> None:
+    """Judge the reading against Core's sticky trusted reference for its stream (see Core's trusted_baseline.py).
+
+    The reference is the median of the readings in which the field was not vetoed, so a step or a frozen
+    probe stays flagged for as long as it lasts instead of becoming the new normal after one history window.
+    A calibration recorded for the probe re-anchors it. Malformed entries are ignored.
+    """
+    if not isinstance(stream_baseline, dict):
+        return
+    sampled = parse_timestamp(sensor.get("timestamp"))
+    previous_packet = next((p for p in reversed(history) if isinstance(p, dict)), {})
+    for field, stats in stream_baseline.items():
+        current = numeric(sensor.get(field))
+        if not isinstance(stats, dict) or current is None:
+            continue
+        median = numeric(stats.get("median"))
+        threshold = BASELINE_DRIFT_THRESHOLDS.get(field)
+        low, high = PLAUSIBLE_RANGES.get(field, (-math.inf, math.inf))
+        spread = numeric(stats.get("spread")) or 0.0
+        if threshold is not None:
+            threshold = max(threshold, DRIFT_SPREAD_FACTOR * spread)
+        if median is not None and threshold is not None and low <= current <= high and abs(current - median) >= threshold:
+            add_unique(labels, "baseline_drift_possible")
+            add_unique(suspect_fields, field)
+            checks.append(f"verify {field} with a meter: {current:g} differs from the trusted level {median:g}; "
+                          + CALIBRATION_HINT)
+        limit = PERSISTENT_STUCK_LIMITS.get(field)
+        changed_at = parse_timestamp(stats.get("last_change_at"))
+        previous = numeric(previous_packet.get(field))
+        if (limit is not None and sampled is not None and changed_at is not None and previous is not None
+                and abs(current - previous) <= STUCK_EPSILON and sampled - changed_at > limit):
+            add_unique(labels, "stuck_value")
+            add_unique(suspect_fields, field)
+            checks.append(f"inspect {field}: the same value for {(sampled - changed_at) // timedelta(minutes=1)} minutes; "
+                          + CALIBRATION_HINT)
+
+
 def derive_sensor_quality(
     farm_context: Dict[str, Any],
     sensor: Dict[str, Any],
@@ -242,6 +313,7 @@ def derive_sensor_quality(
     *,
     now: Optional[datetime] = None,
     history: Optional[List[Dict[str, Any]]] = None,
+    stream_baseline: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     labels: List[str] = []
     missing_fields: List[str] = []
@@ -358,6 +430,7 @@ def derive_sensor_quality(
         checks.append("confirm the latest telemetry timestamp before using this packet")
 
     apply_temporal_checks(sensor, list(history or []), labels, suspect_fields, checks)
+    apply_persistent_checks(sensor, list(history or []), stream_baseline, labels, suspect_fields, checks)
 
     if not checks:
         checks.append("continue routine monitoring")
@@ -396,6 +469,7 @@ def route_sensor_quality_reasoner(
         input_data.get("expected_fields") or [],
         now=now or datetime.now(timezone.utc),
         history=history if isinstance(history, list) else None,
+        stream_baseline=input_data.get("stream_baseline"),
     )
     result["model_id"] = model_id
     result["mode"] = "rules_only" if selected == "rules_only" else "hybrid_guarded"

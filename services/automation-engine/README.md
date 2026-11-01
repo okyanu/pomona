@@ -59,7 +59,7 @@ the dashboard sends each new reading's risk labels to `POST /v1/automation/alert
 
 | State | Meaning |
 |---|---|
-| waiting (`pending`) | A rule's label appeared; it must last `raise_after_seconds` before an alert is raised. If it disappears first, nothing is recorded. |
+| waiting (`pending`) | A rule's label appeared; it must last `raise_after_seconds` (or, for a rule that sets `raise_after_samples`, be on that many readings in a row) before an alert is raised. If it disappears first, nothing is recorded. |
 | `active` | Raised. One `raised` event per incident. |
 | `recovering` | The label is gone; it must stay away `clear_after_seconds`. If it comes back, the same incident continues. |
 | (cleared) | One `recovered` event; the alert is closed. |
@@ -67,7 +67,12 @@ the dashboard sends each new reading's risk labels to `POST /v1/automation/alert
 Defaults are 600 s to raise and 900 s to clear (`ALERT_RAISE_AFTER_SECONDS`,
 `ALERT_CLEAR_AFTER_SECONDS`); a rule in `rules.yaml` can set its own `raise_after_seconds` /
 `clear_after_seconds` (humidity uses 30 / 30 minutes, because it swings with every vent and
-irrigation pulse). Time is the sensor's sample time, so retries, replays and late packets
+irrigation pulse). `sensor_check` also sets `raise_after_samples: 3`: its labels come from detectors
+that look at the last few readings, so a fault is flagged for a handful of consecutive readings, not
+for minutes; the rule raises on 3 readings in a row **or** after the time window, whichever comes
+first (the softer `flatline_possible` hint has its own rule, `sensor_flatline`, with the default windows and no
+sample count; a clean reading still cancels a pending alert; the consecutive count is `consecutive` in
+`GET /v1/automation/alerts`, and a database from before the column is migrated on start). Time is the sensor's sample time, so retries, replays and late packets
 never move an alert. `GET /v1/automation/alerts?farm_id=&zone_id=` lists open alerts and the
 last raised / recovered events. Alerts are advisory: they never create suggestions or touch
 hardware.

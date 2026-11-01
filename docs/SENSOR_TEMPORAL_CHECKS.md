@@ -129,3 +129,26 @@ Do not feed evaluator fault annotations into the detector.
 2. Stuck + flatline rules + normal controls.
 3. Startup-baseline drift.
 4. Update fault-replay baseline table and SENSOR_QUALITY docs.
+
+## Longer memory in Core's feed
+
+The 11-packet window above absorbs a step or a frozen run within minutes. Core's outcome feed adds a
+sticky trusted reference per probe (median of the readings the pipeline did not veto, plus when the value
+last changed) so those faults stay flagged. See
+[SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md#sticky-trusted-reference-core-feed-only).
+
+A flagged level **stays "can't confirm" until a calibration for that probe is recorded** (the default,
+`TRUST_BASELINE_MAX_AGE_S=0`); the reference is anchored at the newest trusted reading, so even a probe
+broken for hours is judged against the readings from before it broke. A lapse is opt-in.
+
+**Why the unattended rates are high on historical logs.** `make real-replay` replays the real third-party
+logs (aquaponic pond, 6 greenhouse compartments) through this check. Those logs have no operator, so
+nobody can ever record a calibration: every real level shift of a drain pH or EC probe (and they move for
+good over a crop cycle) stays flagged for the rest of the log. The "unattended: no operator to calibrate"
+rates (EC 13 to 27 % of readings in the greenhouse compartments, pH 2 to 13 %) are therefore a statement
+about the logs, not about the check, and are reported as information only. With the opt-in 2 h lapse the
+same logs flag EC on 0.8 to 1.9 % and pH on 0.1 to 1.1 % of readings, about what the 11-packet drift check
+flags on its own. The thresholds were not loosened to make the unattended numbers look smaller: what is
+guarded is what must not regress (the legacy pass, the persistent stuck rates both ways, the drift rate with
+the lapse, and the fields that had no persistent flags at all). In a live deployment each flagged level is
+a card that asks someone to confirm the probe, and the confirmation ends it.

@@ -57,7 +57,6 @@ rules:
       - sensor_drift_possible
       - baseline_drift_possible
       - stuck_value
-      - flatline_possible
       - noisy_signal_possible
       - conflicting_readings
       - unit_mismatch
@@ -69,6 +68,21 @@ rules:
       - missing_humidity
       - missing_moisture
     action: check_sensor
+    # The detectors behind these labels look at the last few readings, so a fault is flagged for a handful
+    # of consecutive readings rather than for minutes: raise on 3 in a row, or after the default 10 minutes.
+    raise_after_samples: 3
     message: >-
       A sensor reading could not be confirmed. Check the flagged probe or
-      timestamp before acting on any advice that uses it.
+      timestamp before acting on any advice that uses it. If a meter agrees
+      with the reading, the condition is real: record a calibration for that
+      probe to accept the new level.
+
+  # The softer hint, on its own rule: a probe that has barely moved over the last readings is often just a
+  # quiet probe, so it has no sample-count raise and waits the default windows like the domain rules. It is
+  # still a sensor card (action check_sensor), not advice.
+  - id: sensor_flatline
+    match_any_labels: [flatline_possible]
+    action: check_sensor
+    message: >-
+      A probe has barely moved over its recent readings. It may be stuck or
+      clipped: check that it still responds before relying on it.

@@ -1,6 +1,6 @@
 {
   "seed": 7,
-  "duration_ticks": 420,
+  "duration_ticks": 460,
   "steps": [
     {"at_tick": 30, "start": "spike", "zone": "greenhouse-a", "field": "ph", "params": {"value": 13.0}},
     {"at_tick": 30, "start": "jump", "zone": "greenhouse-b", "field": "ph", "params": {"offset": 1.5}},
@@ -24,6 +24,7 @@
     {"at_tick": 270, "start": "dry_zone", "zone": "greenhouse-a"},
     {"at_tick": 275, "start": "nutrient_over_concentration", "zone": "greenhouse-b"},
     {"at_tick": 385, "stop": "dry_zone", "zone": "greenhouse-a"},
-    {"at_tick": 405, "stop": "nutrient_over_concentration", "zone": "greenhouse-b"}
+    {"at_tick": 395, "calibrate": "ec_ms_cm", "zone": "greenhouse-b"},
+    {"at_tick": 440, "stop": "nutrient_over_concentration", "zone": "greenhouse-b"}
   ]
 }

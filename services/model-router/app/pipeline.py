@@ -103,8 +103,13 @@ async def evaluate_pipeline(
     mode: str,
     scenario_id: str | None = None,
     history: list[dict[str, Any]] | None = None,
+    stream_baseline: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate all deterministic specialists, then apply the final gate."""
+    """Evaluate all deterministic specialists, then apply the final gate.
+
+    `stream_baseline` is Core's sticky trusted reference for the sensor's stream (see
+    sensor_quality.apply_persistent_checks); callers without stream state (the dashboard) omit it.
+    """
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
     fields = expected_fields or expected_fields_for(farm_context, sensor)
@@ -115,6 +120,8 @@ async def evaluate_pipeline(
     }
     if history:
         specialist_input["history"] = history
+    if stream_baseline:
+        specialist_input["stream_baseline"] = stream_baseline
     specialist_mode = "hybrid_guarded" if mode == "hybrid_guarded" else "rules_only"
     quality = route_sensor_quality_reasoner(
         specialist_input,

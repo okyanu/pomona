@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from app.config import settings
 from app.schemas import SensorEvent
 from app.store import SensorEventStore, event_store
+from app.trusted_baseline import stream_baseline
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +109,17 @@ class OutcomeFeed:
             history.append(packet)
         return history
 
+    def _stream_baseline(self, event: SensorEvent) -> Dict[str, Dict[str, Any]]:
+        """Sticky trusted reference for the event's stream: stored readings before it, less what the pipeline vetoed."""
+        prior = self._store.stream_history(event, settings.trust_baseline_scan_limit)
+        return stream_baseline(prior, self._store.stream_calibrations(event), event.timestamp,
+                               settings.trust_baseline_window_s, settings.trust_baseline_min_n,
+                               settings.trust_baseline_max_age_s or None)
+
     def _process(self, event: SensorEvent) -> None:
         sensor = event.model_dump(mode="json")
         sensor.pop("source", None)
+        baseline = self._stream_baseline(event)
         result = _post(settings.model_router_url, "/v1/pipeline/evaluate", {
             "scenario_id": "core_feed",
             "farm_context": {
@@ -124,10 +133,14 @@ class OutcomeFeed:
             },
             "sensor": sensor,
             "history": self._history(event),
+            **({"stream_baseline": baseline} if baseline else {}),
             "proposed_command": {"action_type": "continue_monitoring"},
             "actor": "core_feed",
             "mode": "rules_only",
         })
+        gate = result.get("trust_gate")
+        if gate:  # what this reading's verdict was, so later readings' references leave vetoed values out
+            self._store.add_trust(event, gate.get("trust_verdict", "trusted"), gate.get("vetoed_fields") or [])
         _post(settings.automation_engine_url, "/v1/automation/alerts/observe", {
             "farm_id": event.farm_id, "zone_id": event.zone_id, "device_id": event.device_id,
             "sample_time": sensor["timestamp"], "risk_labels": pipeline_risk_labels(result),

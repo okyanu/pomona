@@ -4,6 +4,8 @@ from pydantic import Field, field_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.trusted_baseline import DEFAULT_MAX_AGE_S, DEFAULT_MIN_N, DEFAULT_SCAN_LIMIT, DEFAULT_WINDOW_S
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -25,6 +27,14 @@ class Settings(BaseSettings):
     model_router_url: str = ""
     automation_engine_url: str = ""
     outcome_feed_queue_size: int = Field(default=1000, ge=1)
+    # Sticky trusted reference per sensor stream (app/trusted_baseline.py), sent with each evaluation so the
+    # router can flag a step or a frozen probe for as long as it lasts: the window the reference median
+    # covers, the trusted readings needed to use it, and how many stored readings are scanned back for it.
+    trust_baseline_window_s: int = Field(default=DEFAULT_WINDOW_S, ge=60)
+    trust_baseline_min_n: int = Field(default=DEFAULT_MIN_N, ge=2)
+    # 0 (the default): a flagged level stays flagged until a calibration. Seconds opt into a lapse.
+    trust_baseline_max_age_s: int = Field(default=DEFAULT_MAX_AGE_S, ge=0)
+    trust_baseline_scan_limit: int = Field(default=DEFAULT_SCAN_LIMIT, ge=10)
 
     @field_validator("min_sample_time")
     @classmethod

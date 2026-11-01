@@ -34,8 +34,9 @@ FARM = {"crop": "tomato", "system_type": "controlled_greenhouse"}
 PLAUSIBLE_EC_OFFSET = 3.0
 UNDETECTABLE = {"plausible_offset"}
 RULES_PATH = ROOT / "services/automation-engine/app/rules.yaml"
-# Labels that produce an advice card in the automation engine; sensor_check is the can't-confirm card, not advice.
-CARD_LABELS = {label for rule in yaml.safe_load(RULES_PATH.read_text())["rules"] if rule["id"] != "sensor_check"
+# Labels that produce an advice card in the automation engine. The sensor rules (action check_sensor:
+# sensor_check, sensor_flatline) are the can't-confirm cards, not advice.
+CARD_LABELS = {label for rule in yaml.safe_load(RULES_PATH.read_text())["rules"] if rule["action"] != "check_sensor"
                for label in rule["match_any_labels"]}
 METRIC_DEFINITIONS = {
     "faulty_frames": "frames where a fault was injected, whether or not a detector can catch it",
@@ -43,7 +44,7 @@ METRIC_DEFINITIONS = {
     "wrong": "a frame's domain labels differ (either direction) from the clean counterpart's",
     "wrong_ungated": "faulty frames whose labels, computed on the raw faulty reading, are wrong",
     "wrong_gated": "faulty frames whose labels, computed after the sensor veto, are wrong (a cannot_confirm frame has no labels, so it is wrong only if the clean frame had some)",
-    "card_labels": "labels matched by any rule in services/automation-engine/app/rules.yaml except sensor_check, i.e. labels that make an advice card",
+    "card_labels": "labels matched by any rule in services/automation-engine/app/rules.yaml except the sensor rules (action check_sensor), i.e. labels that make an advice card",
     "wrong_cards": "wrong restricted to card_labels: the card-producing labels differ from the clean counterpart's",
     "wrong_cards_ungated": "faulty frames whose card-producing labels, on the raw faulty reading, are wrong (the old pipeline would show a wrong advice card)",
     "trusted_wrong_cards_ungated": "wrong_cards_ungated frames where the sensor-quality check raised nothing",

@@ -107,7 +107,8 @@ SENT reading per zone, the tick and the time to the next tick, and has a Start/S
 every fault and event that applies to the zone (a field select for faults that take one, optional
 JSON params). Top bar: **Hidden random** starts one random applicable fault or event that the page
 shows only as "Hidden #n" with a Stop button; **Reveal hidden** (asks first) shows their real names
-and ticks from then on; **Stop all**; and **Download session scenario**.
+and ticks from then on; **Stop all**; and **Download session scenario**. Each zone card also has a
+**Calibrate** button (see Calibration below).
 
 The answer key stays hidden while running: the page and API never expose the true values or the
 truth log's `expect`. Testers read the truth log after the run. The session download is the
@@ -153,10 +154,11 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   {"at_tick": 20, "stop": "jump", "zone": "greenhouse-b"}]}
 ```
 
-- `scenarios/demo.json`: 420 ticks, about 3.5 hours at the default interval, every fault and
-  event, realistic timing. Items in the same zone are at least 12 ticks apart so Pomona's
-  11-sample history is clean again, and the real events last long enough to pass the 30 minute
-  humidity and 10 minute default debounces.
+- `scenarios/demo.json`: 460 ticks, about 3.8 hours at the default interval, every fault and
+  event, realistic timing, plus a `calibrate` of greenhouse-b EC after the nutrient ramp so the
+  demo shows the full flow (can't confirm, calibrate, high_ec card). Items in the same zone are
+  at least 12 ticks apart, and the real events last long enough to pass the 30 minute humidity
+  and 10 minute default debounces.
 - `scenarios/quick.json`: 60 ticks (about 30 minutes): a few sensor faults and one fast `dry_zone`
   (400 %/h) that stays dry long enough for the 10 minute water-level debounce. Quick, but less
   realistic than the demo (a real EC ramp is too slow for a quick run: a fast one trips Pomona's
@@ -191,6 +193,20 @@ Faults and events take `zone`, an optional `field` and `params`. Ramp events tak
 of `--sim-speed`. `dry_zone` drying is fast on purpose so a demo reaches the threshold; real
 substrate takes many hours. The registry is `REGISTRY` in `fake_greenhouse.py`, and
 `Simulation.start(name, zone_id, field, **params)` / `Simulation.stop(...)` toggle them.
+
+### Calibration (a meter confirms a probe)
+
+A calibration is not a fault or an event: the truth does not change. It says that a person checked
+a probe with a meter, which makes Pomona accept the probe's current level as the new normal (Core
+keeps a trusted reference per probe, and a calibration resets it). Without one, a probe whose level
+really changed (a nutrient overdose) stays flagged "can't confirm". Add a scenario step
+`{"at_tick": 395, "calibrate": "ec_ms_cm", "zone": "greenhouse-b"}`, or press **Calibrate** on the
+control page (recorded as a manual step in the session download). Probes: `ph`, `ec_ms_cm`,
+`air_temperature_c`, `humidity_pct`, `soil_moisture_pct` (substrate zone only; there is no
+calibration for substrate temperature). The truth line of that tick carries
+`calibrations: [{field, at, source}]`; with `--core-url` the simulator also posts a CalibrationEvent
+(method `fake_greenhouse_confirm`, timestamp = that tick's wall time) to Core before the tick's
+reading and records `delivery` in the entry.
 
 ### Truth log
 

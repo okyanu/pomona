@@ -128,12 +128,25 @@ function build() {
       (inj.kind === "sensor_fault" ? faults : events).append(row.el);
     });
     panels[zone.zone_id] = panel;
+    const calSelect = h("select", { title: "probe" });
+    zone.calibratable.forEach((f) => calSelect.append(h("option", { value: f, textContent: f })));
+    const calErr = h("div", { class: "err" });
+    const calBtn = h("button", { textContent: "Calibrate" });
+    calBtn.onclick = async () => {
+      calErr.textContent = "";
+      try { await api("/api/calibrate", { zone: zone.zone_id, field: calSelect.value }); calErr.textContent = "Queued: applies at the next tick"; await refresh(); }
+      catch (e) { calErr.textContent = e.message; }
+    };
+    const calibration = h("div", { class: "row" },
+      h("div", { class: "top" }, h("span", { class: "name", textContent: "calibrate" }), calSelect, calBtn),
+      h("div", { class: "desc", textContent: "A meter confirms this probe: Pomona accepts its current level as the new normal. Not a fault or event; the truth is unchanged." }), calErr);
     root.append(h("section", { class: "card" },
       h("h2", { textContent: zone.zone_id }),
       h("div", { class: "sub", textContent: zone.device_id + " / " + zone.system_type }),
       panel.status, values,
       h("h3", { textContent: "Sensor faults (reading wrong)" }), faults,
-      h("h3", { textContent: "Real events (plant affected)" }), events));
+      h("h3", { textContent: "Real events (plant affected)" }), events,
+      h("h3", { textContent: "Calibration (a meter confirms a probe)" }), calibration));
   });
 }
 

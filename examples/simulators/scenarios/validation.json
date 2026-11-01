@@ -4,6 +4,7 @@
   "steps": [
     {"at_tick": 5, "start": "jump", "zone": "greenhouse-a", "field": "ph", "params": {"offset": 1.5}},
     {"at_tick": 9, "start": "dead_clock", "zone": "greenhouse-b"},
-    {"at_tick": 12, "stop": "dead_clock", "zone": "greenhouse-b"}
+    {"at_tick": 12, "stop": "dead_clock", "zone": "greenhouse-b"},
+    {"at_tick": 12, "calibrate": "ph", "zone": "greenhouse-a"}
   ]
 }

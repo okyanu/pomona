@@ -123,6 +123,118 @@ def test_shipped_rules_wait_longer_for_humidity():
     assert kinds(events) == [("high_ec_alert", "raised"), ("high_humidity_fan", "raised")]
 
 
+SAMPLE_RULES = [{"id": "check", "match_any_labels": ["stuck_value"], "action": "check_sensor", "message": "Check.",
+                 "raise_after_samples": 3},
+                *RULES]
+
+
+def feed_seconds(m, labels_by_step, step_s=30):
+    out = []
+    for i, labels in enumerate(labels_by_step):
+        out.append(m.observe("farm", "zone", "node", T0 + timedelta(seconds=step_s * i), labels)["events"])
+    return out
+
+
+def test_label_on_three_consecutive_readings_raises_before_the_time_window():
+    m = monitor(rules=SAMPLE_RULES)
+    events = feed_seconds(m, [["stuck_value"]] * 4)  # 30 s apart: far under the 600 s default
+    assert kinds(events) == [("check", "raised")]
+    assert len(events[2]) == 1 and events[2][0]["sample_time"] == (T0 + timedelta(seconds=60)).isoformat()
+    assert m.states()[0]["state"] == "active"
+
+
+def test_two_readings_then_a_clean_one_cancel_and_the_count_restarts():
+    m = monitor(rules=SAMPLE_RULES)
+    events = feed_seconds(m, [["stuck_value"]] * 2 + [[]] + [["stuck_value"]] * 2)
+    assert kinds(events) == [] and m.states()[0]["consecutive"] == 2  # the clean reading reset the count
+    assert kinds([m.observe("farm", "zone", "node", T0 + timedelta(seconds=150), ["stuck_value"])["events"]]) == [
+        ("check", "raised")]
+
+
+def test_pending_state_counts_consecutive_readings():
+    m = monitor(rules=SAMPLE_RULES)
+    m.observe("farm", "zone", "node", T0, ["stuck_value"])
+    assert (m.states()[0]["state"], m.states()[0]["consecutive"]) == ("pending", 1)
+    m.observe("farm", "zone", "node", T0 + timedelta(seconds=30), ["stuck_value"])
+    assert m.states()[0]["consecutive"] == 2
+
+
+def test_seconds_still_raise_for_a_rule_with_samples():
+    m = monitor(rules=SAMPLE_RULES)
+    # Readings 11 minutes apart: the 600 s window is over at the second reading, before three readings.
+    events = [m.observe("farm", "zone", "node", T0 + timedelta(minutes=11 * i), ["stuck_value"])["events"]
+              for i in range(2)]
+    assert kinds(events) == [("check", "raised")] and len(events[1]) == 1
+
+
+def test_rules_without_samples_are_unchanged():
+    m = monitor(rules=SAMPLE_RULES)
+    events = feed_seconds(m, [["high_ec"]] * 10)  # five minutes of 30 s readings: ec has no sample count
+    assert kinds(events) == []
+    assert kinds(feed_seconds(monitor(rules=SAMPLE_RULES), [["high_ec"]] * 21)) == [("ec", "raised")]  # 600 s
+
+
+def test_shipped_sensor_check_rule_raises_on_three_readings():
+    rules = load_rules(settings.rules_path)
+    check = next(r for r in rules if r["id"] == "sensor_check")
+    assert check["raise_after_samples"] == 3 and "calibration" in check["message"]
+    assert all("raise_after_samples" not in r for r in rules if r["id"] != "sensor_check")  # incl. sensor_flatline
+    m = monitor(rules=rules)
+    assert kinds(feed_seconds(m, [["baseline_drift_possible"]] * 3)) == [("sensor_check", "raised")]
+
+
+def test_flatline_waits_the_default_window_while_sensor_check_raises_on_readings():
+    rules = load_rules(settings.rules_path)
+    m = monitor(rules=rules)
+    both = feed_seconds(m, [["flatline_possible", "stuck_value"]] * 4)
+    assert kinds(both) == [("sensor_check", "raised")]  # flatline alone needs 600 s of sample time
+    assert kinds(feed_seconds(monitor(rules=rules), [["flatline_possible"]] * 21)) == [("sensor_flatline", "raised")]
+    assert kinds(feed_seconds(monitor(rules=rules), [["flatline_possible"]] * 19)) == []
+
+
+def test_a_six_hour_fault_keeps_one_incident_open_until_the_labels_stop():
+    rules = load_rules(settings.rules_path)
+    m = monitor(rules=rules)
+    labels = ["baseline_drift_possible"]  # Core's sticky reference flags the probe on every reading of the fault
+    events = feed_seconds(m, [labels] * (6 * 120))  # six hours at 30 s
+    assert kinds(events) == [("sensor_check", "raised")]  # one raise, never a recovered event while it lasts
+    assert [(a["rule_id"], a["state"]) for a in m.states()] == [("sensor_check", "active")]
+    # Once the labels stop (a calibration accepted the level) it recovers after the clear window, not before.
+    quiet = [m.observe("farm", "zone", "node", T0 + timedelta(seconds=30 * (6 * 120 + i)), [])["events"] for i in range(40)]
+    assert kinds(quiet) == [("sensor_check", "recovered")]
+
+
+def test_old_database_without_the_consecutive_column_is_migrated(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:  # the schema before raise_after_samples
+        conn.execute("""CREATE TABLE alert_states (stream TEXT NOT NULL, rule_id TEXT NOT NULL, state TEXT NOT NULL,
+            since TEXT NOT NULL, raised_at TEXT, recovering_since TEXT, PRIMARY KEY (stream, rule_id))""")
+        conn.execute("CREATE TABLE alert_stream_samples (stream TEXT PRIMARY KEY, last_sample TEXT NOT NULL)")
+        conn.execute("""CREATE TABLE alert_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, stream TEXT NOT NULL,
+            rule_id TEXT NOT NULL, event TEXT NOT NULL, sample_time TEXT NOT NULL)""")
+        stream = AlertMonitor.stream_key("farm", "zone", "node")
+        conn.execute("INSERT INTO alert_states VALUES (?, 'check', 'pending', ?, NULL, NULL)", (stream, T0.isoformat()))
+        conn.execute("INSERT INTO alert_stream_samples VALUES (?, ?)", (stream, T0.isoformat()))
+    m = monitor(rules=SAMPLE_RULES, db_path=db)
+    assert m.states()[0]["state"] == "pending" and m.states()[0]["consecutive"] is None
+    # The old pending row counts as one reading, so two more raise.
+    events = [m.observe("farm", "zone", "node", T0 + timedelta(seconds=30 * i), ["stuck_value"])["events"]
+              for i in (1, 2)]
+    assert kinds(events) == [("check", "raised")]
+    m.close()
+    assert monitor(rules=SAMPLE_RULES, db_path=db).states()[0]["state"] == "active"  # reopening is fine too
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "3", 1001])
+def test_load_rules_rejects_bad_sample_counts(tmp_path, value):
+    path = tmp_path / "rules.yaml"
+    path.write_text(f"rules:\n  - id: r\n    match_any_labels: [stuck_value]\n    action: check_sensor\n"
+                    f"    message: m\n    raise_after_samples: {value!r}\n")
+    with pytest.raises(InvalidRuleError):
+        load_rules(path)
+
+
 @pytest.mark.parametrize("value", [-1, 1.5, True, "600", 8 * 24 * 3600])
 def test_load_rules_rejects_bad_windows(tmp_path, value):
     path = tmp_path / "rules.yaml"

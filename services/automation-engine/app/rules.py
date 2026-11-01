@@ -63,6 +63,12 @@ def load_rules(path: Path) -> List[Dict[str, Any]]:
                     raise InvalidRuleError(f"rule '{rule_id}' {key} must be a whole number of seconds, {minimum} to 7 days")
                 windows[key] = value
 
+        if "raise_after_samples" in rule:
+            samples = rule["raise_after_samples"]
+            if isinstance(samples, bool) or not isinstance(samples, int) or not 1 <= samples <= 1000:
+                raise InvalidRuleError(f"rule '{rule_id}' raise_after_samples must be a whole number of readings, 1 to 1000")
+            windows["raise_after_samples"] = samples
+
         seen_ids.add(rule_id)
         validated.append(
             {

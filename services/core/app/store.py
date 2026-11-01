@@ -46,6 +46,12 @@ class SensorEventStore:
             db.execute("""CREATE TABLE IF NOT EXISTS device_presence (
                 farm_id TEXT, zone_id TEXT, device_id TEXT, payload TEXT NOT NULL,
                 PRIMARY KEY(farm_id, zone_id, device_id))""")
+            # What the pipeline made of each stored reading (its trust verdict and vetoed fields), written by the
+            # outcome feed; the sticky trusted reference is built from the readings it did not veto.
+            db.execute("""CREATE TABLE IF NOT EXISTS event_trust (
+                farm_id TEXT NOT NULL, zone_id TEXT NOT NULL, device_id TEXT NOT NULL, sample_time TEXT NOT NULL,
+                trust_verdict TEXT NOT NULL, vetoed_fields TEXT NOT NULL, created_at TEXT NOT NULL,
+                PRIMARY KEY (farm_id, zone_id, device_id, sample_time))""")
             for table in ("calibration_events", "corrected_observations"):
                 db.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
                     id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,
@@ -324,6 +330,49 @@ class SensorEventStore:
                             "sample_stale": sample_age > 3600 or sample_age < -60})
         return results
 
+    def add_trust(self, event: SensorEvent, trust_verdict: str, vetoed_fields: list) -> None:
+        """Record the pipeline's trust verdict for a stored reading (replaces an earlier verdict for it)."""
+        created = utc_now()
+        cutoff = (created - timedelta(days=settings.retention_days)).isoformat()
+        with self._lock, self._connect() as db:
+            db.execute("""INSERT INTO event_trust VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT(farm_id, zone_id, device_id, sample_time) DO UPDATE SET
+                trust_verdict=excluded.trust_verdict, vetoed_fields=excluded.vetoed_fields""",
+                       (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat(), trust_verdict,
+                        json.dumps(sorted(vetoed_fields)), created.isoformat()))
+            db.execute("DELETE FROM event_trust WHERE created_at < ?", (cutoff,))
+
+    def stream_history(self, event: SensorEvent, limit: int) -> list[dict]:
+        """Up to `limit` stored readings of the event's own stream (farm, zone, device) sampled before it, oldest
+        first, as payload dicts plus `vetoed_fields`. A reading with no trust record counts as not vetoed."""
+        with self._lock, self._connect() as db:
+            rows = db.execute("""SELECT e.payload, t.vetoed_fields FROM sensor_events e
+                LEFT JOIN event_trust t ON t.farm_id=e.farm_id AND t.zone_id=e.zone_id AND t.device_id=e.device_id
+                    AND t.sample_time=e.timestamp
+                WHERE e.farm_id=? AND e.zone_id=? AND e.device_id=? ORDER BY e.id DESC LIMIT ?""",
+                              (event.farm_id, event.zone_id, event.device_id, limit)).fetchall()
+        history = []
+        for row in reversed(rows):
+            packet = json.loads(row["payload"])
+            stamp = datetime.fromisoformat(packet["timestamp"].replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if stamp >= event.timestamp:
+                continue
+            packet["timestamp"] = stamp.astimezone(timezone.utc)  # parsed once here, not per field downstream
+            packet["vetoed_fields"] = json.loads(row["vetoed_fields"]) if row["vetoed_fields"] else []
+            history.append(packet)
+        history.sort(key=lambda packet: packet["timestamp"])  # sample-time order, whatever order they arrived in
+        return history
+
+    def stream_calibrations(self, event: SensorEvent, limit: int = 200) -> list[dict]:
+        """Calibrations recorded for the event's stream (farm, zone, device): `measurement` and `performed_at`."""
+        with self._lock, self._connect() as db:
+            rows = db.execute("""SELECT payload FROM calibration_events WHERE farm_id=? AND zone_id=? AND device_id=?
+                ORDER BY timestamp DESC LIMIT ?""", (event.farm_id, event.zone_id, event.device_id, limit)).fetchall()
+        items = [json.loads(row["payload"]) for row in rows]
+        return [{"measurement": item["measurement"], "performed_at": item["performed_at"]} for item in items]
+
     def count(self) -> int:
         with self._lock, self._connect() as db:
             return int(db.execute("SELECT COUNT(*) FROM sensor_events").fetchone()[0])
@@ -337,6 +386,7 @@ class SensorEventStore:
                 "stream_cursors",
                 "calibration_events",
                 "corrected_observations",
+                "event_trust",
             ):
                 db.execute(f"DELETE FROM {table}")
 

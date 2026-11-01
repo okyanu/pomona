@@ -4,6 +4,7 @@ Suggestions (main.py) are created when a person asks for them. Alerts follow eve
 of a sensor stream instead:
 
   normal --label--> pending --label still there after raise_after--> active  ("raised" event)
+                    pending --label on raise_after_samples readings in a row--> active (rules that set it)
   pending --label gone--> normal (cancelled, no event)
   active --label gone--> recovering --still gone after clear_after--> normal ("recovered" event)
   recovering --label back--> active (same incident, no new event)
@@ -11,6 +12,11 @@ of a sensor stream instead:
 Time is the sensor's sample time, so a retry or a replay gives the same states, and an old or
 repeated sample never moves an alert. One incident therefore produces at most one "raised" and one
 "recovered" event, however often the label flickers in between. Alerts never act on hardware.
+
+A rule may also set `raise_after_samples`: the sensor-check labels come from detectors that look at the
+last few readings, so a fault is flagged for a handful of consecutive readings, not for minutes. Such a rule
+raises when the label is on that many consecutive readings of the stream, or after raise_after_seconds,
+whichever comes first. A clean reading still cancels a pending alert.
 """
 
 from __future__ import annotations
@@ -38,8 +44,10 @@ class AlertMonitor:
         with self._db:
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_states (
                 stream TEXT NOT NULL, rule_id TEXT NOT NULL, state TEXT NOT NULL,
-                since TEXT NOT NULL, raised_at TEXT, recovering_since TEXT,
+                since TEXT NOT NULL, raised_at TEXT, recovering_since TEXT, consecutive INTEGER,
                 PRIMARY KEY (stream, rule_id))""")
+            if "consecutive" not in {r["name"] for r in self._db.execute("PRAGMA table_info(alert_states)")}:
+                self._db.execute("ALTER TABLE alert_states ADD COLUMN consecutive INTEGER")  # DBs from before it existed
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_stream_samples (
                 stream TEXT PRIMARY KEY, last_sample TEXT NOT NULL)""")
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_events (
@@ -78,11 +86,19 @@ class AlertMonitor:
                 state = row["state"] if row else "normal"
                 if matched:
                     if state == "normal":
-                        self._set(stream, rule["id"], "pending", since=t)
-                        state, row = "pending", {"since": t.isoformat()}
-                    if state == "pending" and t - datetime.fromisoformat(row["since"]) >= raise_after:
+                        self._set(stream, rule["id"], "pending", since=t, consecutive=1)
+                        state, row = "pending", {"since": t.isoformat(), "consecutive": 1}
+                    elif state == "pending":
+                        row = dict(row)
+                        row["consecutive"] = (row["consecutive"] or 1) + 1  # rows from before the column count as 1
+                    samples = rule.get("raise_after_samples")
+                    if state == "pending" and (t - datetime.fromisoformat(row["since"]) >= raise_after
+                                               or (samples and row["consecutive"] >= samples)):
                         self._set(stream, rule["id"], "active", since=datetime.fromisoformat(row["since"]), raised_at=t)
                         events.append(self._event(stream, rule["id"], "raised", t))
+                    elif state == "pending":
+                        self._set(stream, rule["id"], "pending", since=datetime.fromisoformat(row["since"]),
+                                  consecutive=row["consecutive"])
                     elif state == "recovering":
                         self._set(stream, rule["id"], "active", since=datetime.fromisoformat(row["since"]),
                                   raised_at=datetime.fromisoformat(row["raised_at"]))
@@ -104,12 +120,13 @@ class AlertMonitor:
         return {"ignored": False, "events": events}
 
     def _set(self, stream: str, rule_id: str, state: str, since: datetime, raised_at: Optional[datetime] = None,
-             recovering_since: Optional[datetime] = None) -> None:
-        self._db.execute("""INSERT INTO alert_states (stream, rule_id, state, since, raised_at, recovering_since)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(stream, rule_id) DO UPDATE SET state=excluded.state,
-            since=excluded.since, raised_at=excluded.raised_at, recovering_since=excluded.recovering_since""",
+             recovering_since: Optional[datetime] = None, consecutive: Optional[int] = None) -> None:
+        self._db.execute("""INSERT INTO alert_states (stream, rule_id, state, since, raised_at, recovering_since, consecutive)
+            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(stream, rule_id) DO UPDATE SET state=excluded.state,
+            since=excluded.since, raised_at=excluded.raised_at, recovering_since=excluded.recovering_since,
+            consecutive=excluded.consecutive""",
             (stream, rule_id, state, since.isoformat(), raised_at.isoformat() if raised_at else None,
-             recovering_since.isoformat() if recovering_since else None))
+             recovering_since.isoformat() if recovering_since else None, consecutive))
 
     def _event(self, stream: str, rule_id: str, event: str, t: datetime) -> Dict[str, Any]:
         self._db.execute("INSERT INTO alert_events (stream, rule_id, event, sample_time) VALUES (?, ?, ?, ?)",

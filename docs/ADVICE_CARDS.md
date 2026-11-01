@@ -64,7 +64,16 @@ Sensor-check card: when a reading fails the sensor check, the trust gate keeps
 the specialists from reasoning on it, so no dosing or irrigation card is made
 from it. The `sensor_check` rule (`check_sensor`) makes this card instead:
 "a reading could not be confirmed; check the flagged probe or timestamp before
-acting on any advice that uses it". Every card's `evidence` carries
+acting on any advice that uses it; if a meter agrees with the reading, the condition is real:
+record a calibration for that probe to accept the new level". The card is raised after the flag
+is on 3 readings in a row (the sensor-check detectors flag a fault for only a few readings; waiting
+the usual 10 minutes would let it cancel itself). Core also keeps a sticky trusted reference per
+probe (see [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md)), so a step or a frozen
+reading stays flagged for as long as it lasts instead of becoming the new normal; a real change
+(a nutrient overdose) therefore shows as "can't confirm" until a calibration for that probe is
+recorded. A probe that has merely barely moved (`flatline_possible`, a softer hint than a stuck value)
+has its own card, `sensor_flatline` ("it may be stuck or clipped: check that it still responds"), which
+waits the usual 10 minutes; both cards use the action `check_sensor`. Every card's `evidence` carries
 `trust_verdict` and `vetoed_fields`, and the dashboard shows a "Sensor trust:"
 line. For a `sensor_check` card the outcome differs: a later reading with one of
 its watched sensor labels is a trusted reading showing the problem persists

@@ -1,5 +1,7 @@
 import logging
+import math
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -273,10 +275,32 @@ class PipelineEvaluateRequest(BaseModel):
         default=None,
         description="Prior sensor packets oldest-first for temporal SQI checks.",
     )
+    stream_baseline: Optional[Dict[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="Core's sticky trusted reference per field: {median, n, window_s, last_change_at}.",
+    )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
     mode: Literal["rules_only", "hybrid_guarded"] = "hybrid_guarded"
     scenario_id: Optional[str] = None
+
+    @field_validator("stream_baseline")
+    @classmethod
+    def validate_stream_baseline(cls, value):
+        if value is None:
+            return value
+        for field, stats in value.items():
+            median, count, changed = stats.get("median"), stats.get("n"), stats.get("last_change_at")
+            if isinstance(median, bool) or not isinstance(median, (int, float)) or not math.isfinite(median):
+                raise ValueError(f"stream_baseline.{field}.median must be a finite number")
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                raise ValueError(f"stream_baseline.{field}.n must be a whole number of readings")
+            if changed is not None:
+                try:
+                    datetime.fromisoformat(str(changed).replace("Z", "+00:00"))
+                except ValueError as error:
+                    raise ValueError(f"stream_baseline.{field}.last_change_at must be an ISO time") from error
+        return value
 
     @field_validator("history")
     @classmethod
@@ -615,6 +639,7 @@ async def evaluate_pomona_pipeline(request: PipelineEvaluateRequest) -> Pipeline
         request.mode,
         request.scenario_id,
         history=request.history,
+        stream_baseline=request.stream_baseline,
     )
     logger.info(
         "pipeline id=%s scenario=%s risk=%s review=%s",
