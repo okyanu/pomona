@@ -3,7 +3,7 @@
 A five minute walkthrough. The fake greenhouse (`examples/simulators/fake_greenhouse.py`) publishes
 realistic readings for two zones, lets you break sensors and cause real problems with buttons, and
 keeps a hidden answer key. A scorer then lays Pomona's cards next to that key. Full reference:
-[examples/simulators/README.md](../examples/simulators/README.md).
+[examples/simulators/README.md](https://github.com/okyanu/pomona/blob/main/examples/simulators/README.md).
 
 Two kinds of trouble are kept strictly apart:
 
