@@ -116,3 +116,18 @@ def test_persisted_snapshot_survives_retry_and_restart(tmp_path):
         assert actual["evidence"]["history_snapshot"]==[{"ph":6.1}]
     finally:
         reopened.close()
+
+
+def test_heat_stress_action_is_a_warn_card_that_still_blocks_actuators():
+    card = suggestion_to_advice_card(
+        {
+            "id": "heat",
+            "action": "check_ventilation_and_shading",
+            "message": "Check vents, fans and shading",
+            "status": "pending",
+            "context": {"risk_labels": ["heat_stress"], "blocked_actions": ["direct_actuator_control"]},
+        }
+    )
+    assert card["severity"] == "warn"
+    assert "direct_actuator_control" in card["blocked_actions"]
+    assert card["human_review_required"] is True

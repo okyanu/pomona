@@ -88,6 +88,15 @@ def test_evaluate_creates_pending_suggestion_for_high_ec(client: TestClient):
     assert suggestion["context"] == {"zone_id": "greenhouse-a"}
 
 
+def test_evaluate_heat_stress_creates_an_advisory_ventilation_and_shading_suggestion(client: TestClient):
+    response = client.post("/v1/automation/evaluate", json={"risk_labels": ["heat_stress"]})
+    assert response.status_code == 200
+    (suggestion,) = response.json()["suggestions"]
+    assert suggestion["rule_id"] == "heat_stress_check"
+    assert suggestion["action"] == "check_ventilation_and_shading" and suggestion["action"] not in FORBIDDEN_ACTIONS
+    assert suggestion["requires_approval"] is True and suggestion["status"] == "pending"
+
+
 def test_evaluate_with_no_matching_labels_creates_nothing(client: TestClient):
     response = client.post("/v1/automation/evaluate", json={"risk_labels": ["missing_critical_data"]})
     assert response.status_code == 200

@@ -183,7 +183,7 @@ JSON, scheduled by tick (not wall time) so replays are exact:
 
 | Name | Effect (default ramp, wall minutes) | Expected label |
 |------|--------|----------------|
-| `heat_spike` | Air temperature ramps to about 33 C in 20 min (vent failure on a sunny day) | `heat_stress` once true air or substrate temperature >= 30 |
+| `heat_spike` | Air temperature ramps to about 33 C in 20 min (vent failure on a sunny day) | `heat_stress` once true air or substrate temperature >= 30 (card: `heat_stress_check`) |
 | `humid_night` | Humidity ramps to about 90 % in 20 min | `fungal_pressure` once true humidity >= 85 % or VPD < 0.4 kPa |
 | `nutrient_over_concentration` | EC ramps to about 5.0 mS/cm in 60 min (dosing or top-up error) | `high_ec` once true EC >= 4.5 |
 | `dry_zone` | Irrigation is blocked in the substrate zone; moisture falls about 70 %/h (`drying_pct_per_hour`), roughly 45 min from 60 % to under 10 % | `water_level_risk` once true moisture < 10 % |

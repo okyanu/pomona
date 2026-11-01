@@ -20,6 +20,7 @@ risk labels to a human-executable suggestion:
 - `high_ec` / `low_ec` -> review nutrient dosing
 - `fungal_pressure` -> consider ventilation, inspect canopy
 - `water_level_risk` -> check the irrigation system
+- `heat_stress` -> check vents, fans and shading (air or substrate temperature at or above 30 C for 10 minutes)
 
 `load_rules` rejects any rule whose `action` matches Pomona's forbidden
 actuator/chemical vocabulary (`direct_pesticide_dosage`,

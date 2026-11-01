@@ -123,6 +123,17 @@ def test_shipped_rules_wait_longer_for_humidity():
     assert kinds(events) == [("high_ec_alert", "raised"), ("high_humidity_fan", "raised")]
 
 
+def test_shipped_heat_stress_rule_raises_after_the_default_window_with_an_advisory_action():
+    rules = load_rules(settings.rules_path)  # load_rules rejects forbidden actions, so loading proves it is advisory
+    heat = next(r for r in rules if r["id"] == "heat_stress_check")
+    assert heat["match_any_labels"] == ["heat_stress"] and heat["action"] == "check_ventilation_and_shading"
+    assert not {"raise_after_seconds", "clear_after_seconds", "raise_after_samples"} & set(heat)  # default windows
+    assert "30" in heat["message"] and "second thermometer" in heat["message"]
+    assert kinds(feed(monitor(rules=rules), [["heat_stress"]] * 2)) == []  # 0 and 5 min: still waiting
+    assert kinds(feed(monitor(rules=rules), [["heat_stress"]] * 3)) == [("heat_stress_check", "raised")]
+    assert kinds(feed(monitor(rules=rules), [["heat_stress"], [], ["heat_stress"], ["heat_stress"]])) == []
+
+
 SAMPLE_RULES = [{"id": "check", "match_any_labels": ["stuck_value"], "action": "check_sensor", "message": "Check.",
                  "raise_after_samples": 3},
                 *RULES]

@@ -92,9 +92,15 @@ def test_rule_specific_window_is_used():
 
 
 def test_label_without_a_rule_is_not_a_miss():
-    report = grade(real_rows("heat_stress"), [])
+    report = grade(real_rows("cold_stress"), [])
     assert report["real_episodes"][0]["outcome"] == "no_card_rule"
     assert report["summary"]["real_episodes"]["no_card_rule"] == 1 and score.failures(report) == 0
+
+
+def test_heat_stress_has_a_rule_so_no_raise_is_a_miss_and_a_raise_is_caught():
+    assert grade(real_rows("heat_stress"), [])["real_episodes"][0]["outcome"] == "missed"
+    report = grade(real_rows("heat_stress"), [raised(A, "heat_stress_check", 30)])
+    assert report["real_episodes"][0]["outcome"] == "caught" and report["summary"]["false_alarms"] == 0
 
 
 def test_raise_inside_the_clear_window_after_the_episode_still_counts():

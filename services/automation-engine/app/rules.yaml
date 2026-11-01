@@ -46,6 +46,15 @@ rules:
       Substrate moisture out of the expected range. Confirm with a second
       reading and check the irrigation system for blockages or leaks.
 
+  # Heat: the label needs air or substrate temperature at or above 30 C. It waits the default windows
+  # (10 minutes to raise, 15 to clear), so a brief spike does not raise a card.
+  - id: heat_stress_check
+    match_any_labels: [heat_stress]
+    action: check_ventilation_and_shading
+    message: >-
+      Temperature stayed at or above 30 C. Check vents, fans and shading, and
+      confirm with a second thermometer before acting.
+
   # Sensor-check labels from the sensor-quality reasoner. The trust gate stops the specialists from
   # reasoning on a reading that failed the check, so this card is what the operator sees instead.
   - id: sensor_check

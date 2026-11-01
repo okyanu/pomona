@@ -14,6 +14,7 @@ SEVERITY_BY_ACTION = {
     "inspect_canopy": "info",
     "check_irrigation_system": "warn",
     "check_sensor": "warn",
+    "check_ventilation_and_shading": "warn",
 }
 
 

@@ -58,7 +58,7 @@ what Pomona raised, with a verdict.
 | caught as can't-confirm (safe) | A real event whose domain card never came, but the sensor check raised while that probe was flagged: Pomona said "check the probe" instead of acting on a doubtful reading |
 | MISSED | A real event that lasted longer than the rule's window raised nothing |
 | too short to raise | The episode was shorter than the rule's `raise_after`; no card was possible |
-| no card rule | The label (for example `heat_stress`) has no rule in `rules.yaml`, so Pomona has no card for it |
+| no card rule | The label (for example `cold_stress`, which the simulator cannot produce) has no rule in `rules.yaml`, so Pomona has no card for it |
 | WRONG CARD | A sensor fault on one field produced a domain card built on it |
 | undetectable | `plausible_offset`: an in-range constant offset nobody can see from one reading |
 | rejected by Core | A dead-clock reading refused at ingest, as intended |
@@ -73,8 +73,8 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
   sample time; a sped-up run (`--sim-speed` above 1) makes both unrealistic. Run in real time.
 - **Demos take time.** A card needs its label to persist for 10 minutes (30 for humidity) and a
   fault needs 11 samples to leave Pomona's history, so a meaningful run is 30 minutes or more.
-- What the scorer shows on the current rules: `heat_stress` has no card rule; a slow drift (0.05 mS/cm
-  per minute) is caught only once it has moved 0.4 from the trusted level; a noisy humidity probe is
+- What the scorer shows on the current rules: `heat_stress` raises the `heat_stress_check` card (check vents, fans and
+  shading) after 10 minutes; a slow drift (0.05 mS/cm per minute) is caught only once it has moved 0.4 from the trusted level; a noisy humidity probe is
   never flagged; a single-sample spike is flagged but too short to raise a card; `plausible_offset`
   started mid-stream is flagged for as long as it lasts (from the start of a stream nobody can see it).
 - Pomona now keeps a trusted reference per probe, so a real step (a nutrient overdose) shows first as
