@@ -138,6 +138,21 @@ if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
   fi
 fi
 
+# --- "Try to fool Pomona" Space: vendored engine files match the repo, Space tests pass ---
+if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
+  if [[ -x spaces/try-to-fool-pomona/.venv/bin/python ]]; then
+    echo ""
+    echo "==> Checking the Try to fool Pomona Space..."
+    if make fool-space-check >/dev/null 2>&1; then
+      ok "Space vendor/ matches the repo and its tests passed"
+    else
+      fail "Try to fool Pomona Space check failed — run: make fool-space-check"
+    fi
+  else
+    warn "Try to fool Pomona Space venv missing — run: make fool-space-venv && make fool-space-check"
+  fi
+fi
+
 echo ""
 if [[ "$ERRORS" -gt 0 ]]; then
   echo "FAILED: $ERRORS error(s). Fix before publishing."

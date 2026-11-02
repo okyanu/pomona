@@ -17,23 +17,20 @@ sample time of the reading, never the wall clock. See METRIC_DEFINITIONS in the 
 from __future__ import annotations
 
 import argparse
-import asyncio
-import importlib.util
 import json
-import re
 import sys
-import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTOMATION_APP = ROOT / "services" / "automation-engine" / "app"
-CORE_APP = ROOT / "services" / "core" / "app"
-ROUTER_DIR = ROOT / "services" / "model-router"
+sys.path.insert(0, str(ROOT / "examples" / "simulators"))
+# The offline replay engine (stdlib at import; the model-router pipeline loads only when --offline runs it).
+from inprocess_pomona import (AUTOMATION_APP, CORE_OPTIONAL, InProcessPomona, alert_defaults, core_packet, iso_z,  # noqa: E402,F401
+                              parse_rules, parse_ts, pipeline_risk_labels)
 SENSOR_RULE = "sensor_check"  # the main sensor card; its windows time the fault episodes
 SENSOR_ACTION = "check_sensor"  # every rule with this action is a sensor card (sensor_check, sensor_flatline), not advice
 # Fields a card is built from, per rule: a raise of that rule during a fault on one of them is a wrong card.
@@ -53,9 +50,6 @@ LABEL_FIELDS = {
     "heat_stress": ("air_temperature_c", "substrate_temperature_c"),
     "cold_stress": ("air_temperature_c", "substrate_temperature_c"),
 }
-# Core's SensorEvent optional fields: Core's stored packet has them as null when absent.
-CORE_OPTIONAL = ("substrate_temperature_c", "substrate_moisture_pct", "weather", "zone_area_m2", "crop_kc",
-                 "npk_target")
 ACCEPTED_STATUSES = (200, 201)
 # A real event leaves its mark after it stops (substrate EC stays high after a dry spell), and Pomona keeps a
 # changed level flagged until it is confirmed: a sensor check this long after an event is its aftermath.
@@ -89,60 +83,8 @@ METRIC_DEFINITIONS = {
 
 # --- Small helpers ----------------------------------------------------------------------
 
-def parse_ts(text: str) -> datetime:
-    """Any ISO spelling (Z or offset) as an aware UTC datetime."""
-    value = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
-    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
-
-
-def iso_z(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def clock(value: datetime) -> str:
     return value.strftime("%H:%M:%S")
-
-
-def parse_rules(text: str) -> List[Dict[str, Any]]:
-    """Read rules.yaml without PyYAML: the file is a flat list of rules with scalar and list values."""
-    rules: List[Dict[str, Any]] = []
-    current: Dict[str, Any] = {}
-    key = ""
-    for raw in text.splitlines():
-        body = raw.strip()
-        if not body or body.startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        if indent == 0:
-            if body != "rules:":
-                break
-            continue
-        if indent == 2 and body.startswith("- "):
-            current = {}
-            rules.append(current)
-            body, indent = body[2:], 4
-        if indent == 4:
-            key, _, value = body.partition(":")
-            value = value.strip()
-            if value.startswith("["):
-                current[key] = [item.strip() for item in value[1:-1].split(",") if item.strip()]
-            elif value in ("", ">-", ">"):
-                current[key] = [] if value == "" else ""
-            else:
-                current[key] = int(value) if value.isdigit() else value
-        elif body.startswith("- "):
-            current[key].append(body[2:].strip())
-        else:
-            current[key] = (current[key] + " " + body).strip()
-    return rules
-
-
-def alert_defaults() -> Tuple[int, int]:
-    """Alert monitor defaults (raise, clear seconds) from automation-engine config.py."""
-    text = (AUTOMATION_APP / "config.py").read_text()
-    raise_after = re.search(r"alert_raise_after_seconds:[^=]*=\s*Field\(default=(\d+)", text)
-    clear_after = re.search(r"alert_clear_after_seconds:[^=]*=\s*Field\(default=(\d+)", text)
-    return (int(raise_after.group(1)) if raise_after else 600, int(clear_after.group(1)) if clear_after else 900)
 
 
 def load_truth(path: Path) -> List[Dict[str, Any]]:
@@ -478,107 +420,35 @@ def failures(report: Dict[str, Any]) -> int:
 
 # --- Offline replay: the real pipeline and the real alert monitor, in-process --------------------
 
-def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
-    """Same as services/core/app/outcome_feed.py (copied: that package cannot be imported next to this one)."""
-    return list(dict.fromkeys([
-        *(result.get("sensor_quality") or {}).get("data_quality_labels", []),
-        *(result.get("water_irrigation") or {}).get("irrigation_risk_labels", []),
-        *(result.get("nutrient_ph_ec") or {}).get("nutrient_risk_labels", []),
-        *(result.get("crop_risk") or {}).get("risk_labels", []),
-    ]))
-
-
-def core_packet(sent: Dict[str, Any]) -> Dict[str, Any]:
-    """The reading as Core stores and forwards it: UTC timestamp with Z, absent optionals as null."""
-    packet = {k: v for k, v in sent.items() if k != "source"}
-    for key in CORE_OPTIONAL:
-        packet.setdefault(key, None)
-    packet["timestamp"] = iso_z(parse_ts(sent["timestamp"]))
-    return packet
-
-
-def load_alert_monitor(rules: List[Dict[str, Any]], defaults: Tuple[int, int], db_path: Path):
-    """The real AlertMonitor (stdlib only), loaded by path so its `app` package never clashes."""
-    spec = importlib.util.spec_from_file_location("pomona_alerts", AUTOMATION_APP / "alerts.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["pomona_alerts"] = module  # needed before exec for dataclass-style lookups
-    spec.loader.exec_module(module)
-    return module.AlertMonitor(rules, defaults[0], defaults[1], db_path=db_path, max_events=1_000_000)
-
-
-def load_module(name: str, path: Path):
-    """A stdlib-only module loaded by file path, so its package never clashes with another `app`."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def replay_offline(rows: List[Dict[str, Any]], rules: List[Dict[str, Any]], defaults: Tuple[int, int]):
     """Replay Core-accepted events like Core's outcome feed. Returns (alert events, frame info, states).
 
-    Like Core, each reading is judged with the sticky trusted reference of its stream, built (by Core's own
-    trusted_baseline.py) from the earlier readings, less what the pipeline vetoed, and from the calibrations.
+    The work is done by InProcessPomona (examples/simulators/inprocess_pomona.py), the engine the "Try to
+    fool Pomona" Space also runs: each reading is judged with the sticky trusted reference of its stream,
+    built (by Core's own trusted_baseline.py) from the earlier readings, less what the pipeline vetoed, and
+    from the calibrations. Which readings Core accepted comes from the truth log.
     """
-    sys.path.insert(0, str(ROUTER_DIR))
     try:
-        from app import pipeline  # model-router's app package
+        engine = InProcessPomona(rules, defaults)
     except ImportError as error:
         raise SystemExit(f"--offline needs the model-router venv (services/model-router/.venv/bin/python): {error}")
-    pipeline.write_pipeline_audit = lambda record: None
-    loop = asyncio.new_event_loop()
-    baseline = load_module("pomona_trusted_baseline", CORE_APP / "trusted_baseline.py")
-    calibrations: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
-    for row in rows:
-        for item in row.get("calibrations", []):
-            if (item.get("delivery") or {"status": 201}).get("status") in ACCEPTED_STATUSES:
-                key = (row["sent"]["farm_id"] if row.get("sent") else "", row["zone_id"], row["device_id"])
-                calibrations.setdefault(key, []).append({"measurement": item["field"], "performed_at": item["at"]})
-    streams: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
-    history: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     events: List[Dict[str, Any]] = []
     info: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    card_labels = {label for r in rules if r.get("action") != SENSOR_ACTION for label in r["match_any_labels"]}
-    check_labels = {label for r in rules if r.get("action") == SENSOR_ACTION for label in r["match_any_labels"]}
-    with tempfile.TemporaryDirectory(prefix="score-fake-greenhouse.") as tmp:
-        monitor = load_alert_monitor(rules, defaults, Path(tmp) / "alerts.db")
-        try:
-            for row in sorted(rows, key=lambda r: (r["tick"], r["zone_id"])):
-                if not core_accepted(row):
-                    continue
-                sent = row["sent"]
-                sample = parse_ts(sent["timestamp"])
-                sensor = core_packet(sent)
-                sensor.update(received_at=iso_z(sample + timedelta(seconds=1)), mqtt_retained=False)
-                key = (sent["farm_id"], sent["zone_id"])
-                prior = [{k: v for k, v in p.items() if k not in ("received_at", "mqtt_retained")}
-                         for p in history.get(key, [])[-11:]]
-                pipeline._now = lambda now=sample + timedelta(seconds=1): now
-                farm = {"crop": sensor["crop"], "system_type": sensor["system_type"], "zone_id": sensor["zone_id"],
-                        "weather": sensor.get("weather"), "zone_area_m2": sensor.get("zone_area_m2"),
-                        "crop_kc": sensor.get("crop_kc"), "npk_target": sensor.get("npk_target")}
-                stream = (sent["farm_id"], sent["zone_id"], sent["device_id"])
-                prior_stream = streams.setdefault(stream, [])
-                reference = baseline.stream_baseline(
-                    prior_stream[-baseline.DEFAULT_SCAN_LIMIT:], calibrations.get(stream, []), sample,
-                    baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MIN_N, baseline.DEFAULT_MAX_AGE_S or None)
-                result = loop.run_until_complete(pipeline.evaluate_pipeline(
-                    farm, sensor, [], {"action_type": "continue_monitoring"}, "core_feed", "rules_only",
-                    "core_feed", history=prior, stream_baseline=reference or None))
-                history.setdefault(key, []).append(sensor)
-                prior_stream.append({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})
-                labels = pipeline_risk_labels(result)
-                info[(row["zone_id"], row["tick"])] = {
-                    "labels": labels, "trust": result["trust_gate"]["trust_verdict"],
-                    "vetoed_fields": result["trust_gate"]["vetoed_fields"],
-                    "card_labels": sorted(set(labels) & card_labels),
-                    "sensor_check_labels": sorted(set(labels) & check_labels)}
-                events += monitor.observe(sent["farm_id"], sent["zone_id"], sent["device_id"], sample, labels)["events"]
-            states = monitor.states()
-        finally:
-            monitor.close()
-            loop.close()
+    with engine:
+        for row in sorted(rows, key=lambda r: (r["tick"], r["zone_id"])):
+            sent = row.get("sent")
+            for item in row.get("calibrations", []):  # before the reading, so Core has them when it evaluates it
+                if (item.get("delivery") or {"status": 201}).get("status") in ACCEPTED_STATUSES:
+                    engine.calibrate(row["zone_id"], item["field"], item["at"],
+                                     farm_id=sent["farm_id"] if sent else "", device_id=row["device_id"])
+            if not core_accepted(row):
+                continue
+            got = engine.observe(sent)
+            info[(row["zone_id"], row["tick"])] = {
+                "labels": got["labels"], "trust": got["trust"], "vetoed_fields": got["vetoed_fields"],
+                "card_labels": got["card_labels"], "sensor_check_labels": got["sensor_check_labels"]}
+            events += got["alert_events"]
+        states = engine.states()
     return events, info, states
 
 

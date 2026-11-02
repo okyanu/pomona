@@ -173,3 +173,6 @@ spaces/sensor-data-checker/tests/parity_cases.json
 spaces/pomona-greenhouse-demo/tests/parity_cases.json
 spaces/pomona-greenhouse-demo/tests/chain_cases.json
 spaces/ph-calibration-checker/tests/parity_cases.json
+
+# "Try to fool Pomona" Space: engine files copied from the repo by scripts/build_fool_space.sh (never committed)
+spaces/try-to-fool-pomona/vendor/

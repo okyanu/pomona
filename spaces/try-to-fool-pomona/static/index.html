@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Try to fool Pomona</title>
+  <meta name="description" content="Break a greenhouse sensor or hurt the plants, fast-forward time, and see whether Pomona catches it.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <a class="skip" href="#play">Skip to the game</a>
+  <header class="top">
+    <div class="wrap">
+      <h1>Try to fool Pomona</h1>
+      <p class="lede">Break a sensor and Pomona should say it can't trust that sensor. Hurt the plants and it should raise
+        the right alert. Fast-forward time and see.</p>
+      <p class="honest">This page runs Pomona's real deterministic safety chain on a pretend greenhouse. The small AI
+        models are advisory and are not used here. The physics is fake, not a crop model.</p>
+    </div>
+  </header>
+
+  <div id="status" class="status wrap" role="status" aria-live="polite" hidden></div>
+
+  <main id="play" class="wrap">
+    <section class="clock-bar" aria-label="Simulated time">
+      <div class="clock">
+        <span class="clock-label">Greenhouse clock</span>
+        <strong id="clock-text">–</strong>
+        <span id="clock-sub" class="muted"></span>
+      </div>
+      <progress id="clock-progress" max="100" value="0" aria-label="Share of the 24 simulated hours used"></progress>
+      <div class="time-buttons" role="group" aria-label="Fast-forward">
+        <button type="button" class="needs-idle" data-ticks="20">+10 min</button>
+        <button type="button" class="needs-idle" data-ticks="60">+30 min</button>
+        <button type="button" class="needs-idle" data-ticks="240">+2 h</button>
+        <button type="button" class="ghost needs-idle" id="new-session">New session</button>
+      </div>
+      <p class="note" id="time-note"></p>
+    </section>
+
+    <section class="zones" id="zones" aria-label="The two greenhouse zones"></section>
+
+    <section class="panel" aria-labelledby="tricks-h">
+      <h2 id="tricks-h">Your tricks</h2>
+      <div class="trick-groups">
+        <div>
+          <h3>Lie to Pomona <span class="muted">(sensor faults)</span></h3>
+          <p class="muted small">The plants are fine; the reading is wrong.</p>
+          <div class="chips" id="chips-lie" role="radiogroup" aria-label="Sensor faults"></div>
+        </div>
+        <div>
+          <h3>Hurt the plants <span class="muted">(real events)</span></h3>
+          <p class="muted small">The readings are honest; the plants are really in trouble.</p>
+          <div class="chips" id="chips-hurt" role="radiogroup" aria-label="Real events"></div>
+        </div>
+      </div>
+      <div class="trick-form">
+        <p id="trick-blurb" class="small"></p>
+        <label>Zone <select id="pick-zone" class="needs-idle"></select></label>
+        <label id="field-wrap">Sensor <select id="pick-field" class="needs-idle"></select></label>
+        <button type="button" class="primary needs-idle" id="start-trick">Start</button>
+      </div>
+
+      <div class="extras">
+        <div class="extra">
+          <h3>Pomona's blind test</h3>
+          <p class="small muted">A random trick starts and you don't see which. Pomona doesn't get a hint either.
+            The verdict and the name come when you reveal it (or at the end of the 24 hours).</p>
+          <div class="row">
+            <button type="button" class="needs-idle" id="hidden-btn">Hidden random</button>
+            <button type="button" class="needs-idle" id="reveal-btn">Reveal</button>
+          </div>
+          <ul id="hidden-list" class="plain small"></ul>
+        </div>
+        <div class="extra">
+          <h3>Check the probe with a meter</h3>
+          <p class="small muted">You measured the real value with a reference meter and it matched, so Pomona may accept
+            the probe's current level. Use it after Pomona says it can't confirm a real change.</p>
+          <div class="row">
+            <label>Zone <select id="cal-zone" class="needs-idle"></select></label>
+            <label>Probe <select id="cal-field" class="needs-idle"></select></label>
+            <button type="button" class="needs-idle" id="cal-btn">Record meter check</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="score-h">
+      <h2 id="score-h">Scoreboard</h2>
+      <p id="score-summary" class="score-summary">Start a trick, then fast-forward.</p>
+      <p id="score-extra" class="muted small"></p>
+      <div id="timelines" class="timelines"></div>
+      <ul id="episodes" class="episodes plain"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="verdicts-h">
+      <h2 id="verdicts-h">What the verdicts mean</h2>
+      <p class="muted small">The grader is the same one the repository's scorer uses, run against the simulator's
+        answer key.</p>
+      <div class="table-scroll">
+        <table class="verdicts">
+          <thead><tr><th scope="col">Scorer verdict</th><th scope="col">Shown as</th><th scope="col">Why</th></tr></thead>
+          <tbody id="verdict-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="share-h">
+      <h2 id="share-h">Share or run it yourself</h2>
+      <div class="row">
+        <button type="button" class="needs-idle" id="copy-link">Copy replay link</button>
+        <button type="button" class="needs-idle" id="download">Download this scenario</button>
+      </div>
+      <p class="small muted" id="share-note">The replay link holds the seed and your steps (nothing is stored on the
+        server); anyone who opens it sees the same run and the same verdicts.</p>
+      <input id="link-field" class="link-field" type="text" readonly hidden aria-label="Replay link">
+      <p class="small">Run the scenario on your own stack: save the file, then
+        <code>make fake-greenhouse SCENARIO=path/to/the-file.json</code> in the
+        <a href="https://github.com/okyanu/pomona">repository</a>.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p id="build-line">Runs Pomona's real code, not a copy.</p>
+      <p class="small">
+        <a href="https://github.com/okyanu/pomona">GitHub</a> ·
+        <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9">Models and datasets</a> ·
+        <a href="https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo">Greenhouse demo</a> ·
+        <a href="https://huggingface.co/spaces/Okyanus/pomona-sensor-data-checker">Sensor data checker</a> ·
+        <a href="https://huggingface.co/spaces/Okyanus/pomona-ph-calibration-checker">pH calibration checker</a>
+      </p>
+      <p class="small muted">Pomona only advises. It never controls irrigation, dosing or any other hardware. Nothing
+        you do here is stored on the server.</p>
+    </div>
+  </footer>
+  <script src="static/app.js" defer></script>
+</body>
+</html>

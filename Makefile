@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: up down logs health events sim fake-greenhouse fake-greenhouse-dry fake-greenhouse-score local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
+.PHONY: up down logs health events sim fake-greenhouse fake-greenhouse-dry fool-space-check fool-space-build fool-space-venv fake-greenhouse-score local-validation pre-hardware-validation hardware-simulation-validation backup-recovery-validation article-runtime-benchmark article-demo commit-plan test-local local-check docker-config backup-local restore-local test setup advisor install check publish-check publish-github publish-github-push publish-hf split-ml
 
 up:
 	./scripts/up.sh
@@ -40,10 +40,12 @@ split-ml:
 sim:
 	./scripts/sim.sh
 
+# SCENARIO=path/to/scenario.json runs another scenario (for example one downloaded from the "Try to fool Pomona" Space).
+SCENARIO ?= examples/simulators/scenarios/demo.json
 fake-greenhouse:
 	$(PYTHON) -m pip install -q -r examples/simulators/requirements.txt 2>/dev/null || true
 	@echo "Control page: http://127.0.0.1:8090/"
-	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario examples/simulators/scenarios/demo.json --control-port 8090
+	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario $(SCENARIO) --control-port 8090
 
 # No MQTT: events go to data/fake_greenhouse/events.jsonl, the control page runs in real time.
 fake-greenhouse-dry:
@@ -83,6 +85,27 @@ test-local:
 	services/model-router/.venv/bin/python -m pytest scripts/tests -q
 	services/model-router/.venv/bin/python -m pytest services/model-router/tests -q
 	services/automation-engine/.venv/bin/python -m pytest services/automation-engine/tests -q
+
+# "Try to fool Pomona" Space (spaces/try-to-fool-pomona): the Space's own Python 3.11 venv, the vendored engine files
+# (copied from the repo, generated, not committed) and its tests. No network is used by the tests.
+FOOL_SPACE := spaces/try-to-fool-pomona
+FOOL_PY := $(FOOL_SPACE)/.venv/bin/python
+PYTHON311 ?= python3.11
+
+$(FOOL_PY):
+	$(PYTHON311) -m venv $(FOOL_SPACE)/.venv
+	$(FOOL_SPACE)/.venv/bin/pip install -q -r $(FOOL_SPACE)/requirements-dev.txt
+
+fool-space-venv: $(FOOL_PY)
+
+fool-space-build:
+	./scripts/build_fool_space.sh
+
+# Rebuild vendor/, verify every vendored file against the repo (hashes), run the Space tests. Part of publish-check.
+fool-space-check: $(FOOL_PY)
+	./scripts/build_fool_space.sh
+	./scripts/build_fool_space.sh --check
+	$(FOOL_PY) -m pytest $(FOOL_SPACE)/tests -q
 
 .PHONY: print-pack
 # 3D-printable station and sensor mounts: render STL/3MF and run geometry checks (needs OpenSCAD).
