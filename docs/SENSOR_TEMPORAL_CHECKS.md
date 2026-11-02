@@ -152,3 +152,56 @@ flags on its own. The thresholds were not loosened to make the unattended number
 guarded is what must not regress (the legacy pass, the persistent stuck rates both ways, the drift rate with
 the lapse, and the fields that had no persistent flags at all). In a live deployment each flagged level is
 a card that asks someone to confirm the probe, and the confirmation ends it.
+
+## Stream-habit checks in Core's feed (2026-11-02)
+
+The "Try to fool Pomona" game ([FAKE_GREENHOUSE.md](./FAKE_GREENHOUSE.md)) showed four sensor lies the checks
+above missed. Three checks now close them. All need Core's `stream_baseline` (they judge a reading against
+its own stream, so they run in the Core feed and the in-process engine, not in the 11-packet rules the
+browser checker mirrors in JavaScript) and every threshold was set on the real logs (`make real-replay`,
+5-minute samples, budget about 0.15 % of readings per stream).
+
+| Check | Fires when | Real-data share flagged |
+|---|---|---|
+| `stuck_value` for pH and EC (adaptive) | The value repeats for longer than 15 minutes **and** 4 times the longest hold the stream showed in its last 200 trusted readings, **and** the stream changed in at least 70 % of those steps (15 steps minimum). Core sends `change_share`, `change_steps`, `longest_run_s` for pH and EC | pH: 0 of 7 real streams. EC: 0.02 % (IUACAAS, no-lapse replay only), 0.004 % (Automatoes), 0 elsewhere |
+| `sensor_drift_possible` for air temperature (step) | The reading differs from the newest trusted reading (`last_value`, `last_at`) by more than max(3 C, 1 C per minute since that reading). A flagged reading is vetoed, so the reference stays put and the step stays flagged until the allowance has grown to cover it (4 minutes for 4 C), then the new level is accepted | 0.054 % of the Reference compartment (it holds 17 C glitches), 0.002 % in two others, 0 in three |
+| `noisy_signal_possible` for humidity and air temperature | The median step over the last 12 readings is at least the limit: 10 %RH / 2 C scaled by the square root of the sample interval over 5 minutes, never below 3 %RH / 0.4 C | humidity: 0.084 % (AICU), 0.056 % (IUACAAS), 0.025 % (Digilog), about 0 elsewhere; air: 0.029 % (Reference), about 0 elsewhere |
+
+Why each shape:
+
+- **pH/EC cannot have a fixed stuck limit.** Real drain probes hold one value for hours (80 % of readings
+  are beyond 20 minutes; the longest hold is 6 days). A limit tuned to the longest real plateau would miss
+  every freeze, a short one would flag the drain probe most of the time. A history-only variant (limit = a
+  multiple of the longest hold in the last 2 to 72 hours) was tried on the real logs and flags 0.4 to 20 %
+  of readings, because plateaus are heavy-tailed and every new record plateau looks like a freeze. What
+  does separate the two kinds of probe is how often the value changes at all: the real drain probes change
+  in 3 to 18 % of their steps, the pond pH in 99 % and the pond EC in 77 %, the simulator's pH and EC in 83 to
+  93 %. Only a stream that normally changes almost every sample can be "stuck"; one that is quiet by habit
+  is left alone, and the longest-hold factor (4) keeps a probe that rests for up to an hour (the pond EC)
+  quiet too.
+- **Air temperature has no level check** (it varies 10 C a day, so a distance from the 2 h median would flag
+  every morning), so the step is judged by speed: how far air can really move since the last reading it
+  trusted. A heat spike ramps about 0.5 C per minute and never reaches the allowance, so it stays a real event
+  (a heat card, not a sensor card). In 5-minute logs the allowance is 5 C, so only glitches trip it.
+- **Noise needs the sample interval.** Real humidity at 5 minutes swings a lot (the median step over 12
+  readings reaches 8 %RH in 0.2 % of windows), which is why the limit at 5 minutes is 10 %RH. A legitimate
+  swing is spread over more samples when readings come faster, so the limit shrinks with the square root of
+  the interval, down to a floor several times a healthy probe's noise. No real log is sampled faster than
+  5 minutes, so the scaling at 30 seconds (limit 3.2 %RH, 0.63 C) is argued from the physics and checked only
+  against the simulator's normal runs (0 new flags in 23 seeds), not against real data.
+
+Limits that remain:
+
+- A pH or EC freeze shorter than about 16 minutes is not caught (the floor is 15 minutes, and a card needs 3
+  flagged readings), and a stream with fewer than 15 trusted steps before the freeze has no habit to judge.
+- A second freeze of the same probe soon after the first is missed: the first freeze's first 15 minutes were
+  still trusted, so that stream now "rests" for 15 minutes and needs 4 x 15 = 60 minutes. A percentile
+  of the holds instead of the longest one would fix it and flags 3 to 30 times more real readings, so the
+  longest hold stays. A probe that was already frozen before Pomona started watching it has no earlier habit
+  and is not judged.
+- A step of 4 C is flagged for about 4 minutes and then accepted as the new level without a calibration (a
+  heat spike must not be held back). Removing a long drift snaps the reading back and trips the same check, so
+  in the game a 40-minute air-temperature drift is "caught" only when it ends.
+- Not covered by the new checks, and still MISSED in the game: a jump or drift on humidity, substrate moisture
+  or substrate temperature, a drift on air temperature (until it ends), a noisy pH, EC, moisture or
+  substrate-temperature probe, and a frozen substrate-temperature probe (3 h of thermal mass).

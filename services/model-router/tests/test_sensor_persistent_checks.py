@@ -93,8 +93,9 @@ def test_a_changed_value_breaks_the_run_and_missing_data_is_quiet():
     assert "stuck_value" not in derive(packet(11, air_temperature_c=21.0), history, no_time)["data_quality_labels"]
 
 
-def test_moisture_ph_and_ec_have_no_persistent_stuck_check():
-    # Drain probes and placeholders really sit on one value for hours; only the continuous probes are judged.
+def test_moisture_ph_and_ec_have_no_fixed_persistent_stuck_limit():
+    # Drain probes and placeholders really sit on one value for hours; only the continuous probes are judged by a
+    # fixed limit. pH and EC are judged by their own habits only when Core sends them (test_sensor_stream_habits.py).
     history = [packet(i, substrate_moisture_pct=50.0, ph=6.0, ec_ms_cm=2.5) for i in range(11)]
     baseline = {"substrate_moisture_pct": stats(50.0, 600), "soil_moisture_pct": stats(50.0, 600),  # ten hours flat
                 "ph": stats(6.0, 600), "ec_ms_cm": stats(2.5, 600)}

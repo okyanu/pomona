@@ -277,7 +277,8 @@ class PipelineEvaluateRequest(BaseModel):
     )
     stream_baseline: Optional[Dict[str, Dict[str, Any]]] = Field(
         default=None,
-        description="Core's sticky trusted reference per field: {median, n, window_s, last_change_at}.",
+        description=("Core's sticky trusted reference per field: {median, n, window_s, last_change_at}, optionally "
+                     "{spread, last_value, last_at, change_share, change_steps, longest_run_s}."),
     )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
@@ -300,6 +301,21 @@ class PipelineEvaluateRequest(BaseModel):
                     datetime.fromisoformat(str(changed).replace("Z", "+00:00"))
                 except ValueError as error:
                     raise ValueError(f"stream_baseline.{field}.last_change_at must be an ISO time") from error
+            # Optional habit keys (newer Core): the newest trusted reading and how the probe normally changes.
+            last_value, last_at = stats.get("last_value"), stats.get("last_at")
+            if last_value is not None and (isinstance(last_value, bool) or not isinstance(last_value, (int, float))
+                                           or not math.isfinite(last_value)):
+                raise ValueError(f"stream_baseline.{field}.last_value must be a finite number")
+            if last_at is not None:
+                try:
+                    datetime.fromisoformat(str(last_at).replace("Z", "+00:00"))
+                except ValueError as error:
+                    raise ValueError(f"stream_baseline.{field}.last_at must be an ISO time") from error
+            for key in ("change_share", "change_steps", "longest_run_s"):
+                number = stats.get(key)
+                if number is not None and (isinstance(number, bool) or not isinstance(number, (int, float))
+                                           or not math.isfinite(number) or number < 0):
+                    raise ValueError(f"stream_baseline.{field}.{key} must be a non-negative number")
         return value
 
     @field_validator("history")

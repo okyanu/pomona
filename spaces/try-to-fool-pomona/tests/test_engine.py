@@ -188,3 +188,41 @@ def test_the_page_download_is_a_scenario_make_fake_greenhouse_loads(tmp_path):
     loaded = fg.load_scenario(path)
     assert loaded["seed"] == 33 and [s["at_tick"] for s in loaded["steps"]] == sorted(s["at_tick"] for s in loaded["steps"])
     assert {next(k for k in ("start", "stop", "calibrate") if k in s) for s in loaded["steps"]} == {"start", "calibrate"}
+
+
+# --- The four lies that used to fool Pomona, and the real event that must stay a real event -------------------
+
+@pytest.mark.parametrize("name,field,zone", [
+    ("stuck", "ph", A), ("stuck", "ph", B), ("stuck", "ec_ms_cm", A), ("stuck", "ec_ms_cm", B),
+    ("jump", "air_temperature_c", A), ("jump", "air_temperature_c", B),
+    ("noisy", "humidity_pct", A), ("noisy", "humidity_pct", B),
+])
+def test_the_four_old_gaps_are_caught_after_forty_minutes(name, field, zone):
+    session = game.Session.start_new(1)
+    try:
+        session.command({"op": "start", "name": name, "zone": zone, "field": field})
+        session.advance(80)  # 40 simulated minutes
+        session.command({"op": "stop", "name": name, "zone": zone, "field": field})
+        session.advance(40)
+        (fault,) = session.grade()["faults"]
+        assert (fault["fault"], fault["field"], fault["outcome"]) == (name, field, "caught"), fault
+        assert not fault["wrong_cards"] and not session.grade()["false_alarms"]
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("zone", [A, B])
+def test_a_heat_spike_stays_a_real_event_and_raises_the_heat_card_not_a_sensor_lie(zone):
+    session = game.Session.start_new(1)
+    try:
+        session.command({"op": "start", "name": "heat_spike", "zone": zone})
+        session.advance(120)
+        session.command({"op": "stop", "name": "heat_spike", "zone": zone})
+        session.advance(60)
+        board = session.grade()
+        (real,) = board["real"]
+        assert (real["rule"], real["outcome"]) == ("heat_stress_check", "caught"), real
+        assert not board["faults"] and not board["false_alarms"]
+        assert not any(e["rule_id"] == "sensor_check" for e in session.alert_events)  # no check-the-sensor card either
+    finally:
+        session.close()

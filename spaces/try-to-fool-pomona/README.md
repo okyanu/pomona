@@ -50,8 +50,10 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
   time-lapse): two simulated hours take about a quarter of a second to compute. A session is capped at 24
   simulated hours.
 - Pomona only advises. It never controls irrigation, dosing or any other hardware.
-- Known gaps stay visible on purpose: a plausible offset is undetectable by design, and some sensor lies (for
-  example a stuck pH probe) are not caught yet. See
+- Known gaps stay visible on purpose: a plausible offset is undetectable by design, and some sensor lies are still
+  not caught: a pH or EC freeze shorter than about 16 minutes (or a second one soon after the first), a jump or drift
+  on humidity, substrate moisture or substrate temperature, a drift of air temperature before it ends, and a noisy
+  pH, EC, moisture or substrate-temperature probe. See
   [docs/FAKE_GREENHOUSE.md](https://github.com/okyanu/pomona/blob/main/docs/FAKE_GREENHOUSE.md#honest-limits).
 
 ## How it works

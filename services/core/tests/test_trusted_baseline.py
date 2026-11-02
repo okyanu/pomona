@@ -293,3 +293,58 @@ def test_feed_keeps_the_pre_fault_reference_through_a_six_hour_fault(client, fee
         send(client, feed, at(20 - 5 * i, ph=7.6))
     sent = send(client, feed, at(1, ph=7.6))
     assert sent["stream_baseline"]["ph"]["median"] == 7.6 and sent["stream_baseline"]["ph"]["n"] == 3
+
+
+# --- The stream's own habits: newest trusted reading, and how a pH/EC probe normally changes -----------------
+
+def test_stats_carry_the_newest_trusted_reading():
+    readings = series([6.0, 6.1, 6.0, 6.2, 6.1, 6.0, 6.1, 9.0, 9.0], vetoed={7, 8})
+    stats = tb.trusted_stats(readings, "ph", T0 + timedelta(minutes=10), 7200, 6)
+    assert stats["last_value"] == 6.1  # the vetoed 9.0 never becomes the reference
+    assert tb.parse_time(stats["last_at"]) == T0 + timedelta(seconds=30 * 6)
+
+
+def test_norm_describes_how_the_probe_changed_before_the_current_run():
+    # 40 readings that change almost every step, then a frozen run: the norm covers only what came before it.
+    moving = [6.0 + 0.01 * ((i * 7) % 5) for i in range(40)]
+    readings = series(moving + [6.5] * 60)
+    stats = tb.trusted_stats(readings, "ph", T0 + timedelta(hours=1), 7200, 6, norm_steps=tb.NORM_STEPS)
+    assert stats["change_steps"] == 39 and stats["change_share"] > 0.9
+    assert stats["longest_run_s"] <= 60  # at most a repeat or two
+    assert tb.parse_time(stats["last_change_at"]) == T0 + timedelta(seconds=30 * 40)
+    # Not asked for (the default): the keys are absent, nothing else changes.
+    plain = tb.trusted_stats(readings, "ph", T0 + timedelta(hours=1), 7200, 6)
+    assert "change_share" not in plain and plain["median"] == stats["median"]
+
+
+def test_a_drain_probe_that_sits_still_has_a_low_change_share_and_a_long_hold():
+    # Real drain pH: a handful of changes in many hours, each value held for ages.
+    plateaus = [6.0] * 50 + [6.2] * 80 + [6.1] * 70 + [6.3] * 60
+    stats = tb.trusted_stats(series(plateaus, step_s=300), "ph", T0 + timedelta(hours=40), 7200, 6, norm_steps=tb.NORM_STEPS)
+    assert stats["change_share"] < 0.05
+    assert stats["longest_run_s"] >= 300 * 70
+
+
+def test_norm_skips_vetoed_readings_and_stops_at_a_calibration():
+    moving = [6.0 + 0.01 * ((i * 7) % 5) for i in range(60)]
+    readings = series(moving + [6.5] * 20, vetoed=set(range(30, 60)))  # half of what came before was vetoed
+    stats = tb.trusted_stats(readings, "ph", T0 + timedelta(hours=1), 7200, 6, norm_steps=tb.NORM_STEPS)
+    assert stats["change_steps"] == 29  # 30 trusted rows before the run -> 29 steps
+    after = T0 + timedelta(seconds=30 * 50)  # a calibration inside the vetoed stretch
+    cut = tb.trusted_stats(readings, "ph", T0 + timedelta(hours=1), 7200, 6, calibrated_after=after, norm_steps=tb.NORM_STEPS)
+    assert cut["median"] == 6.5 and "change_share" not in cut  # only the frozen run counts after it: no norm yet
+
+
+def test_norm_walk_is_bounded_by_norm_steps():
+    readings = series([6.0 + 0.01 * (i % 2) for i in range(1000)])
+    stats = tb.trusted_stats(readings, "ph", T0 + timedelta(hours=9), 7200, 6, norm_steps=50)
+    assert stats["change_steps"] == 50 and stats["change_share"] == 1.0
+
+
+def test_stream_baseline_adds_the_norm_to_ph_and_ec_only():
+    prior = [{"timestamp": T0 + timedelta(seconds=30 * i), "ph": 6.0 + 0.01 * (i % 3), "ec_ms_cm": 2.5 + 0.01 * (i % 2),
+              "air_temperature_c": 24.0 + 0.1 * (i % 4), "vetoed_fields": []} for i in range(40)]
+    out = tb.stream_baseline(prior, [], T0 + timedelta(seconds=30 * 40))
+    assert {"change_share", "change_steps", "longest_run_s", "last_value", "last_at"} <= set(out["ph"])
+    assert {"change_share", "change_steps", "longest_run_s"} <= set(out["ec_ms_cm"])
+    assert "last_value" in out["air_temperature_c"] and "change_share" not in out["air_temperature_c"]

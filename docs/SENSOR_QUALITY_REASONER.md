@@ -120,7 +120,9 @@ sensor check itself raises nothing, for example a constant in-range offset.
 The temporal checks above only remember the last 11 packets, so a step or a frozen probe becomes
 the new "normal" within minutes and the flag stops (about 8 consecutive readings at 30 s) while the
 fault is still there. Core's outcome feed therefore sends an optional `stream_baseline` with each
-evaluation (`POST /v1/pipeline/evaluate`): per field `{median, n, window_s, spread, last_change_at}`.
+evaluation (`POST /v1/pipeline/evaluate`): per field `{median, n, window_s, spread, last_change_at}`, plus
+the optional `last_value` / `last_at` and, for pH and EC, `change_share` / `change_steps` / `longest_run_s`
+(older Cores omit them and the new checks stay off).
 
 - `median`: the median of that probe's earlier readings in which the field was **not vetoed**, within
   2 h (`TRUST_BASELINE_WINDOW_S`) of the newest **trusted** reading (not of "now"), from the latest
@@ -130,12 +132,23 @@ evaluation (`POST /v1/pipeline/evaluate`): per field `{median, n, window_s, spre
   `services/core/app/trusted_baseline.py` (stdlib only, shared with the fake-greenhouse scorer).
 - `spread`: the window's 10th-to-90th percentile range, how far the probe normally wanders.
 - `last_change_at`: when the current run of identical values began, over all readings.
+- `last_value` / `last_at`: the newest trusted reading (a step is judged against it).
+- pH and EC only, `change_share` / `change_steps` / `longest_run_s`: over the last 200 trusted readings
+  before the current identical run, the share of steps in which the value changed and the longest hold in
+  seconds. They tell a probe that normally moves every sample from a drain probe that sits still for hours.
 
 With it the router flags `baseline_drift_possible` while pH differs from the trusted median by 0.35 or
 EC by 0.4 (the existing thresholds) **and** by 3 times the probe's own spread, so the flag lasts as long
 as the fault, the veto holds, and no wrong domain card follows; and `stuck_value` when a reading repeats
 for longer than 45 min (air temperature), 30 min (humidity), 6 h (substrate temperature) or 3 h (water
-temperature). The check text tells the operator to verify with a meter and, if the reading is right, to
+temperature); for pH and EC only when the stream normally changes in at least 70 % of its steps, and then
+after 15 minutes and 4 times its longest hold (a drain probe that sits still for hours is never judged).
+Two more checks run on the same path: `sensor_drift_possible` when air temperature differs from the newest
+trusted reading by more than max(3 C, 1 C per minute since then), and `noisy_signal_possible` when humidity
+or air temperature has a median step over 12 readings beyond its limit (10 %RH / 2 C at 5-minute samples,
+shrinking with the square root of the interval to a floor of 3 %RH / 0.4 C); see
+[SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md#stream-habit-checks-in-cores-feed-2026-11-02). The
+check text tells the operator to verify with a meter and, if the reading is right, to
 record a calibration (`POST /v1/sensors/calibrations`) for that probe: a calibration resets the
 reference (after 6 trusted readings at the new level the flag clears and the domain card can raise).
 **A flagged level stays "can't confirm" until a calibration**, however long that takes and however
@@ -146,8 +159,9 @@ the 11-packet checks again and trusted silently). Without `stream_baseline` the 
 not have the sticky check yet.
 
 The limits come from the real logs (`make real-replay`, whose "sticky" pass replays them the way Core's
-feed does): pH and EC are not checked for "stuck" because drain and tank probes sit on one value for
-hours as a matter of course (80 % of real readings are beyond 20 minutes); air temperature and humidity
+feed does): pH and EC have no fixed "stuck" limit because drain and tank probes sit on one value for
+hours as a matter of course (80 % of real readings are beyond 20 minutes), so they get the adaptive check
+that leaves such probes alone (0 pH and at most 0.02 % of EC readings flagged); air temperature and humidity
 limits keep real-log false flags under 0.15 % of readings; substrate temperature needs 6 h because real
 slab probes hold one 0.1 C value for up to 9 h; and a drift needs 3 times the probe's own spread because real
 drain pH and EC leave their 2 h median by 0.35 / 0.4 on 1 to 3 % of readings. Moisture has no persistent

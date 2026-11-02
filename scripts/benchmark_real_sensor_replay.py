@@ -25,6 +25,10 @@ The sticky replays are long (14 of them), so they run in parallel: about 20 minu
 Guards cover what must not regress: the legacy pass, the persistent stuck rates (both ways), the drift rate
 with the lapse, and fields that had no persistent flags at all. Exit 1 means a guard failed.
 
+The checks added so that pH/EC freezes, sudden air-temperature steps and noisy humidity/air probes are no longer
+missed (NEW_CHECKS below) each get a tighter guard: they may flag at most 0.15 % of the real readings of a stream,
+with and without the lapse.
+
 Usage: python scripts/benchmark_real_sensor_replay.py [--rules-module PATH]
 """
 from __future__ import annotations
@@ -156,6 +160,13 @@ QUIET = {"mendeley_aquaponic_pond_iot": ["water_temperature_c"],
          "4tu_agc2_cherry_tomato/TheAutomators": ["air_temperature_c"]}
 
 
+# Persistent checks that close gaps the fake-greenhouse game exposed. Each may flag at most 0.15 % of a real stream's
+# readings (the budget the older stuck limits were tuned to), whichever way the reference lapses.
+NEW_CHECKS = (("ph", "stuck_value"), ("ec_ms_cm", "stuck_value"), ("air_temperature_c", "sensor_drift_possible"),
+              ("air_temperature_c", "noisy_signal_possible"), ("humidity_pct", "noisy_signal_possible"))
+NEW_CHECK_LIMIT = 0.0015
+
+
 def replay_sticky(rules, gate, baseline, packets, context, fields, max_age_s=None):
     """Replay like Core's feed: judge each packet with the trusted reference, veto, feed the verdict back.
 
@@ -232,6 +243,11 @@ def main():
                 for label, variant in (("no lapse", attended), ("2 h lapse", lapsed)):
                     value = sticky_rate(variant, field, "stuck_value")
                     guard(f"{key} sticky {field} persistent stuck rate ({label})", value, "<= 0.005", value <= 0.005)
+            for field, label in NEW_CHECKS:
+                for variant_label, variant in (("no lapse", attended), ("2 h lapse", lapsed)):
+                    value = sticky_rate(variant, field, label)
+                    guard(f"{key} sticky {field} {label} rate ({variant_label})", value, f"<= {NEW_CHECK_LIMIT}",
+                          value <= NEW_CHECK_LIMIT)
             for field in QUIET.get(key, []):
                 for label, variant in (("no lapse", attended), ("2 h lapse", lapsed)):
                     flags = variant["persistent_flags"].get(f"{field}:stuck_value", 0)

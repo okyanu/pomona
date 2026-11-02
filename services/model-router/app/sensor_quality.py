@@ -24,7 +24,8 @@ FIELD_LABELS = {
 }
 
 # Exact stuck/flatline applies to fields that normally show small sample-to-sample
-# change. Quantized probes (pH/EC) are excluded so legitimate plateaus stay quiet.
+# change. Quantized probes (pH/EC) are excluded here so legitimate plateaus stay quiet;
+# apply_persistent_checks judges them against their own history instead (ADAPTIVE_STUCK_*).
 STUCK_FIELDS = (
     "air_temperature_c",
     "water_temperature_c",
@@ -64,15 +65,46 @@ STUCK_MIN_DURATION = {
 #   substrate temperature 6 h, water temperature 3 h: thermal mass. Real slab probes hold one 0.1 C value
 #                           for up to 9 h (3 h would flag 0.1-1.3 % of readings); a real pond holds one
 #                           0.0625 C step up to 6 h (3 h: 0.2 %), as STUCK_MIN_DURATION already says.
-# pH and EC are NOT checked: a drain or tank probe only changes when water flows past it, and real logs sit on
-# one value for hours as a matter of course (80 % of readings are beyond 20 min). Moisture is left out too: a
-# hydroponic zone sends a constant placeholder and slab moisture can sit still overnight.
+# pH and EC have no fixed limit: a drain or tank probe only changes when water flows past it, and real logs sit
+# on one value for hours as a matter of course (80 % of readings are beyond 20 min). They get the adaptive
+# check below instead. Moisture is left out: a hydroponic zone sends a constant placeholder and slab moisture
+# can sit still overnight.
 PERSISTENT_STUCK_LIMITS = {
     "air_temperature_c": timedelta(minutes=45),
     "humidity_pct": timedelta(minutes=30),
     "substrate_temperature_c": timedelta(hours=6),
     "water_temperature_c": STUCK_MIN_DURATION["water_temperature_c"],
 }
+# Adaptive stuck check for pH and EC (needs Core's `change_share` / `change_steps` / `longest_run_s`, which
+# describe how the probe behaved in its last 200 trusted readings before the current identical run). A probe
+# that normally moves every sample (the simulator's pH and EC, the Pomona cress logger's pH) and then freezes is
+# stuck; a drain probe that holds one value for hours is not, however long the hold. So the check applies only to
+# a stream that changed in at least 70 % of its trusted steps (and has 15 of them), and the freeze must be longer than 15 minutes
+# AND 4 times the longest hold that stream showed. Real logs (make real-replay, 5-minute samples): every
+# drain probe changes in 3 to 18 % of its steps and is never checked; the pond EC (77 %) rests up to an hour
+# and is the only stream near the line. Share of real readings flagged: under 0.02 %.
+ADAPTIVE_STUCK_FIELDS = ("ph", "ec_ms_cm")
+ADAPTIVE_STUCK_FLOOR = timedelta(minutes=15)
+ADAPTIVE_STUCK_RUN_FACTOR = 4.0
+ADAPTIVE_STUCK_MIN_STEPS = 15
+ADAPTIVE_STUCK_MIN_CHANGE_SHARE = 0.7
+# Sudden step in air temperature (needs Core's `last_value` / `last_at`: the newest trusted reading). Air cannot
+# move by more than max(3 C, 1 C per minute since that reading); a heat spike ramps about 0.5 C per minute and
+# stays well inside. A flagged reading is vetoed, so the reference stays put and a step is flagged until the
+# allowance has grown to cover it (4 minutes for 4 C), then the new level is accepted. Real logs (5-minute
+# samples): 0.054 % of readings in the worst compartment, which holds 17 C glitches, 0.002 % elsewhere.
+STEP_FIELDS = ("air_temperature_c",)
+STEP_MIN_C = 3.0
+STEP_MAX_RATE_C_PER_MIN = 1.0
+# Noise on a continuous probe: the median step over the last 12 readings. Real 5-minute logs set the limit
+# (the share of real windows at or above it stays under 0.15 %); a legitimate swing is spread over more
+# samples when they come faster, so the limit shrinks with the square root of the sample interval, down to a
+# floor several times a healthy probe's noise (simulator humidity 0.8 %RH, air 0.1 C). No real log is
+# sampled faster than 5 minutes, so the scaling is untested there.
+NOISE_STEP_LIMIT_5MIN = {"humidity_pct": 10.0, "air_temperature_c": 2.0}
+NOISE_STEP_FLOOR = {"humidity_pct": 3.0, "air_temperature_c": 0.4}
+NOISE_REFERENCE_INTERVAL_S = 300.0
+NOISE_WINDOW = 12
 # A pH/EC probe whose typical step between samples is as large as the drift threshold
 # is too noisy to judge drift (e.g. an unshielded PH-4502C swinging ~1.6 pH in 5 min;
 # commercial greenhouse drain sensors stay at <= 0.1).
@@ -296,14 +328,85 @@ def apply_persistent_checks(
             checks.append(f"verify {field} with a meter: {current:g} differs from the trusted level {median:g}; "
                           + CALIBRATION_HINT)
         limit = PERSISTENT_STUCK_LIMITS.get(field)
+        habit = ""
+        if limit is None and field in ADAPTIVE_STUCK_FIELDS:
+            limit = adaptive_stuck_limit(stats)
+            habit = f", though this probe normally changes on {numeric(stats.get('change_share')) or 0:.0%} of its readings"
         changed_at = parse_timestamp(stats.get("last_change_at"))
         previous = numeric(previous_packet.get(field))
         if (limit is not None and sampled is not None and changed_at is not None and previous is not None
                 and abs(current - previous) <= STUCK_EPSILON and sampled - changed_at > limit):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
-            checks.append(f"inspect {field}: the same value for {(sampled - changed_at) // timedelta(minutes=1)} minutes; "
-                          + CALIBRATION_HINT)
+            checks.append(f"inspect {field}: the same value for {(sampled - changed_at) // timedelta(minutes=1)} minutes"
+                          + habit + "; " + CALIBRATION_HINT)
+        if field in STEP_FIELDS:
+            apply_step_check(field, current, sampled, stats, labels, suspect_fields, checks)
+        if field in NOISE_STEP_LIMIT_5MIN:
+            apply_noise_check(field, sensor, history, labels, suspect_fields, checks)
+
+
+def adaptive_stuck_limit(stats: Dict[str, Any]) -> Optional[timedelta]:
+    """How long this stream may repeat one value before it counts as stuck, or None when it is not judged.
+
+    Only a stream that changes in nearly every trusted step is judged (a probe that really holds values for hours
+    has a low change share and is left alone); the limit is the larger of the floor and 4 times its longest hold.
+    """
+    share = numeric(stats.get("change_share"))
+    steps = numeric(stats.get("change_steps"))
+    longest = numeric(stats.get("longest_run_s"))
+    if (share is None or steps is None or longest is None or longest < 0
+            or steps < ADAPTIVE_STUCK_MIN_STEPS or share < ADAPTIVE_STUCK_MIN_CHANGE_SHARE):
+        return None
+    return max(ADAPTIVE_STUCK_FLOOR, timedelta(seconds=ADAPTIVE_STUCK_RUN_FACTOR * longest))
+
+
+def apply_step_check(
+    field: str,
+    current: float,
+    sampled: Optional[datetime],
+    stats: Dict[str, Any],
+    labels: List[str],
+    suspect_fields: List[str],
+    checks: List[str],
+) -> None:
+    """A step larger than the field can physically make since the newest trusted reading (Core's `last_value`)."""
+    last_value = numeric(stats.get("last_value"))
+    last_at = parse_timestamp(stats.get("last_at"))
+    if last_value is None or last_at is None or sampled is None:
+        return
+    minutes = max((sampled - last_at).total_seconds(), 0.0) / 60
+    allowed = max(STEP_MIN_C, STEP_MAX_RATE_C_PER_MIN * minutes)
+    if abs(current - last_value) > allowed:
+        add_unique(labels, "sensor_drift_possible")
+        add_unique(suspect_fields, field)
+        checks.append(f"compare {field} with a second thermometer: it moved {current - last_value:+.1f} C in "
+                      f"{minutes:.1f} minutes, faster than air can change; " + CALIBRATION_HINT)
+
+
+def apply_noise_check(
+    field: str,
+    sensor: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    labels: List[str],
+    suspect_fields: List[str],
+    checks: List[str],
+) -> None:
+    """Humidity or air temperature jumping between samples by more than a real reading does at this sample rate."""
+    points = _series_points(history, sensor, field)[-NOISE_WINDOW:]
+    if len(points) < NOISE_MIN_SAMPLES:
+        return
+    stamps = [parse_timestamp(packet.get("timestamp")) for _, packet in points]
+    gaps = sorted(g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:]) if a and b) if g > 0)
+    if not gaps:
+        return
+    limit = max(NOISE_STEP_FLOOR[field],
+                NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(_median(gaps) / NOISE_REFERENCE_INTERVAL_S))
+    values = [value for value, _ in points]
+    if _median([abs(b - a) for a, b in zip(values, values[1:])]) >= limit:
+        add_unique(labels, "noisy_signal_possible")
+        add_unique(suspect_fields, field)
+        checks.append(f"inspect {field}: readings jump between samples; check probe shielding, wiring and averaging")
 
 
 def derive_sensor_quality(
