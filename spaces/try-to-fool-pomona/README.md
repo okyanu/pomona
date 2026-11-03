@@ -7,7 +7,7 @@ sdk: docker
 app_port: 7860
 pinned: false
 license: apache-2.0
-short_description: Break a greenhouse sensor or hurt the plants; does Pomona catch it?
+short_description: Break a greenhouse sensor. Does Pomona catch it?
 tags:
 - agriculture
 - sensors
