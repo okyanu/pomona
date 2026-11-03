@@ -2,12 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Try to fool Pomona</title>
   <meta name="description" content="Break a greenhouse sensor or hurt the plants, fast-forward time, and see whether Pomona catches it.">
   <meta name="color-scheme" content="light dark">
-  <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="static/style.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <a class="skip" href="#play">Skip to the game</a>
@@ -16,14 +18,24 @@
       <h1>Try to fool Pomona</h1>
       <p class="lede">Break a sensor and Pomona should say it can't trust that sensor. Hurt the plants and it should raise
         the right alert. Fast-forward time and see.</p>
-      <p class="honest">This page runs Pomona's real deterministic safety chain on a pretend greenhouse. The small AI
-        models are advisory and are not used here. The physics is fake, not a crop model.</p>
+      <p class="honest">This page runs Pomona's real deterministic safety chain on a pretend greenhouse, as Python in
+        your browser (Pyodide). The small AI models are advisory and are not used here. The physics is fake, not a
+        crop model.</p>
     </div>
   </header>
 
   <div id="status" class="status wrap" role="status" aria-live="polite" hidden></div>
 
-  <main id="play" class="wrap">
+  <section id="loading" class="wrap" role="status" aria-live="polite">
+    <div class="load-box">
+      <h2 id="load-title">Loading Pomona's real code into your browser (about 9 MB, first visit only)</h2>
+      <progress id="load-progress" max="100" value="0" aria-labelledby="load-title"></progress>
+      <p id="load-text" class="muted small">Starting…</p>
+      <noscript><p>This page needs JavaScript: Pomona's Python runs in your browser.</p></noscript>
+    </div>
+  </section>
+
+  <main id="play" class="wrap" hidden>
     <section class="clock-bar" aria-label="Simulated time">
       <div class="clock">
         <span class="clock-label">Greenhouse clock</span>
@@ -113,7 +125,7 @@
         <button type="button" class="needs-idle" id="copy-link">Copy replay link</button>
         <button type="button" class="needs-idle" id="download">Download this scenario</button>
       </div>
-      <p class="small muted" id="share-note">The replay link holds the seed and your steps (nothing is stored on the
+      <p class="small muted" id="share-note">The replay link holds the seed and your steps (nothing is sent to any
         server); anyone who opens it sees the same run and the same verdicts.</p>
       <input id="link-field" class="link-field" type="text" readonly hidden aria-label="Replay link">
       <p class="small">Run the scenario on your own stack: save the file, then
@@ -124,7 +136,7 @@
 
   <footer class="foot">
     <div class="wrap">
-      <p id="build-line">Runs Pomona's real code, not a copy.</p>
+      <p id="build-line">Runs Pomona's real code in your browser with Pyodide, not a copy.</p>
       <p class="small">
         <a href="https://github.com/okyanu/pomona">GitHub</a> ·
         <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9">Models and datasets</a> ·
@@ -133,9 +145,9 @@
         <a href="https://huggingface.co/spaces/Okyanus/pomona-ph-calibration-checker">pH calibration checker</a>
       </p>
       <p class="small muted">Pomona only advises. It never controls irrigation, dosing or any other hardware. Nothing
-        you do here is stored on the server.</p>
+        you do here is sent to any server.</p>
     </div>
   </footer>
-  <script src="static/app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

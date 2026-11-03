@@ -226,3 +226,15 @@ table.verdicts { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-
 }
 
 [hidden] { display: none !important; }
+
+/* first-load screen and the "working" status */
+.load-box { margin-top: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.load-box h2 { margin: 0 0 6px; font-size: 1.1rem; }
+#loading.failed h2 { color: var(--alarm); }
+#loading.failed progress { display: none; }
+.status.working::before {
+  content: ""; display: inline-block; width: 0.9em; height: 0.9em; margin-right: 8px; vertical-align: -0.1em;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .status.working::before { animation: none; } }

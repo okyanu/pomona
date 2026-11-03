@@ -1,4 +1,7 @@
-"""Space tests: run with the Space's own Python 3.11 venv (`make fool-space-check`), after vendor/ is built."""
+"""Space tests: run with the Space's own Python 3.11 venv (`make fool-space-check`), after vendor/ is built.
+
+They call `engine_api` (the code the browser's worker runs) directly, in plain CPython.
+"""
 
 import os
 import sys
@@ -15,28 +18,24 @@ if os.environ.get("FOOL_SPACE_ROOT"):
 if not (SPACE / "vendor" / "BUILD_INFO.json").is_file():
     raise RuntimeError("vendor/ is missing: run scripts/build_fool_space.sh (or make fool-space-check)")
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-import game  # noqa: E402
-import server  # noqa: E402
+import engine_api  # noqa: E402
 
 
 @pytest.fixture()
-def make_client():
-    """A fresh app (own session cache and rate limits) per call."""
-    clients = []
+def make_engine():
+    """A fresh engine (its own live session) per call: what a freshly opened page has."""
+    engines = []
 
-    def build(limits=None, clock=None):
-        kwargs = {"clock": clock} if clock else {}
-        client = TestClient(server.create_app(limits, **kwargs))
-        clients.append(client)
-        return client
+    def build():
+        engine = engine_api.Engine()
+        engines.append(engine)
+        return engine
 
     yield build
-    for client in clients:
-        client.close()
+    for engine in engines:
+        engine.close()
 
 
 @pytest.fixture()
-def client(make_client):
-    return make_client()
+def engine(make_engine):
+    return make_engine()

@@ -1,5 +1,6 @@
 """The engine path: no network, the vendored files are the repo's, and a session agrees with the offline scorer."""
 
+import asyncio
 import json
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import pytest
 from helpers import A, B, CAL, SPACE, START, STOP
 
 import fake_greenhouse as fg
+import engine_api
 import game
 import score_fake_greenhouse as score
 
@@ -226,3 +228,48 @@ def test_a_heat_spike_stays_a_real_event_and_raises_the_heat_card_not_a_sensor_l
         assert not any(e["rule_id"] == "sensor_check" for e in session.alert_events)  # no check-the-sensor card either
     finally:
         session.close()
+
+
+# --- The browser build: no asyncio event loop -------------------------------------------------------------------
+
+def test_the_sync_loop_gives_the_same_answers_as_a_real_asyncio_loop(monkeypatch):
+    """Pyodide runs the engine under engine_api.SyncLoop; it must change nothing but the loop that drives the coroutines."""
+    def run(loop):
+        monkeypatch.setattr(game, "LOOP", loop)
+        session = game.Session.start_new(11)
+        try:
+            session.command({"op": "start", "name": "stuck", "zone": B, "field": "ph"})
+            session.command({"op": "start", "name": "heat_spike", "zone": A})
+            session.advance(130)
+            session.command({"op": "calibrate", "zone": B, "field": "ph"})
+            session.advance(60)
+            return json.dumps([session.view(), session.scenario(), sorted(session.frame_info.items()), session.alert_events],
+                              sort_keys=True, default=str)
+        finally:
+            session.close()
+
+    real_loop = asyncio.new_event_loop()
+    try:
+        expected = run(real_loop)
+    finally:
+        real_loop.close()
+    assert run(engine_api.SyncLoop()) == expected
+    engine_api.install_sync_loop()
+    assert isinstance(game.LOOP, engine_api.SyncLoop)  # monkeypatch puts the real loop back after the test
+
+
+def test_the_sync_loop_fails_loudly_when_a_coroutine_really_waits():
+    class Pending:  # what an unfinished future looks like to the coroutine driving it: it yields once
+        def __await__(self):
+            yield
+
+    async def waits():
+        await Pending()
+
+    with pytest.raises(RuntimeError, match="suspended"):
+        engine_api.SyncLoop().run_until_complete(waits())
+
+    async def returns():
+        return 7
+
+    assert engine_api.SyncLoop().run_until_complete(returns()) == 7

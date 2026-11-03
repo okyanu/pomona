@@ -1,6 +1,7 @@
-/* Try to fool Pomona: the page. The server runs Pomona's real code; this file only shows it.
- * The browser keeps the scenario (seed + commands + ticks); every request sends it, so a sleeping or restarted Space
- * loses nothing. Replay links carry the same scenario in the URL hash. */
+/* Try to fool Pomona: the page. Pomona's real Python runs in a Web Worker (Pyodide, see worker.js); this file only
+ * shows it. Nothing is sent to any server. The page keeps the scenario (seed + commands + ticks) and sends it to the
+ * worker with every request, so a reload loses nothing: the worker replays it. Replay links carry the same scenario in
+ * the URL hash. */
 (() => {
   "use strict";
 
@@ -53,53 +54,77 @@
     return (key === "ph" || key === "ec_ms_cm") ? value.toFixed(2) : value.toFixed(1);
   }
 
-  // ---- talking to the server ---------------------------------------------------------------------
+  // ---- talking to the worker ---------------------------------------------------------------------
 
-  let wakeTimer = null;
-  function showStatus(message, isError) {
+  let workingTimer = null;
+  function showStatus(message, isError, working) {
     const box = $("#status");
     if (!message) { box.hidden = true; return; }
     box.textContent = message;
-    box.className = "status wrap" + (isError ? " error" : "");
+    box.className = "status wrap" + (isError ? " error" : "") + (working ? " working" : "");
     box.hidden = false;
   }
 
-  async function request(path, body) {
-    // A free Space sleeps when nobody visits; the proxy answers 5xx or drops the connection while it wakes.
-    const options = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
-    let lastError = null;
-    for (let attempt = 0; attempt < 12; attempt++) {
-      try {
-        const response = await fetch(path, options);
-        if (response.status === 503) {
-          showStatus("The Space is busy right now. Trying again in a moment.");
-          throw new Error("busy");
-        }
-        if (response.status === 502 || response.status === 504) throw new Error("waking");
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const err = new Error(data.error || `The server said ${response.status}.`);
-          err.final = true;
-          throw err;
-        }
-        return data;
-      } catch (error) {
-        if (error.final) throw error;
-        lastError = error;
-        if (error.message !== "busy") showStatus("Waking up the Space. A free Space sleeps when nobody visits; this takes under a minute.");
-        await new Promise((resolve) => setTimeout(resolve, 2500 + attempt * 500));
-      }
+  const worker = new Worker("worker.js", { type: "module" });
+  const pending = new Map();
+  let nextId = 1;
+
+  function showLoading(fraction, text) {
+    $("#load-progress").value = Math.round(fraction * 100);
+    $("#load-text").textContent = text;
+  }
+  function loadFailed(message) {
+    $("#loading").classList.add("failed");
+    $("#load-title").textContent = "Pomona's engine could not start in this browser";
+    $("#load-text").textContent = message || "The page needs a current browser with WebAssembly and module workers.";
+  }
+
+  worker.onmessage = ({ data }) => {
+    if (data.type === "progress" && data.phase === "load") return showLoading(data.fraction, data.text);
+    if (data.type === "ready") return;
+    if (data.type === "fatal") return loadFailed(data.error);
+    const entry = pending.get(data.id);
+    if (!entry) return;
+    if (data.type === "progress") return entry.onProgress && entry.onProgress(data);
+    pending.delete(data.id);
+    if (data.error) {
+      const err = new Error(data.error);
+      err.refused = Boolean(data.refused);
+      entry.reject(err);
+    } else {
+      entry.resolve(data.result);
     }
-    throw lastError || new Error("The server did not answer.");
+  };
+  worker.onerror = (event) => {
+    event.preventDefault();
+    loadFailed("The worker could not be loaded" + (event.message ? ": " + event.message : "."));
+    for (const entry of pending.values()) entry.reject(new Error("Pomona's engine is not running."));
+    pending.clear();
+  };
+
+  function request(type, body, onProgress) {
+    return new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject, onProgress });
+      worker.postMessage({ id, type, body });
+    });
   }
 
   async function act(payload) {
     if (state.busy) return;
     setBusy(true);
-    clearTimeout(wakeTimer);
-    wakeTimer = setTimeout(() => showStatus("Waking up the Space. A free Space sleeps when nobody visits; this takes under a minute."), 3000);
+    clearTimeout(workingTimer);
+    const ticks = payload.advance || 0;
+    // A long fast-forward takes a moment: say so once it is noticeable. The page stays responsive (the worker computes).
+    workingTimer = setTimeout(() => showStatus(ticks >= 120
+      ? `Simulating ${ticks / 120} greenhouse hours, one reading every 30 seconds. This takes a few seconds.`
+      : "Simulating…", false, true), 400);
+    const onProgress = (p) => {
+      clearTimeout(workingTimer);
+      showStatus(`Rebuilding your run: ${Math.min(100, Math.floor((p.tick / Math.max(p.total, 1)) * 100))}%`, false, true);
+    };
     try {
-      const result = await request("/api/act", payload);
+      const result = await request("act", payload, onProgress);
       state.scenario = result.scenario;
       state.view = result.view;
       persist();
@@ -108,7 +133,7 @@
     } catch (error) {
       showStatus(error.message || "Something went wrong.", true);
     } finally {
-      clearTimeout(wakeTimer);
+      clearTimeout(workingTimer);
       setBusy(false);
     }
   }
@@ -462,9 +487,10 @@
       const link = el("a", null, b.short_commit);
       link.href = `https://github.com/okyanu/pomona/commit/${b.commit}`;
       link.target = "_blank"; link.rel = "noopener";
-      fill(line, "This page runs Pomona's real code (commit ", link, b.dirty ? ", plus local changes" : "", "), not a copy.");
+      fill(line, "This page runs Pomona's real code (commit ", link, b.dirty ? ", plus local changes" : "",
+        ") in your browser with Pyodide, not a copy. Nothing is sent to any server.");
     } else {
-      line.textContent = "This page runs Pomona's real code, not a copy.";
+      line.textContent = "This page runs Pomona's real code in your browser with Pyodide, not a copy. Nothing is sent to any server.";
     }
   }
 
@@ -512,11 +538,13 @@
   async function boot() {
     wire();
     try {
-      state.info = await request("/api/info");
+      state.info = await request("info");
     } catch (error) {
-      showStatus(error.message || "The server did not answer.", true);
+      loadFailed(error.message);
       return;
     }
+    $("#loading").hidden = true;
+    $("#play").hidden = false;
     renderVerdictTable();
     renderFooter();
     let scenario = null;
@@ -530,7 +558,7 @@
     state.ui.zone = state.info.zones[0].id;
     state.scenario = scenario;
     await act(scenario ? { scenario } : {});
-    if (scenario && !state.view) {  // a saved scenario the server refused: begin again
+    if (scenario && !state.view) {  // a saved scenario the engine refused: begin again
       safe(() => localStorage.removeItem(STORE_KEY));
       state.scenario = null;
       await act({});

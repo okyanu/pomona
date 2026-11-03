@@ -2,23 +2,31 @@
 
 from pathlib import Path
 
+import pytest
+
 SPACE = Path(__file__).resolve().parents[1]
 
 
-def act(client, **body):
-    response = client.post("/api/act", json=body)
-    assert response.status_code == 200, response.text
-    return response.json()
+def act(engine, **body):
+    return engine.act(body)
 
 
-def play(client, steps, seed=11):
+def refused(engine, **body):
+    """The engine refuses this request; returns the visitor-safe message."""
+    with pytest.raises(ValueError) as error:
+        engine.act(body)
+    assert str(error.value)
+    return str(error.value)
+
+
+def play(engine, steps, seed=11):
     """Drive a session like the page does. steps: ('cmd', {command}) runs it plus one tick, ('ff', ticks) fast-forwards."""
-    result = act(client, seed=seed)
+    result = act(engine, seed=seed)
     for kind, arg in steps:
         if kind == "cmd":
-            result = act(client, scenario=result["scenario"], commands=[arg], advance=1)
+            result = act(engine, scenario=result["scenario"], commands=[arg], advance=1)
         else:
-            result = act(client, scenario=result["scenario"], advance=arg)
+            result = act(engine, scenario=result["scenario"], advance=arg)
     return result
 
 

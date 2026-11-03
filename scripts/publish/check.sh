@@ -144,9 +144,18 @@ if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
     echo ""
     echo "==> Checking the Try to fool Pomona Space..."
     if make fool-space-check >/dev/null 2>&1; then
-      ok "Space vendor/ matches the repo and its tests passed"
+      ok "Space vendor/ and pinned Pyodide files match, and its tests passed"
     else
       fail "Try to fool Pomona Space check failed — run: make fool-space-check"
+    fi
+    if command -v node >/dev/null 2>&1; then
+      if make fool-space-pyodide-check >/dev/null 2>&1; then
+        ok "Try to fool Pomona engine in Pyodide is byte-identical to CPython"
+      else
+        fail "Try to fool Pomona Pyodide parity check failed — run: make fool-space-pyodide-check"
+      fi
+    else
+      warn "node not found — skipped make fool-space-pyodide-check (Pyodide vs CPython parity)"
     fi
   else
     warn "Try to fool Pomona Space venv missing — run: make fool-space-venv && make fool-space-check"
