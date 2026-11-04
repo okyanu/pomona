@@ -5,7 +5,9 @@ a verdict, the automation-engine turns labels into cards), as one importable cla
 
   1. Core: reject a dead clock (sample time before Core's `min_sample_time`).
   2. Core: build the sticky trusted baseline of the stream (core/app/trusted_baseline.py, loaded by path)
-     from the stream's earlier readings, less what the pipeline vetoed, and from the calibrations.
+     from the stream's earlier readings, less what the pipeline vetoed, and from the calibrations. The engine
+     keeps it up to date reading by reading (`StreamBaseline`, byte-identical to Core's `stream_baseline`), so a
+     late reading costs no more than the first.
   3. Model-router: the real `app.pipeline.evaluate_pipeline` in `rules_only` mode, with the stream's last
      11 packets as history. No network, no model weights.
   4. Automation-engine: the real `AlertMonitor` (alerts.py, in-memory SQLite) with the real rules.yaml
@@ -194,7 +196,7 @@ class InProcessPomona:
         self._loop = loop if loop is not None else asyncio.new_event_loop()
         self._owns_loop = loop is None
         self._history: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}  # per zone, the last 11 packets
-        self._streams: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}  # per stream, for the baseline
+        self._streams: Dict[Tuple[str, str, str], Any] = {}  # per stream, its StreamBaseline (Core's trusted reference)
         # (farm_id or None, zone_id, device_id or None, measurement, performed_at); None matches any
         self._calibrations: List[Tuple[Optional[str], str, Optional[str], str, str]] = []
 
@@ -244,11 +246,13 @@ class InProcessPomona:
                 "weather": sensor.get("weather"), "zone_area_m2": sensor.get("zone_area_m2"),
                 "crop_kc": sensor.get("crop_kc"), "npk_target": sensor.get("npk_target")}
         stream = (farm_id, zone_id, device_id)
-        prior_stream = self._streams.setdefault(stream, [])
         baseline = self._baseline
-        reference = baseline.stream_baseline(
-            prior_stream[-baseline.DEFAULT_SCAN_LIMIT:], self._stream_calibrations(stream), sample,
-            baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MIN_N, baseline.DEFAULT_MAX_AGE_S or None)
+        tracked = self._streams.get(stream)
+        if tracked is None:
+            tracked = self._streams[stream] = baseline.StreamBaseline(
+                baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MIN_N, baseline.DEFAULT_MAX_AGE_S or None,
+                baseline.DEFAULT_SCAN_LIMIT)
+        reference = tracked.baseline(self._stream_calibrations(stream), sample)
         pipeline = self._pipeline
         with PIPELINE_LOCK:
             original_now = pipeline._now
@@ -262,8 +266,7 @@ class InProcessPomona:
         history = self._history.setdefault(zone_key, [])
         history.append(sensor)
         del history[:-HISTORY_PACKETS]
-        prior_stream.append({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})
-        del prior_stream[:-baseline.DEFAULT_SCAN_LIMIT]
+        tracked.add({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})
         labels = pipeline_risk_labels(result)
         verdict = self.monitor.observe(farm_id, zone_id, device_id, sample, labels)
         out = {"accepted": True, "rejection": None, "farm_id": farm_id, "zone_id": zone_id, "device_id": device_id,

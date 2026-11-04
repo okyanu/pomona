@@ -83,6 +83,45 @@ def test_stepwise_observe_on_demo_gives_the_scorer_path_events(demo_rows):
                 "card_labels": got["card_labels"], "sensor_check_labels": got["sensor_check_labels"]} == info
 
 
+class PlainBaseline:
+    """The reference the engine's per-stream StreamBaseline must equal: stream_baseline over the stored readings."""
+
+    def __init__(self, window_s, min_n, max_age_s, scan_limit):
+        self.args, self.scan_limit, self.seen = (window_s, min_n, max_age_s), scan_limit, []
+
+    def add(self, packet):
+        self.seen.append(packet)
+
+    def baseline(self, calibrations, now):
+        base = engine.load_module("pomona_trusted_baseline", engine.CORE_APP / "trusted_baseline.py")
+        return base.stream_baseline(self.seen[-self.scan_limit:], calibrations, now, *self.args)
+
+
+def test_incremental_baseline_gives_the_engine_the_same_results_as_the_plain_stream_baseline(demo_rows):
+    """Every pipeline result (labels, trust, vetoes, the full verdict) is identical whichever computes the reference."""
+    def run(plain):
+        with engine.InProcessPomona(score.parse_rules((score.AUTOMATION_APP / "rules.yaml").read_text()),
+                                    score.alert_defaults()) as pomona:
+            if plain:
+                pomona._baseline = type("Plain", (), {
+                    "StreamBaseline": PlainBaseline, "DEFAULT_WINDOW_S": pomona._baseline.DEFAULT_WINDOW_S,
+                    "DEFAULT_MIN_N": pomona._baseline.DEFAULT_MIN_N, "DEFAULT_MAX_AGE_S": pomona._baseline.DEFAULT_MAX_AGE_S,
+                    "DEFAULT_SCAN_LIMIT": pomona._baseline.DEFAULT_SCAN_LIMIT})
+            results = []
+            for row in sorted(demo_rows, key=lambda r: (r["tick"], r["zone_id"])):
+                for item in row.get("calibrations", []):
+                    pomona.calibrate(row["zone_id"], item["field"], item["at"])
+                if row["published"]:
+                    got = pomona.observe(row["sent"], include_result=True)
+                    got.get("pipeline", {}).pop("pipeline_id", None)  # a fresh random id per call
+                    results.append(got)
+            return json.dumps(results, sort_keys=True, default=str)
+
+    fast, plain = run(plain=False), run(plain=True)
+    same = fast == plain  # not `assert fast == plain`: pytest would diff two huge strings on a failure
+    assert same and len(fast) > 100_000
+
+
 def test_observe_reports_dead_clock_as_core_rejection_without_a_trace(demo_rows):
     sent = next(r["sent"] for r in demo_rows if r["published"] and r["sent"])
     with engine.InProcessPomona(score.parse_rules((score.AUTOMATION_APP / "rules.yaml").read_text()),

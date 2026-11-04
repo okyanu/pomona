@@ -130,6 +130,11 @@ the optional `last_value` / `last_at` and, for pH and EC, `change_share` / `chan
   that has been broken for six hours is therefore still judged against the readings from before it broke.
   Core records each reading's verdict in the `event_trust` table and builds the reference with
   `services/core/app/trusted_baseline.py` (stdlib only, shared with the fake-greenhouse scorer).
+  `stream_baseline` there walks the stored readings back from the newest (one pass for all fields, ending
+  as soon as a field's run, window and norm are settled); the in-process engine behind the fake-greenhouse
+  scorer and the "Try to fool Pomona" Space keeps the same answer up to date one reading at a time with
+  `StreamBaseline` instead, so a late reading costs about as much as the first one. `stream_baseline` is the
+  reference: the tests hold the two byte for byte equal, scan-limit overflow and out-of-order arrival included.
 - `spread`: the window's 10th-to-90th percentile range, how far the probe normally wanders.
 - `last_change_at`: when the current run of identical values began, over all readings.
 - `last_value` / `last_at`: the newest trusted reading (a step is judged against it).

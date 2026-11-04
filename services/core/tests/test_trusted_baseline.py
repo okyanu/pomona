@@ -1,4 +1,8 @@
 import ast
+import json
+import math
+import random
+import statistics
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -33,7 +37,7 @@ def test_module_is_stdlib_only_so_the_scorer_can_load_it_by_path():
     tree = ast.parse(Path(tb.__file__).read_text())
     imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     imported |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert imported <= {"__future__", "math", "statistics", "datetime", "typing"}
+    assert imported <= {"__future__", "bisect", "collections", "math", "datetime", "typing"}
 
 
 def test_median_ignores_vetoed_readings_and_needs_min_n():
@@ -99,6 +103,226 @@ def test_stream_baseline_per_field_with_vetoes_aliases_and_calibrations():
     assert calibrated["ec_ms_cm"]["n"] == 6 and calibrated["ph"]["n"] == 10  # only that probe was reset
     moisture = tb.stream_baseline(prior, [{"measurement": "soil_moisture_pct", "performed_at": T0.isoformat()}], now, 7200, 6)
     assert "soil_moisture_pct" not in moisture and "substrate_moisture_pct" not in moisture  # 5 trusted, 6 needed
+
+
+# --- Speed-ups must not change a byte: stream_baseline and StreamBaseline against the plain algorithm -------
+
+def reference_stream_baseline(prior, calibrations, now, window_s=tb.DEFAULT_WINDOW_S, min_n=tb.DEFAULT_MIN_N,
+                              max_age_s=None):
+    """The definition, one field at a time with a full pass and no shortcut (what `stream_baseline` did before it
+    was made fast): the oracle both fast paths are held to."""
+    limit = tb.parse_time(now)
+    latest = {}
+    for item in calibrations:
+        stamp = tb.parse_time(item.get("performed_at"))
+        if stamp is None or (limit is not None and stamp > limit):
+            continue
+        for field in tb.MEASUREMENT_FIELDS.get(item.get("measurement"), ()):
+            latest[field] = max(latest.get(field, stamp), stamp)
+    out = {}
+    for field in tb.BASELINE_FIELDS:
+        alias = tb.ALIASES.get(field)
+        rows = []  # (time, value, vetoed) newest first
+        for packet in reversed(prior):
+            stamp, value = tb.parse_time(packet.get("timestamp")), tb._number(packet.get(field))
+            if stamp is None or value is None or (limit is not None and stamp > limit):
+                continue
+            vetoed = packet.get("vetoed_fields") or ()
+            rows.append((stamp, value, field in vetoed or alias in vetoed))
+        if not rows:
+            continue
+        start_at = latest.get(field)
+        newest, changed_at = rows[0][1], rows[0][0]
+        for stamp, value, _ in rows[1:]:
+            if abs(value - newest) > tb.IDENTICAL_EPSILON:
+                break
+            changed_at = stamp
+        values, anchor = [], None
+        for stamp, value, vetoed in rows:
+            if start_at is not None and stamp < start_at:
+                break
+            if vetoed:
+                continue
+            if anchor is None:
+                anchor = stamp
+            elif (anchor - stamp).total_seconds() > window_s:
+                break
+            values.append(value)
+        before = []
+        if field in tb.NORM_FIELDS:
+            index = next((i for i, row in enumerate(rows) if abs(row[1] - newest) > tb.IDENTICAL_EPSILON), len(rows))
+            for stamp, value, vetoed in rows[index:]:
+                if start_at is not None and stamp < start_at:
+                    break
+                if not vetoed:
+                    before.append((stamp, value))
+                    if len(before) > tb.NORM_STEPS:
+                        break
+        if start_at is not None:
+            changed_at = max(changed_at, start_at)
+        if len(values) < min_n or (max_age_s is not None and limit is not None and (limit - anchor).total_seconds() > max_age_s):
+            continue
+        ordered = sorted(values)
+        spread = ordered[int(0.9 * (len(ordered) - 1))] - ordered[int(0.1 * (len(ordered) - 1))]
+        out[field] = {"median": statistics.median(values), "n": len(values), "window_s": window_s,
+                      "spread": round(spread, 6), "last_change_at": changed_at.isoformat(), "last_value": values[0],
+                      "last_at": anchor.isoformat(), **tb._norm(before)}
+    return out
+
+
+def same_bytes(left, right):
+    return json.dumps(left) == json.dumps(right)  # key order and float signs (0.0 vs -0.0) count
+
+
+def random_stream(rng, count, fields=tb.BASELINE_FIELDS, step_s=30):
+    """Readings oldest first: levels that wander, hold, step and freeze, rounded values around zero, junk values,
+    unreadable and ISO-string times, vetoes in blocks (some by the moisture alias), absent fields, gaps."""
+    present = [f for f in fields if rng.random() < 0.8]
+    mode = {f: rng.choice(["walk", "steppy", "noisy", "zero"]) for f in present}
+    level = {f: rng.uniform(1, 30) for f in present}
+    frozen, hold, veto_left = {}, {f: 0 for f in present}, {}
+    stamp, out = T0, []
+    for _ in range(count):
+        stamp += timedelta(seconds=step_s * (rng.randint(2, 300) if rng.random() < 0.01 else 1))
+        packet = {"timestamp": stamp}
+        if rng.random() < 0.3:
+            packet["timestamp"] = stamp.isoformat().replace("+00:00", "Z")
+        elif rng.random() < 0.01:
+            packet["timestamp"] = rng.choice([None, "garbage", 7])
+        vetoed = []
+        for f in present:
+            if rng.random() < 0.01:
+                packet[f] = rng.choice([None, float("nan"), float("inf"), True, "7"])
+            else:
+                if f not in frozen and rng.random() < 0.004:
+                    frozen[f] = rng.randint(3, 400)
+                if mode[f] == "zero":
+                    packet[f] = round(rng.gauss(0, 0.07), 1)
+                else:
+                    if mode[f] == "walk":
+                        level[f] += rng.gauss(0, 0.05)
+                    elif mode[f] == "noisy":
+                        level[f] += rng.gauss(0, 1.0)
+                    elif hold[f] <= 0:
+                        level[f] += rng.choice([-1, 1]) * rng.uniform(0.2, 2)
+                        hold[f] = rng.randint(1, 60)
+                    hold[f] -= 1
+                    packet[f] = round(level[f], rng.choice([1, 2, 3]))
+                if f in frozen:
+                    packet[f] = round(level[f], 2)
+                    frozen[f] -= 1
+                    if frozen[f] <= 0:
+                        del frozen[f]
+            if rng.random() < 0.003:
+                veto_left[f] = rng.randint(3, 300)
+            if veto_left.get(f, 0) > 0 or rng.random() < 0.01:
+                vetoed.append("substrate_moisture_pct" if f == "soil_moisture_pct" and rng.random() < 0.5 else f)
+            veto_left[f] = veto_left.get(f, 0) - 1
+        if vetoed or rng.random() < 0.5:
+            packet["vetoed_fields"] = vetoed if rng.random() < 0.7 else tuple(vetoed)
+        out.append(packet)
+    return out
+
+
+def sample_time(packet):
+    value = packet["timestamp"]
+    return value if isinstance(value, datetime) else tb.parse_time(value)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_stream_baseline_is_byte_identical_to_the_plain_algorithm(seed):
+    rng = random.Random(seed)
+    packets = random_stream(rng, rng.choice([0, 4, 60, 400, 900]))
+    window_s, min_n = rng.choice([(tb.DEFAULT_WINDOW_S, tb.DEFAULT_MIN_N), (600, 3), (6 * 3600, 30)])
+    max_age_s = rng.choice([None, None, 0, 900])
+    calibrations = [{"measurement": rng.choice([*tb.MEASUREMENT_FIELDS, "other"]),
+                     "performed_at": (T0 + timedelta(seconds=rng.randint(0, 30 * 900))).isoformat()}
+                    for _ in range(rng.choice([0, 1, 3]))]
+    for cut in sorted({len(packets), *(rng.randint(0, len(packets)) for _ in range(5))}):
+        prior = packets[:cut]
+        stamp = next((t for t in map(sample_time, reversed(prior)) if t is not None), T0)
+        for now in (stamp + timedelta(seconds=30), stamp.isoformat(), stamp - timedelta(seconds=700)):
+            assert same_bytes(tb.stream_baseline(prior, calibrations, now, window_s, min_n, max_age_s),
+                              reference_stream_baseline(prior, calibrations, now, window_s, min_n, max_age_s))
+
+
+def grow_and_compare(packets, calibrations_at, scan_limit, every, window_s=tb.DEFAULT_WINDOW_S,
+                     min_n=tb.DEFAULT_MIN_N, max_age_s=None, now_of=None):
+    """Feed `packets` to a StreamBaseline one by one; every `every` readings its answer must equal
+    `stream_baseline` over the last `scan_limit` readings added. Returns how many answers had stats."""
+    tracker = tb.StreamBaseline(window_s, min_n, max_age_s, scan_limit)
+    seen, answered = [], 0
+    for index, packet in enumerate(packets):
+        if index % every == 0 or index == len(packets) - 1:
+            now = now_of(index, packet) if now_of else (sample_time(packet) or T0)
+            calibrations = calibrations_at(index)
+            expected = tb.stream_baseline(seen[-scan_limit:], calibrations, now, window_s, min_n, max_age_s)
+            assert same_bytes(tracker.baseline(calibrations, now), expected), f"reading {index}"
+            assert same_bytes(expected, reference_stream_baseline(seen[-scan_limit:], calibrations, now, window_s,
+                                                                  min_n, max_age_s))
+            answered += bool(expected)
+        seen.append(packet)
+        tracker.add(packet)
+    return answered
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_incremental_baseline_equals_stream_baseline_beyond_a_small_scan_limit(seed):
+    rng = random.Random(1000 + seed)
+    packets = random_stream(rng, 1500)
+    calibrations = [{"measurement": rng.choice(list(tb.MEASUREMENT_FIELDS)),
+                     "performed_at": (T0 + timedelta(seconds=rng.randint(0, 30 * 1500))).isoformat()} for _ in range(4)]
+    # calibrations become known over time, as Core stores them (only the ones at or before the reading apply anyway)
+    known = lambda index: [c for c in calibrations if tb.parse_time(c["performed_at"]) <= T0 + timedelta(seconds=30 * index)]
+    for scan_limit in (1, 150, 700):
+        assert grow_and_compare(packets, known, scan_limit, every=37, max_age_s=rng.choice([None, 1200])) > 0 or scan_limit == 1
+
+
+def test_incremental_baseline_equals_stream_baseline_over_the_real_scan_limit():
+    # 5600 readings of a hydroponic-like stream (no moisture, no substrate temperature): the default 5000 overflows.
+    rng = random.Random(7)
+    packets = random_stream(rng, 5600, fields=("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct"))
+    calibrations = [{"measurement": "ec_ms_cm", "performed_at": (T0 + timedelta(seconds=30 * 5200)).isoformat()}]
+    known = lambda index: calibrations if index >= 5200 else []
+    assert grow_and_compare(packets, known, tb.DEFAULT_SCAN_LIMIT, every=400) > 0
+
+
+def test_a_long_identical_run_and_a_field_that_vanishes_fall_out_with_the_scan_limit():
+    packets = []
+    for i in range(130):
+        packet = {"timestamp": T0 + timedelta(seconds=30 * i), "ph": 6.0, "humidity_pct": 60.0 + (i % 3) * 0.1}
+        if i < 20:
+            packet["ec_ms_cm"] = 2.0 + 0.1 * (i % 2)  # only the first 20 readings carry EC
+        packets.append(packet)
+    tracker = tb.StreamBaseline(7200, 6, None, 100)
+    seen = []
+    for packet in packets:
+        seen.append(packet)
+        tracker.add(packet)
+    now = T0 + timedelta(hours=2)
+    expected = tb.stream_baseline(seen[-100:], [], now, 7200, 6, None)
+    assert "ec_ms_cm" not in expected  # beyond the scan limit
+    assert expected["ph"]["last_change_at"] == (T0 + timedelta(seconds=30 * 30)).isoformat()  # the run is cut at 100
+    assert same_bytes(tracker.baseline([], now), expected)
+
+
+def test_incremental_baseline_ties_keep_the_sign_of_zero_like_sorted_does():
+    # -0.0 == 0.0, so which one lands in the middle depends on the tie order; sorted() keeps the newest first.
+    values = [0.0, -0.0, 0.1, -0.1, -0.0, 0.0, 0.0, -0.0, 0.1, -0.1, -0.0, 0.0] * 3
+    packets = [{"timestamp": T0 + timedelta(seconds=30 * i), "air_temperature_c": v} for i, v in enumerate(values)]
+    assert grow_and_compare(packets, lambda index: [], 20, every=1, window_s=300, min_n=3) > 0
+
+
+def test_out_of_order_arrival_and_early_queries_fall_back_to_the_plain_walk():
+    rng = random.Random(3)
+    packets = random_stream(rng, 600)
+    for i in range(0, 590, 17):  # swap neighbours: sample times go back
+        packets[i], packets[i + 3] = packets[i + 3], packets[i]
+    assert grow_and_compare(packets, lambda index: [], 5000, every=11) > 0
+    ordered = random_stream(rng, 300)
+    early = lambda index, packet: (sample_time(packet) or T0) - timedelta(seconds=300)  # `now` before readings already added
+    assert grow_and_compare(ordered, lambda index: [], 5000, every=13, now_of=early) >= 0
+    assert grow_and_compare(ordered, lambda index: [], 5000, every=13, min_n=0, window_s=0) >= 0  # unsupported settings
 
 
 # --- Core: the outcome feed builds the reference from stored readings and the trust it recorded ----------
