@@ -181,3 +181,7 @@ spaces/try-to-fool-pomona/pyodide/
 spaces/try-to-fool-pomona/wheels/
 spaces/try-to-fool-pomona/pomona.zip
 spaces/try-to-fool-pomona/tests/node_modules/
+
+# Local only: Claude Code launch config, and the small-model benchmark (uses private venvs and private outputs)
+.claude/
+scripts/benchmark_small_models.py
