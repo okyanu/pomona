@@ -67,7 +67,7 @@
     </div>
 
     <div id="panel-json" role="tabpanel" aria-labelledby="tab-json" hidden>
-      <label for="json-text">Packet: <code>farm_context</code>, <code>sensor</code>, <code>expected_fields</code>, optional <code>current_time</code> and <code>history</code> (earlier packets, oldest first)</label>
+      <label for="json-text">Packet: <code>farm_context</code>, <code>sensor</code>, <code>expected_fields</code>, optional <code>current_time</code>, <code>history</code> (earlier packets, oldest first) and <code>stream_baseline</code> (the device's trusted reference as Pomona's Core builds it)</label>
       <textarea id="json-text" style="min-height:220px"></textarea>
       <p><button class="primary" id="run-json">Check packet</button> <span class="error" id="json-error" role="alert"></span></p>
       <div id="json-result"></div>
@@ -99,7 +99,8 @@
 
   <section class="card" aria-labelledby="how-h">
     <h2 id="how-h">How it works</h2>
-    <p class="muted">Every reading is checked with the exact rules <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">Pomona</a> uses before any model or person acts on sensor data (<a href="https://github.com/okyanu/pomona/blob/main/services/model-router/app/sensor_quality.py" target="_blank" rel="noopener">source</a>). This page runs a JavaScript copy that matches the Python rules on 9,242 test cases, including timestamp parsing quirks. Each reading is also compared with the 11 readings before it from the same device, to spot stuck, flat, noisy or drifting sensors.</p>
+    <p class="muted">Every reading is checked with the exact rules <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">Pomona</a> uses before any model or person acts on sensor data (<a href="https://github.com/okyanu/pomona/blob/main/services/model-router/app/sensor_quality.py" target="_blank" rel="noopener">source</a>). This page runs a JavaScript copy that matches the Python rules on more than 18,000 test cases, including timestamp parsing quirks. Each reading is compared with the 11 readings before it from the same device, to spot stuck, flat, noisy or drifting sensors.</p>
+    <p class="muted">Those 11 readings are soon filled by a fault, so each reading is also judged against what the device did earlier in the file, the way Pomona's Core does it: the median of its earlier readings that passed the checks, and how long its value has been the same. That catches slow drift, longer freezes, sudden jumps (a step faster than the probe can physically change) and noise that the 11-reading window gets used to. A reading that fails a check is left out of that reference, so a fault can't teach the page the wrong normal.</p>
     <p class="muted">Only the <em>latest</em> reading of each device is judged "stale" against the check time; older rows in a log are judged at their own time. Rules check that data is <em>trustworthy</em>, not whether conditions are good for your plants.</p>
     <p class="muted">Why rules and not an AI model? We measured it: fine-tuned small models scored 0.34–0.68 on this job; the rules score 1.00. See the <a href="https://huggingface.co/datasets/Okyanus/agri-telemetry-sanity-bench" target="_blank" rel="noopener">Agri Telemetry Sanity Bench</a>.</p>
   </section>
@@ -107,6 +108,8 @@
   <footer>Apache-2.0 · <a href="https://github.com/okyanu/pomona" target="_blank" rel="noopener">GitHub</a> · <a href="https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9" target="_blank" rel="noopener">Pomona on Hugging Face</a> · Advisory only: this tool never controls equipment.</footer>
 </main>
 <script src="rules.js"></script>
+<script src="persistent.js"></script>
+<script src="trust_gate.js"></script>
 <script src="checker.js"></script>
 <script src="app.js"></script>
 </body>

@@ -9,11 +9,17 @@
  * same rules with their own sample time as "now", plus the future-timestamp check against
  * the check time. Each packet sees the previous 11 packets of its stream as history, like
  * the Pomona dashboard.
+ *
+ * Persistent checks: each packet is also judged against the trusted reference Core builds for its stream
+ * (persistent.js): the median and run length of the stream's earlier readings, less the fields the sensor veto
+ * (trust_gate.js) removed from them. The reference is rebuilt from the earlier packets of the stream in the file;
+ * the page has no calibrations, so none are passed. A packet whose timestamp cannot be read is not placed in
+ * time: it gets no reference and is not part of anyone else's.
  */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./rules.js"));
-  else root.PomonaChecker = factory(root.PomonaRules);
-})(typeof self !== "undefined" ? self : this, function (R) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./rules.js"), require("./persistent.js"), require("./trust_gate.js"));
+  else root.PomonaChecker = factory(root.PomonaRules, root.PomonaPersistent, root.PomonaTrustGate);
+})(typeof self !== "undefined" ? self : this, function (R, P, G) {
   "use strict";
 
   const HISTORY_SIZE = 11;
@@ -140,10 +146,10 @@
     return { format: long ? "long" : "wide", streams: [...streams.values()], fieldsPresent: [...fieldsPresent], notes, duplicates };
   }
 
-  function evaluatePacket(ctx, packet, expected, history, nowUs, isLatest) {
-    if (isLatest) return R.deriveSensorQuality(ctx, packet, expected, nowUs, history);
+  function evaluatePacket(ctx, packet, expected, history, nowUs, isLatest, reference) {
+    if (isLatest) return P.derive(ctx, packet, expected, nowUs, history, reference);
     const sampled = R.parseTimestampUs(packet.timestamp);
-    const out = R.deriveSensorQuality(ctx, packet, expected, sampled, history);
+    const out = P.derive(ctx, packet, expected, sampled, history, reference);
     if (sampled !== null && nowUs !== null && sampled - nowUs > 60n * US) {
       if (!out.data_quality_labels.includes("insufficient_context")) out.data_quality_labels.push("insufficient_context");
       if (!out.suspect_fields.includes("timestamp")) out.suspect_fields.push("timestamp");
@@ -161,16 +167,19 @@
     return s[Math.floor(s.length / 2)];
   }
 
-  function checkLog(built, ctx, expected, nowUs) {
+  function checkLog(built, ctx, expected, nowUs, scanLimit = P.DEFAULT_SCAN_LIMIT) {
     const results = [];
     const issues = { gaps: [], outOfOrder: [], reboots: [], latest: [] };
     for (const stream of built.streams) {
       const packets = stream.packets;
+      const trusted = new P.StreamReference(scanLimit);
       packets.forEach((p, i) => {
         const history = packets.slice(Math.max(0, i - HISTORY_SIZE), i).map((h) => h.packet);
         const isLatest = i === packets.length - 1;
-        results.push({ stream: stream.key, rows: p.rows, isLatest, packet: p.packet,
-          out: evaluatePacket(ctx, p.packet, expected, history, nowUs, isLatest) });
+        const stamp = R.parseTimestampUs(p.packet.timestamp);
+        const out = evaluatePacket(ctx, p.packet, expected, history, nowUs, isLatest, stamp === null ? null : trusted.baseline(stamp));
+        results.push({ stream: stream.key, rows: p.rows, isLatest, packet: p.packet, out });
+        if (stamp !== null) trusted.add(p.packet, stamp, G.applySensorVeto(p.packet, history, out, expected).gate.vetoed_fields);
       });
       const times = packets.map((p) => R.parseTimestampUs(p.packet.timestamp));
       const deltas = [];

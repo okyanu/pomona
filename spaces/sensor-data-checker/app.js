@@ -2,6 +2,7 @@
 (function () {
   "use strict";
   const R = window.PomonaRules;
+  const P = window.PomonaPersistent;
   const C = window.PomonaChecker;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -21,10 +22,10 @@
     unit_mismatch: ["bad", "Unit mismatch", "Both Celsius and Fahrenheit temperatures are present; check which one is real."],
     conflicting_readings: ["bad", "Sensors disagree", "Primary and backup air temperature differ by 8 °C or more."],
     stale_reading: ["warn", "Stale", "The latest reading is more than 1 hour older than the check time: the logger may have stopped."],
-    stuck_value: ["warn", "Stuck value", "The same value repeated at least 3 times, and at least twice as long as any earlier repeat: a frozen sensor or a repeated cached value. Coarse probes that often repeat need a longer freeze before this fires. Water and substrate temperature change slowly, so their freeze must also last 3 hours."],
-    noisy_signal_possible: ["warn", "Noisy probe", "pH (≥0.35) or EC (≥0.4 mS/cm) typically jumps this much between readings: check probe shielding, grounding and averaging. Drift can't be judged until it settles."],
-    sensor_drift_possible: ["warn", "Sudden pH jump", "pH moved by 0.8 or more from the previous reading."],
-    baseline_drift_possible: ["warn", "Drift", "pH (≥0.35) or EC (≥0.4 mS/cm) has stayed away from the median of the first 3 plausible readings in the last 11: recalibrate or verify with a handheld meter."],
+    stuck_value: ["warn", "Stuck value", "The same value repeated at least 3 times, and at least twice as long as any earlier repeat: a frozen sensor or a repeated cached value. Coarse probes that often repeat need a longer freeze before this fires. Water and substrate temperature change slowly, so their freeze must also last 3 hours. Against the device's own history it also fires when air temperature stays the same for over 45 minutes, humidity over 30, substrate temperature over 6 hours, or pH/EC (on a probe that normally changes every reading) over 5 minutes, 4 times its longest earlier hold and at least 3 readings in a row."],
+    noisy_signal_possible: ["warn", "Noisy probe", "pH (≥0.35) or EC (≥0.4 mS/cm) typically jumps this much between readings; humidity, air temperature, pH, moisture and substrate temperature also fire when the typical step over the last 12 readings is larger than a real reading moves at this log's interval (unless the window is one steady ramp): check probe shielding, wiring, grounding and averaging. Drift can't be judged until it settles."],
+    sensor_drift_possible: ["warn", "Sudden jump", "pH moved by 0.8 or more from the previous reading, or air temperature, humidity, moisture or substrate temperature moved faster than it can physically change since the last trusted reading (air 3 °C plus 1 °C per minute, humidity 12 % plus 4 per minute, moisture 8 % plus 2 per minute, substrate temperature 1.5 °C plus 0.3 per minute). A rise from a very dry slab (below 15 %) is allowed: one irrigation does that."],
+    baseline_drift_possible: ["warn", "Drift", "pH (≥0.35) or EC (≥0.4 mS/cm) has stayed away from the median of the first 3 plausible readings in the last 11, or from the device's trusted level (the median of its earlier trusted readings over the last 2 hours, and at least 3 times its normal spread): recalibrate or verify with a handheld meter."],
     flatline_possible: ["hint", "Very flat (hint)", "The last 6 readings moved less in total than this sensor normally moves in one step: possibly a clipped or failing probe."],
   };
   const info = (l) => LABELS[l] || ["warn", l, ""];
@@ -195,7 +196,7 @@
     if (data === null || typeof data !== "object" || Array.isArray(data)) { $("json-error").textContent = "Expected a JSON object."; return; }
     const nowUs = data.current_time === undefined ? R.parseTimestampUs(isoNow()) : R.parseTimestampUs(data.current_time);
     if (nowUs === null) { $("json-error").textContent = "current_time must be an ISO time with a timezone."; return; }
-    const out = R.deriveSensorQuality(data.farm_context, data.sensor, data.expected_fields, nowUs, data.history ?? null);
+    const out = P.derive(data.farm_context, data.sensor, data.expected_fields, nowUs, data.history ?? null, data.stream_baseline ?? null);
     $("json-result").innerHTML = `<p>${out.data_quality_labels.length ? out.data_quality_labels.map((l) => chip(l)).join("") : '<span class="chip ok">OK</span>'}</p>` +
       `<pre>${esc(JSON.stringify(out, null, 2))}</pre>`;
   });

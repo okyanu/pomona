@@ -98,6 +98,10 @@ ADAPTIVE_STUCK_FLOOR = timedelta(minutes=5)
 ADAPTIVE_STUCK_RUN_FACTOR = 4.0
 ADAPTIVE_STUCK_MIN_STEPS = 15
 ADAPTIVE_STUCK_MIN_CHANGE_SHARE = 0.7
+# The identical run must also hold this many readings (the last ones, counted from the packets the router sees). At a slow
+# sample rate one pair of equal 2-decimal readings is already more than the time floor (10 or 15 minutes apart) and
+# probes that change on nearly every sample repeat by chance now and then; a freeze is at least 3 readings in a row.
+ADAPTIVE_STUCK_MIN_RUN = 3
 # Sudden step (needs Core's `last_value` / `last_at`: the newest trusted reading). A field cannot move by more than
 # max(smallest allowance, speed x minutes since that reading). A flagged reading is vetoed, so the reference stays put
 # and a step is flagged until the allowance has grown to cover it, then the new level is accepted. The allowances come
@@ -384,13 +388,15 @@ def apply_persistent_checks(
                           + CALIBRATION_HINT)
         limit = PERSISTENT_STUCK_LIMITS.get(field)
         habit = ""
-        if limit is None and field in ADAPTIVE_STUCK_FIELDS:
+        adaptive = limit is None and field in ADAPTIVE_STUCK_FIELDS
+        if adaptive:
             limit = adaptive_stuck_limit(stats)
             habit = f", though this probe normally changes on {numeric(stats.get('change_share')) or 0:.0%} of its readings"
         changed_at = parse_timestamp(stats.get("last_change_at"))
         previous = numeric(previous_packet.get(field))
         if (limit is not None and sampled is not None and changed_at is not None and previous is not None
-                and abs(current - previous) <= STUCK_EPSILON and sampled - changed_at > limit):
+                and abs(current - previous) <= STUCK_EPSILON and sampled - changed_at > limit
+                and (not adaptive or _trailing_run([v for v, _ in _series_points(history, sensor, field)]) >= ADAPTIVE_STUCK_MIN_RUN)):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
             checks.append(f"inspect {field}: the same value for {(sampled - changed_at) // timedelta(minutes=1)} minutes"
@@ -474,7 +480,10 @@ def apply_noise_check(
     # point one way, so most of the distance it covers is net displacement; white noise ends within a quarter of the
     # distance it travelled in 95 % of 12-reading windows (a third in 99 %). Require the window to have moved by no
     # more than half of it.
-    if _median(steps) >= limit and abs(values[-1] - values[0]) <= NOISE_MAX_NET_SHARE * sum(steps):
+    travelled = 0.0
+    for step in steps:  # left to right, as sum() did before Python 3.12 (which adds the floats more exactly)
+        travelled += step
+    if _median(steps) >= limit and abs(values[-1] - values[0]) <= NOISE_MAX_NET_SHARE * travelled:
         add_unique(labels, "noisy_signal_possible")
         add_unique(suspect_fields, field)
         checks.append(f"inspect {field}: readings jump between samples; check probe shielding, wiring and averaging")

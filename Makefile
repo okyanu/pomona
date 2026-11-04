@@ -126,10 +126,13 @@ print-pack:
 	hardware/a1mini-sensor-station/build.sh
 
 .PHONY: test-checker
-# Sensor Data Checker Space: JS rules must match the Python rules (needs python3.11 + node).
+# Sensor Data Checker Space: JS rules (rules.js) and persistent checks (persistent.js: Core's trusted stream reference and
+# apply_persistent_checks) must match the Python code (needs python3.11 + node).
 test-checker:
 	python3.11 spaces/sensor-data-checker/tests/make_parity_cases.py
 	node spaces/sensor-data-checker/tests/parity.test.mjs
+	python3.11 spaces/sensor-data-checker/tests/make_persistent_cases.py
+	node spaces/sensor-data-checker/tests/persistent.test.mjs
 	node spaces/sensor-data-checker/tests/checker.test.mjs
 
 .PHONY: test-demo

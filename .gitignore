@@ -168,8 +168,9 @@ docs/UNPUBLISHED_MODEL_RELEASES.md
 devices/*/include/config.h
 devices/*/.pio/
 
-# Sensor checker parity cases (regenerate with tests/make_parity_cases.py)
+# Sensor checker parity cases (regenerate with tests/make_parity_cases.py and tests/make_persistent_cases.py)
 spaces/sensor-data-checker/tests/parity_cases.json
+spaces/sensor-data-checker/tests/persistent_cases.json
 spaces/pomona-greenhouse-demo/tests/parity_cases.json
 spaces/pomona-greenhouse-demo/tests/chain_cases.json
 spaces/ph-calibration-checker/tests/parity_cases.json

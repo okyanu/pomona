@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.sensor_quality import (
-    ADAPTIVE_STUCK_FLOOR, ADAPTIVE_STUCK_MIN_CHANGE_SHARE, ADAPTIVE_STUCK_MIN_STEPS, NOISE_STEP_FLOOR,
+    ADAPTIVE_STUCK_FLOOR, ADAPTIVE_STUCK_MIN_CHANGE_SHARE, ADAPTIVE_STUCK_MIN_RUN, ADAPTIVE_STUCK_MIN_STEPS, NOISE_STEP_FLOOR,
     NOISE_STEP_LIMIT_5MIN, STEP_LIMITS, STEP_MAX_RATE_C_PER_MIN, STEP_MIN_C, adaptive_stuck_limit, derive_sensor_quality,
 )
 
@@ -66,6 +66,20 @@ def test_a_probe_that_normally_moves_is_stuck_after_the_floor(field, value):
         assert (field in result["suspect_fields"]) is flagged
     text = " ".join(derive(*frozen_case(6, field, value), [field])["safe_next_checks"])
     assert "6 minutes" in text and "normally changes on 90%" in text and "calibration" in text
+
+
+def test_a_pair_of_equal_readings_is_not_a_freeze_however_slow_the_sampling():
+    assert ADAPTIVE_STUCK_MIN_RUN == 3
+    for step_s in (300, 600, 900, 3600):
+        stats = {**moving(), "median": 6.1, "last_change_at": iso(when(0, step_s))}
+        pair = ([packet(1, step_s, ph=6.1)], packet(2, step_s, ph=6.1))  # changed_at is one interval back
+        stats["last_change_at"] = iso(when(1, step_s))
+        long_ago = [packet(0, step_s, ph=6.0), *pair[0]]
+        assert derive(pair[1], long_ago, {"ph": stats}, ["ph"])["data_quality_labels"] == [], step_s
+        triple = [packet(0, step_s, ph=6.1), packet(1, step_s, ph=6.1)]
+        stats["last_change_at"] = iso(when(0, step_s))
+        flagged = derive(packet(2, step_s, ph=6.1), triple, {"ph": stats}, ["ph"])["data_quality_labels"]
+        assert (flagged == ["stuck_value"]) is (2 * step_s > ADAPTIVE_STUCK_FLOOR.total_seconds()), step_s
 
 
 def test_a_probe_frozen_a_second_time_soon_after_the_first_is_still_caught():

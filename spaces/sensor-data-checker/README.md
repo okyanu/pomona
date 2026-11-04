@@ -28,7 +28,8 @@ you shouldn't trust:
 - **broken** values (`err`, `NaN`, text where a number should be)
 - **badly timed** readings (no timezone, future-dated, stale latest reading, logging gaps, reboots,
   time going backwards)
-- **stuck, flat, noisy or drifting** sensors (compared with the previous 11 readings of the same device)
+- **stuck, flat, noisy or drifting** sensors (compared with the previous 11 readings of the same device, and with the
+  device's own earlier readings in the file: slow drift, longer freezes, sudden jumps, noisy probes)
 
 Everything runs in your browser. Files are never uploaded.
 
@@ -46,8 +47,17 @@ turns pH buffer readings into a calibration and checks that the probe is not wea
 
 The checks are the deterministic sensor-quality rules from
 [Pomona](https://github.com/okyanu/pomona) (`services/model-router/app/sensor_quality.py`),
-ported to JavaScript. The port is tested against the Python rules on 8,638 cases, including
+ported to JavaScript. The port is tested against the Python rules on more than 18,000 cases, including
 Python 3.11's timestamp parsing, so the page gives the same answers as the platform.
+
+Two parts. `rules.js` holds the checks over a reading and the 11 before it. `persistent.js` holds the checks that
+judge a reading against what the device did earlier (Pomona Core's trusted per-stream reference,
+`services/core/app/trusted_baseline.py`, and `apply_persistent_checks`): a level that stays away from the
+trusted median, a value that does not change for too long (air temperature 45 minutes, humidity 30 minutes,
+substrate temperature 6 hours, pH/EC on a probe that normally changes every reading), a step faster than the probe can
+change, and a probe that jumps between samples. The reference is built from the device's earlier readings in the
+file, leaving out any value the sensor check removed, as Core does. The page has no probe calibrations, so none are
+applied.
 
 Why rules instead of an AI model? We measured it on the
 [Agri Telemetry Sanity Bench](https://huggingface.co/datasets/Okyanus/agri-telemetry-sanity-bench):
