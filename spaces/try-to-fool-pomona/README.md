@@ -53,9 +53,12 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
   time-lapse): two simulated hours take a few seconds in the browser. A session is capped at 24 simulated hours.
 - Pomona only advises. It never controls irrigation, dosing or any other hardware.
 - Known gaps stay visible on purpose: a plausible offset is undetectable by design, and some sensor lies are still
-  not caught: a pH or EC freeze shorter than about 16 minutes (or a second one soon after the first), a jump or drift
-  on humidity, substrate moisture or substrate temperature, a slow drift of air temperature, EC or pH (Pomona notices it only when the drift ends and the reading snaps back, which is scored as "MISSED (noticed only when it ended)", not as caught), and a noisy
-  pH, EC, moisture or substrate-temperature probe. See
+  not caught: a pH or EC freeze shorter than about 8 to 10 minutes (or a second one soon after the first that lasts
+  less than about 21 minutes), a jump smaller than a real probe can make (humidity below 12 %RH, substrate moisture
+  below 8 %, substrate temperature below 1.5 C), a slow drift of air temperature, humidity, substrate moisture or
+  substrate temperature (Pomona notices it only when the drift ends and the reading snaps back, which is scored as
+  "MISSED (noticed only when it ended)", not as caught), a very slow pH drift (0.005 per minute), a gentle or short EC drift, a noisy EC probe
+  and a frozen substrate-temperature probe. Each of these is limited by what real greenhouse logs allow, see
   [docs/FAKE_GREENHOUSE.md](https://github.com/okyanu/pomona/blob/main/docs/FAKE_GREENHOUSE.md#honest-limits).
 
 ## How it works

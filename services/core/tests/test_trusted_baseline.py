@@ -137,7 +137,7 @@ def reference_stream_baseline(prior, calibrations, now, window_s=tb.DEFAULT_WIND
             if abs(value - newest) > tb.IDENTICAL_EPSILON:
                 break
             changed_at = stamp
-        values, anchor = [], None
+        values, stamps, anchor = [], [], None
         for stamp, value, vetoed in rows:
             if start_at is not None and stamp < start_at:
                 break
@@ -148,6 +148,7 @@ def reference_stream_baseline(prior, calibrations, now, window_s=tb.DEFAULT_WIND
             elif (anchor - stamp).total_seconds() > window_s:
                 break
             values.append(value)
+            stamps.append(stamp)
         before = []
         if field in tb.NORM_FIELDS:
             index = next((i for i, row in enumerate(rows) if abs(row[1] - newest) > tb.IDENTICAL_EPSILON), len(rows))
@@ -164,9 +165,14 @@ def reference_stream_baseline(prior, calibrations, now, window_s=tb.DEFAULT_WIND
             continue
         ordered = sorted(values)
         spread = ordered[int(0.9 * (len(ordered) - 1))] - ordered[int(0.1 * (len(ordered) - 1))]
+        lag = {}
+        if field in tb.NORM_FIELDS:  # pH and EC: the spread of the readings older than SPREAD_LAG_S
+            old = sorted(v for v, s in zip(values, stamps) if (anchor - s).total_seconds() > tb.SPREAD_LAG_S)
+            if len(old) >= max(min_n, 1):
+                lag = {"spread_lag": round(old[int(0.9 * (len(old) - 1))] - old[int(0.1 * (len(old) - 1))], 6)}
         out[field] = {"median": statistics.median(values), "n": len(values), "window_s": window_s,
                       "spread": round(spread, 6), "last_change_at": changed_at.isoformat(), "last_value": values[0],
-                      "last_at": anchor.isoformat(), **tb._norm(before)}
+                      "last_at": anchor.isoformat(), **tb._norm(before), **lag}
     return out
 
 
@@ -466,6 +472,27 @@ def test_stats_carry_the_spread_of_the_trusted_window():
     stats = tb.trusted_stats(series([6.0, 6.1, 6.2, 6.0, 6.1, 6.3, 6.0, 6.1, 6.2, 6.1, 9.0]), "ph", T0 + timedelta(hours=1), 7200, 6)
     assert stats["spread"] == pytest.approx(0.2, abs=0.11)  # 10th to 90th percentile: the outlier does not widen it much
     assert tb.trusted_stats(series([5.0] * 8), "ph", T0 + timedelta(hours=1), 7200, 6)["spread"] == 0.0
+
+
+def test_pH_and_EC_carry_the_spread_of_the_readings_older_than_half_an_hour():
+    # 3 hours of steady pH (0.01 wobble), then a drift of 0.02 per minute for 20 minutes that is still trusted.
+    steady = [{"timestamp": T0 + timedelta(seconds=30 * i), "ph": 6.1 + 0.01 * (i % 3), "ec_ms_cm": 2.6 + 0.01 * (i % 3),
+               "air_temperature_c": 24.0 + 0.01 * (i % 3)} for i in range(360)]
+    drifting = [{"timestamp": T0 + timedelta(seconds=30 * (360 + i)), "ph": 6.1 + 0.01 * i, "ec_ms_cm": 2.6,
+                 "air_temperature_c": 24.0} for i in range(40)]
+    now = T0 + timedelta(seconds=30 * 400)
+    got = tb.stream_baseline(steady + drifting, [], now)
+    assert got["ph"]["spread"] > 0.1  # the drift is in the window and widens it...
+    assert got["ph"]["spread_lag"] == pytest.approx(0.02)  # ...but the lagged spread has not seen it yet
+    assert got["ec_ms_cm"]["spread_lag"] == pytest.approx(0.02)
+    assert "spread_lag" not in got["air_temperature_c"]  # pH and EC only
+    # Fewer than min_n readings older than half an hour: no lagged spread.
+    young = tb.stream_baseline(steady[-64:], [], T0 + timedelta(seconds=30 * 360))
+    assert "spread_lag" not in young["ph"] and "spread" in young["ph"]
+    tracker = tb.StreamBaseline()
+    for packet in steady + drifting:
+        tracker.add(packet)
+    assert same_bytes(tracker.baseline([], now), got)
 
 
 def test_default_never_lapses_a_probe_broken_for_six_hours_keeps_its_pre_fault_reference():

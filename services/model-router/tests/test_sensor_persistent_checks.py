@@ -149,3 +149,38 @@ def test_a_wandering_probe_needs_a_departure_beyond_its_own_spread():
     assert derive(packet(11, ec_ms_cm=5.0), HISTORY, {"ec_ms_cm": wide})["data_quality_labels"] == ["baseline_drift_possible"]
     calm = {"median": 2.5, "n": 20, "window_s": 7200, "spread": 0.05}  # the base threshold still rules a calm probe
     assert derive(packet(11, ec_ms_cm=2.95), HISTORY, {"ec_ms_cm": calm})["data_quality_labels"] == ["baseline_drift_possible"]
+
+
+def test_a_drift_in_progress_cannot_widen_the_threshold_that_judges_it():
+    # A slow pH drift (0.02 per minute) is trusted until it is 0.35 away, which widens the window's spread (here 0.3,
+    # so 3 x spread = 0.9) and would hide it. Core's lagged spread has not seen the newest half hour: 0.05.
+    steady = {"change_share": 0.9, "change_steps": 199, "longest_run_s": 60.0}
+    drifting = {"median": 6.0, "n": 200, "window_s": 7200, "spread": 0.3, **steady}
+    assert derive(packet(11, ph=6.5), HISTORY, {"ph": drifting})["data_quality_labels"] == []
+    lagged = {**drifting, "spread_lag": 0.05}
+    assert derive(packet(11, ph=6.5), HISTORY, {"ph": lagged})["data_quality_labels"] == ["baseline_drift_possible"]
+    # The lagged spread still protects a steady probe that really wanders.
+    wide = {**drifting, "spread": 0.8, "spread_lag": 0.8}
+    assert derive(packet(11, ph=6.5), HISTORY, {"ph": wide})["data_quality_labels"] == []
+    for bad in ("x", None, True, -1.0):  # unusable values fall back to the plain spread
+        assert derive(packet(11, ph=6.5), HISTORY, {"ph": {**drifting, "spread_lag": bad}})["data_quality_labels"] == []
+
+
+def test_only_a_stream_that_changes_every_sample_is_judged_by_the_lagged_spread():
+    # Real drain probes change in 3 to 18 % of their steps and swing with every irrigation: the full spread is theirs.
+    base = {"median": 6.0, "n": 200, "window_s": 7200, "spread": 0.3, "spread_lag": 0.05}
+    for habit in ({"change_share": 0.18, "change_steps": 199, "longest_run_s": 3600.0},
+                  {"change_share": 0.9, "change_steps": 10, "longest_run_s": 60.0}, {}):
+        assert derive(packet(11, ph=6.5), HISTORY, {"ph": {**base, **habit}})["data_quality_labels"] == [], habit
+    steady = {**base, "change_share": 0.9, "change_steps": 199, "longest_run_s": 60.0}
+    assert derive(packet(11, ph=6.5), HISTORY, {"ph": steady})["data_quality_labels"] == ["baseline_drift_possible"]
+
+
+def test_ec_keeps_the_full_spread_even_when_it_changes_every_sample():
+    # Substrate EC really rises as the substrate dries (the fake greenhouse's dry zone: +0.4 or more): a probe that
+    # moves every sample must not get a "check the probe" card for that, so only pH uses the lagged spread.
+    habit = {"change_share": 0.9, "change_steps": 199, "longest_run_s": 60.0}
+    ec = {"median": 2.6, "n": 200, "window_s": 7200, "spread": 0.3, "spread_lag": 0.03, **habit}
+    assert derive(packet(11, ec_ms_cm=3.1), HISTORY, {"ec_ms_cm": ec})["data_quality_labels"] == []
+    ph = {"median": 6.0, "n": 200, "window_s": 7200, "spread": 0.3, "spread_lag": 0.03, **habit}
+    assert derive(packet(11, ph=6.5), HISTORY, {"ph": ph})["data_quality_labels"] == ["baseline_drift_possible"]

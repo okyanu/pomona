@@ -23,6 +23,12 @@ Optional extras per field, so the router can judge a stream by its own habits:
   * pH and EC only: how the probe normally behaves in its last `NORM_STEPS` trusted readings before the
     current identical run (`change_share`, `change_steps`, `longest_run_s`). A drain probe that holds one
     value for hours has a low share; a probe that moves every sample has a high one.
+  * pH and EC only: `spread_lag`, the spread of the window's trusted readings that are older than
+    `SPREAD_LAG_S`. The drift check widens its threshold with the probe's own spread, and a slow drift widens
+    `spread` itself (the readings that were still inside the threshold are trusted) until it hides the drift;
+    the lagged spread has not yet seen the newest half hour, so it does not. (Core sends it for both; the router
+    uses it for pH only, because a real EC rise, a drying substrate concentrating the solution, would look like a
+    drift to it.)
 
 Shared by Core's outcome feed and the fake-greenhouse scorer (which loads this file by path), so both
 compute the reference exactly the same way.
@@ -68,6 +74,8 @@ IDENTICAL_EPSILON = 1e-9  # same value, as in the router's stuck check
 # change in 3 to 18 % of their steps; probes that move every sample change in more than 90 %.
 NORM_STEPS = 200
 NORM_FIELDS = ("ph", "ec_ms_cm")
+# Age (seconds, behind the newest trusted reading) a trusted reading needs before it counts for `spread_lag`.
+SPREAD_LAG_S = 1800
 
 # Fields the router can check against a reference, and the calibration `measurement` that resets each.
 BASELINE_FIELDS = ("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct",
@@ -122,16 +130,27 @@ def _norm(before: List[tuple]) -> Dict[str, Any]:
     return {"change_share": round(changes / steps, 4), "change_steps": steps, "longest_run_s": longest}
 
 
-def _summary(ordered: List[float], window_s: float, changed_at: datetime, last_value: float, anchor: datetime,
-             before: List[tuple]) -> Dict[str, Any]:
-    """The reported reference from the window's values SORTED, the start of the identical run, the newest trusted
-    reading (`last_value` at `anchor`) and the norm rows. Shared by every way of walking the history."""
+def _percentile_range(ordered: List[float]) -> float:
+    """10th to 90th percentile range of values SORTED (at least one)."""
     count = len(ordered)
-    spread = ordered[int(0.9 * (count - 1))] - ordered[int(0.1 * (count - 1))]
+    return ordered[int(0.9 * (count - 1))] - ordered[int(0.1 * (count - 1))]
+
+
+def _lagged(old: List[float], min_n: int) -> Dict[str, Any]:
+    """`spread_lag` from the window's trusted values older than SPREAD_LAG_S, SORTED; empty with fewer than `min_n`."""
+    return {"spread_lag": round(_percentile_range(old), 6)} if old and len(old) >= min_n else {}
+
+
+def _summary(ordered: List[float], window_s: float, changed_at: datetime, last_value: float, anchor: datetime,
+             before: List[tuple], lagged: Dict[str, Any]) -> Dict[str, Any]:
+    """The reported reference from the window's values SORTED, the start of the identical run, the newest trusted
+    reading (`last_value` at `anchor`), the norm rows and `spread_lag`. Shared by every way of walking the history."""
+    count = len(ordered)
+    spread = _percentile_range(ordered)
     middle = count // 2  # what statistics.median gives: the middle value, or the mean of the two middle ones
     return {"median": ordered[middle] if count % 2 else (ordered[middle - 1] + ordered[middle]) / 2,
             "n": count, "window_s": window_s, "spread": round(spread, 6), "last_change_at": changed_at.isoformat(),
-            "last_value": last_value, "last_at": anchor.isoformat(), **_norm(before)}
+            "last_value": last_value, "last_at": anchor.isoformat(), **_norm(before), **lagged}
 
 
 class _Walk:
@@ -144,7 +163,7 @@ class _Walk:
     """
 
     __slots__ = ("field", "alias", "window_s", "start_at", "norm_steps", "newest", "changed_at", "anchor",
-                 "run_open", "window_open", "norm_open", "open", "values", "before")
+                 "run_open", "window_open", "norm_open", "open", "values", "stamps", "before")
 
     def __init__(self, field: Optional[str], window_s: float, start_at: Optional[datetime], norm_steps: int = 0) -> None:
         self.field = field
@@ -156,6 +175,7 @@ class _Walk:
         self.run_open = self.window_open = self.open = True
         self.norm_open = norm_steps > 0
         self.values: List[float] = []
+        self.stamps: List[datetime] = []  # the window's sample times, as `values`, for the lagged spread
         self.before: List[tuple] = []  # trusted (time, value) rows before the current run, for the norm
 
     def push(self, stamp: datetime, value: float, vetoed: bool) -> bool:
@@ -178,6 +198,8 @@ class _Walk:
                     self.window_open = False
                 if self.window_open:
                     self.values.append(value)
+                    if self.norm_steps > 0:
+                        self.stamps.append(stamp)
         if self.norm_open and not self.run_open:
             if start_at is not None and stamp < start_at:
                 self.norm_open = False
@@ -196,7 +218,8 @@ class _Walk:
         changed_at = self.changed_at if self.start_at is None else max(self.changed_at, self.start_at)
         if len(values) < min_n or (max_age_s is not None and now is not None and (now - anchor).total_seconds() > max_age_s):
             return None
-        return _summary(sorted(values), self.window_s, changed_at, values[0], anchor, self.before)
+        old = sorted(v for v, s in zip(values, self.stamps) if (anchor - s).total_seconds() > SPREAD_LAG_S)
+        return _summary(sorted(values), self.window_s, changed_at, values[0], anchor, self.before, _lagged(old, min_n))
 
 
 def _stats(rows: Iterable[tuple], window_s: float, min_n: int, start_at: Optional[datetime],
@@ -396,7 +419,10 @@ class _FieldState:
                 if not vetoed:
                     before.append((stamp, value))
                 position -= 1
-        return _summary(self.ranked, self.window_s, changed_at, last_value, anchor, before)
+        old: List[float] = []
+        if self.field in NORM_FIELDS:
+            old = sorted(v for _, s, v in window if (anchor - s).total_seconds() > SPREAD_LAG_S)
+        return _summary(self.ranked, self.window_s, changed_at, last_value, anchor, before, _lagged(old, min_n))
 
 
 class StreamBaseline:

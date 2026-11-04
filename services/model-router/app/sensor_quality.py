@@ -86,32 +86,66 @@ PERSISTENT_STUCK_LIMITS = {
 # describe how the probe behaved in its last 200 trusted readings before the current identical run). A probe
 # that normally moves every sample (the simulator's pH and EC, the Pomona cress logger's pH) and then freezes is
 # stuck; a drain probe that holds one value for hours is not, however long the hold. So the check applies only to
-# a stream that changed in at least 70 % of its trusted steps (and has 15 of them), and the freeze must be longer than 15 minutes
-# AND 4 times the longest hold that stream showed. Real logs (make real-replay, 5-minute samples): every
+# a stream that changed in at least 70 % of its trusted steps (and has 15 of them), and the freeze must be longer than
+# 5 minutes AND 4 times the longest hold that stream showed. Real logs (make real-replay, 5-minute samples): every
 # drain probe changes in 3 to 18 % of its steps and is never checked; the pond EC (77 %) rests up to an hour
-# and is the only stream near the line. Share of real readings flagged: under 0.02 %.
+# and is the only stream near the line. Share of real readings flagged: under 0.02 %, the same with the floor at 15
+# minutes (the floor only matters for a probe whose longest hold is under 75 seconds; it is one real 5-minute
+# sample, so a pair of equal readings never counts). The first freeze's trusted minutes count as a hold of their own
+# for the next 200 readings, so a second freeze soon after needs 4 times as long as the first took to be flagged.
 ADAPTIVE_STUCK_FIELDS = ("ph", "ec_ms_cm")
-ADAPTIVE_STUCK_FLOOR = timedelta(minutes=15)
+ADAPTIVE_STUCK_FLOOR = timedelta(minutes=5)
 ADAPTIVE_STUCK_RUN_FACTOR = 4.0
 ADAPTIVE_STUCK_MIN_STEPS = 15
 ADAPTIVE_STUCK_MIN_CHANGE_SHARE = 0.7
-# Sudden step in air temperature (needs Core's `last_value` / `last_at`: the newest trusted reading). Air cannot
-# move by more than max(3 C, 1 C per minute since that reading); a heat spike ramps about 0.5 C per minute and
-# stays well inside. A flagged reading is vetoed, so the reference stays put and a step is flagged until the
-# allowance has grown to cover it (4 minutes for 4 C), then the new level is accepted. Real logs (5-minute
-# samples): 0.054 % of readings in the worst compartment, which holds 17 C glitches, 0.002 % elsewhere.
-STEP_FIELDS = ("air_temperature_c",)
-STEP_MIN_C = 3.0
-STEP_MAX_RATE_C_PER_MIN = 1.0
-# Noise on a continuous probe: the median step over the last 12 readings. Real 5-minute logs set the limit
-# (the share of real windows at or above it stays under 0.15 %); a legitimate swing is spread over more
-# samples when they come faster, so the limit shrinks with the square root of the sample interval, down to a
-# floor several times a healthy probe's noise (simulator humidity 0.8 %RH, air 0.1 C). No real log is
-# sampled faster than 5 minutes, so the scaling is untested there.
-NOISE_STEP_LIMIT_5MIN = {"humidity_pct": 10.0, "air_temperature_c": 2.0}
-NOISE_STEP_FLOOR = {"humidity_pct": 3.0, "air_temperature_c": 0.4}
+# Sudden step (needs Core's `last_value` / `last_at`: the newest trusted reading). A field cannot move by more than
+# max(smallest allowance, speed x minutes since that reading). A flagged reading is vetoed, so the reference stays put
+# and a step is flagged until the allowance has grown to cover it, then the new level is accepted. The allowances come
+# from the real logs (make real-replay, 5-minute samples; share of real readings flagged, worst compartment):
+#   air temperature 3 C, 1 C/min: a heat spike ramps about 0.5 C per minute and stays well inside. 0.054 % (the
+#       Reference compartment holds 17 C glitches), 0.002 % elsewhere.
+#   humidity 12 %RH, 4 %RH/min (20 %RH between 5-minute samples): real 5-minute steps reach 8 to 15 %RH in 0.1 % of
+#       readings and 15 to 20 in 0.01 %; only glitches and the odd 25 %RH step go beyond. 0.021 % (Reference).
+#   substrate moisture 8 %, 2 %/min (10 % between 5-minute samples): the largest real 5-minute step is 4.3 to 7.1 %
+#       (an irrigation pulse), apart from one 79 % glitch. 0.017 % (Digilog: the glitch is held until the allowance
+#       covers it).
+#   substrate temperature 1.5 C, 0.3 C/min: a slab has thermal mass; the largest real 5-minute step is 0.4 to 0.8 C
+#       apart from one 2.4 C glitch. 0.006 % (Digilog).
+# A smaller offset than the allowance (a humidity shift of 10 %RH, a moisture shift of 5 %) cannot be told from a
+# real change in one sample and is not caught here.
+STEP_LIMITS = {
+    "air_temperature_c": (3.0, 1.0, "C", "a second thermometer"),
+    "humidity_pct": (12.0, 4.0, "%RH", "a second hygrometer"),
+    "soil_moisture_pct": (8.0, 2.0, "%", "a hand-held moisture meter"),
+    "substrate_moisture_pct": (8.0, 2.0, "%", "a hand-held moisture meter"),
+    "substrate_temperature_c": (1.5, 0.3, "C", "a second thermometer"),
+}
+STEP_FIELDS = tuple(STEP_LIMITS)
+# A rise in substrate moisture from a trusted level below this is not judged by speed: a slab that dry (the water-level
+# card fires below 10 %) is rewetted by one irrigation, which the fake greenhouse's dry zone shows as +40 % in one
+# sample. The real logs never get that dry (lowest 54 %, apart from one 0 % glitch), so they say nothing about how
+# fast a dry slab rewets and the exemption costs them nothing. A fall, and a rise from any wetter level, keep the
+# allowance.
+STEP_REWET_BELOW_PCT = {"soil_moisture_pct": 15.0, "substrate_moisture_pct": 15.0}
+STEP_MIN_C, STEP_MAX_RATE_C_PER_MIN = STEP_LIMITS["air_temperature_c"][:2]
+# Noise on a continuous probe: the median step over the last 12 readings, when the window has not simply moved in one
+# direction (a ramp is not noise). Real 5-minute logs set the limit (the share of real windows at or above it stays
+# under 0.15 %); a legitimate swing is spread over more samples when they come faster, so the limit shrinks with the
+# square root of the sample interval, down to a floor above what a healthy probe's windows reach (fake greenhouse,
+# normal runs of seeds 1 to 80: the largest window median step is humidity 2.5 %RH, air 0.32 C, pH 0.06, moisture
+# 1.5 %, substrate temperature 0.31 C). No real log is sampled faster than 5 minutes, so the scaling is untested there.
+# Share of real 12-reading windows at or above the 5-minute limit (worst compartment):
+#   humidity 10 %RH 0.084 %, air 2 C 0.029 %, pH 0.5 0.13 % (AICU; the pond pH is noisy by nature, see
+#   noisy_signal_possible above), moisture 1.0 % 0.009 %, substrate temperature 0.4 C 0 %.
+# EC is not here: the Automatoes drain EC really jumps (1.0 % of its windows have a median step of 0.4 mS/cm or
+# more, 0.29 % of 2 mS/cm), so no limit that real data allows is below what a noisy simulator probe shows.
+NOISE_STEP_LIMIT_5MIN = {"humidity_pct": 10.0, "air_temperature_c": 2.0, "ph": 0.5,
+                         "soil_moisture_pct": 1.0, "substrate_moisture_pct": 1.0, "substrate_temperature_c": 0.4}
+NOISE_STEP_FLOOR = {"humidity_pct": 3.0, "air_temperature_c": 0.4, "ph": 0.1,
+                    "soil_moisture_pct": 2.5, "substrate_moisture_pct": 2.5, "substrate_temperature_c": 0.5}
 NOISE_REFERENCE_INTERVAL_S = 300.0
 NOISE_WINDOW = 12
+NOISE_MAX_NET_SHARE = 0.5
 # A pH/EC probe whose typical step between samples is as large as the drift threshold
 # is too noisy to judge drift (e.g. an unshielded PH-4502C swinging ~1.6 pH in 5 min;
 # commercial greenhouse drain sensors stay at <= 0.1).
@@ -298,6 +332,16 @@ def apply_temporal_checks(
 # percentile range of its trusted window). Real drain pH and EC swing with every irrigation; without this,
 # 1 to 3 % of real readings sit 0.35 / 0.4 from their 2 h median and each one would start a flag.
 DRIFT_SPREAD_FACTOR = 3.0
+# A slow drift (pH 0.02 per minute) is trusted until it is a threshold away, and those readings widen the window's
+# `spread` until 3 x spread hides the drift for good. So a pH stream that normally changes every sample (the same
+# habit test as the adaptive stuck check: its spread is just its noise) is judged against `spread_lag`, the spread
+# of the readings older than half an hour, which a drift in progress has not reached. Streams with a lower change
+# share (every real drain probe) keep the full spread: it also covers their irrigation swings, and the lagged
+# one flagged 2.2 to 2.3 % of the real drain EC readings (with the 2 h lapse) against 1.7 to 1.9 % without it.
+# EC always keeps the full spread: its level really moves with the crop (a drying substrate concentrates the
+# solution, the fake greenhouse's dry zone raises EC by 0.4 or more), and a probe that changes every sample would
+# get a false "check the probe" card around every such event. A slow EC drift is therefore not caught.
+LAGGED_SPREAD_FIELDS = ("ph",)
 CALIBRATION_HINT = "if a meter agrees with the reading, it is real: record a calibration for this probe to accept it"
 
 
@@ -327,6 +371,10 @@ def apply_persistent_checks(
         threshold = BASELINE_DRIFT_THRESHOLDS.get(field)
         low, high = PLAUSIBLE_RANGES.get(field, (-math.inf, math.inf))
         spread = numeric(stats.get("spread")) or 0.0
+        lagged_spread = numeric(stats.get("spread_lag"))
+        if (field in LAGGED_SPREAD_FIELDS and lagged_spread is not None and lagged_spread >= 0
+                and is_steady_stream(stats)):
+            spread = lagged_spread  # a drift in progress has not reached it yet (see the note above CALIBRATION_HINT)
         if threshold is not None:
             threshold = max(threshold, DRIFT_SPREAD_FACTOR * spread)
         if median is not None and threshold is not None and low <= current <= high and abs(current - median) >= threshold:
@@ -351,6 +399,14 @@ def apply_persistent_checks(
             apply_step_check(field, current, sampled, stats, labels, suspect_fields, checks)
         if field in NOISE_STEP_LIMIT_5MIN:
             apply_noise_check(field, sensor, history, labels, suspect_fields, checks)
+
+
+def is_steady_stream(stats: Dict[str, Any]) -> bool:
+    """The stream changed in at least 70 % of its last trusted steps (and has 15 of them): it moves every sample."""
+    share = numeric(stats.get("change_share"))
+    steps = numeric(stats.get("change_steps"))
+    return (share is not None and steps is not None and steps >= ADAPTIVE_STUCK_MIN_STEPS
+            and share >= ADAPTIVE_STUCK_MIN_CHANGE_SHARE)
 
 
 def adaptive_stuck_limit(stats: Dict[str, Any]) -> Optional[timedelta]:
@@ -382,13 +438,16 @@ def apply_step_check(
     last_at = parse_timestamp(stats.get("last_at"))
     if last_value is None or last_at is None or sampled is None:
         return
+    if current > last_value and last_value < STEP_REWET_BELOW_PCT.get(field, -math.inf):
+        return
+    smallest, speed, unit, instrument = STEP_LIMITS[field]
     minutes = max((sampled - last_at).total_seconds(), 0.0) / 60
-    allowed = max(STEP_MIN_C, STEP_MAX_RATE_C_PER_MIN * minutes)
+    allowed = max(smallest, speed * minutes)
     if abs(current - last_value) > allowed:
         add_unique(labels, "sensor_drift_possible")
         add_unique(suspect_fields, field)
-        checks.append(f"compare {field} with a second thermometer: it moved {current - last_value:+.1f} C in "
-                      f"{minutes:.1f} minutes, faster than air can change; " + CALIBRATION_HINT)
+        checks.append(f"compare {field} with {instrument}: it moved {current - last_value:+.1f} {unit} in "
+                      f"{minutes:.1f} minutes, faster than it can change; " + CALIBRATION_HINT)
 
 
 def apply_noise_check(
@@ -399,7 +458,7 @@ def apply_noise_check(
     suspect_fields: List[str],
     checks: List[str],
 ) -> None:
-    """Humidity or air temperature jumping between samples by more than a real reading does at this sample rate."""
+    """A probe jumping between samples by more than a real reading does at this sample rate."""
     points = _series_points(history, sensor, field)[-NOISE_WINDOW:]
     if len(points) < NOISE_MIN_SAMPLES:
         return
@@ -410,7 +469,12 @@ def apply_noise_check(
     limit = max(NOISE_STEP_FLOOR[field],
                 NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(_median(gaps) / NOISE_REFERENCE_INTERVAL_S))
     values = [value for value, _ in points]
-    if _median([abs(b - a) for a, b in zip(values, values[1:])]) >= limit:
+    steps = [abs(b - a) for a, b in zip(values, values[1:])]
+    # Noise goes nowhere, a trend does: a real fast ramp (a dry zone drying, a vent opening) has large steps that all
+    # point one way, so most of the distance it covers is net displacement; white noise ends within a quarter of the
+    # distance it travelled in 95 % of 12-reading windows (a third in 99 %). Require the window to have moved by no
+    # more than half of it.
+    if _median(steps) >= limit and abs(values[-1] - values[0]) <= NOISE_MAX_NET_SHARE * sum(steps):
         add_unique(labels, "noisy_signal_possible")
         add_unique(suspect_fields, field)
         checks.append(f"inspect {field}: readings jump between samples; check probe shielding, wiring and averaging")

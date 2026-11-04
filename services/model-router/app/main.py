@@ -278,7 +278,7 @@ class PipelineEvaluateRequest(BaseModel):
     stream_baseline: Optional[Dict[str, Dict[str, Any]]] = Field(
         default=None,
         description=("Core's sticky trusted reference per field: {median, n, window_s, last_change_at}, optionally "
-                     "{spread, last_value, last_at, change_share, change_steps, longest_run_s}."),
+                     "{spread, spread_lag, last_value, last_at, change_share, change_steps, longest_run_s}."),
     )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
@@ -311,7 +311,7 @@ class PipelineEvaluateRequest(BaseModel):
                     datetime.fromisoformat(str(last_at).replace("Z", "+00:00"))
                 except ValueError as error:
                     raise ValueError(f"stream_baseline.{field}.last_at must be an ISO time") from error
-            for key in ("change_share", "change_steps", "longest_run_s"):
+            for key in ("change_share", "change_steps", "longest_run_s", "spread_lag"):
                 number = stats.get(key)
                 if number is not None and (isinstance(number, bool) or not isinstance(number, (int, float))
                                            or not math.isfinite(number) or number < 0):
