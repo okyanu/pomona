@@ -201,7 +201,10 @@ Limits that remain:
   and is not judged.
 - A step of 4 C is flagged for about 4 minutes and then accepted as the new level without a calibration (a
   heat spike must not be held back). Removing a long drift snaps the reading back and trips the same check, so
-  in the game a 40-minute air-temperature drift is "caught" only when it ends.
+  a 40-minute air-temperature drift raises a sensor card only when it ends. The scorer does not credit that: a
+  sensor card whose label run began after the fault's last reading is scored "MISSED (noticed only when it
+  ended)" (verdict `caught_at_recovery`), in the game and in `make fake-greenhouse-score`.
 - Not covered by the new checks, and still MISSED in the game: a jump or drift on humidity, substrate moisture
-  or substrate temperature, a drift on air temperature (until it ends), a noisy pH, EC, moisture or
+  or substrate temperature, a slow drift on air temperature, EC or pH (0.1 C, 0.05 mS/cm, 0.02 pH per minute,
+  40 minutes: noticed only when it ends, which is scored as missed), a noisy pH, EC, moisture or
   substrate-temperature probe, and a frozen substrate-temperature probe (3 h of thermal mass).

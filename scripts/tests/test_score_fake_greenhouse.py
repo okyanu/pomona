@@ -129,12 +129,38 @@ def test_sensor_check_raised_during_a_fault_is_caught():
     assert report["summary"]["false_alarms"] == 0
 
 
-def test_sensor_check_raised_in_the_recovery_tail_is_attributed_to_the_fault():
-    report = grade(fault_rows(), [raised(A, "sensor_check", 52)])
-    assert report["fault_episodes"][0]["outcome"] == "caught" and report["summary"]["false_alarms"] == 0
+def test_sensor_check_raised_in_the_recovery_tail_is_attributed_to_the_fault_but_is_not_a_catch():
+    report = grade(fault_rows(), [raised(A, "sensor_check", 52)])  # fault active to tick 45; label began on the snap back
+    (ep,) = report["fault_episodes"]
+    assert ep["outcome"] == "caught_at_recovery" and ep["raised"] is None and ep["raised_at_recovery"]["tick"] == 52
+    assert report["summary"]["false_alarms"] == 0  # still the fault's card, not a false alarm
+    sensor = report["summary"]["sensor_fault_episodes"]
+    assert (sensor["sensor_check_caught"], sensor["missed"], sensor["missed_noticed_only_at_recovery"]) == (0, 1, 1)
+    assert "only after the fault ended | MISSED (noticed only when it ended)" in score.markdown(report, "stack", Path("t"))
     # After the tail and the clear window the same raise is a false alarm.
     late = grade(fault_rows(total=200), [raised(A, "sensor_check", 140)])
     assert late["summary"]["false_alarms"] == 1 and late["fault_episodes"][0]["outcome"] == "missed"
+
+
+def test_a_card_raised_just_after_the_end_counts_only_if_its_label_began_during_the_fault():
+    # sensor_check raises on 3 flagged readings in a row. Readings 45, 46, 47: the run began on the last wrong reading.
+    slow = grade(fault_rows(), [raised(A, "sensor_check", 47)])["fault_episodes"][0]
+    assert slow["outcome"] == "caught" and slow["raised"]["tick"] == 47 and slow["raised_at_recovery"] is None
+    # Readings 46, 47, 48: the run began on the first honest reading, so the snap back is what raised it.
+    snap = grade(fault_rows(), [raised(A, "sensor_check", 48)])["fault_episodes"][0]
+    assert snap["outcome"] == "caught_at_recovery"
+    # A raise in the fault is caught whatever follows, and a fault with no card at all is still just missed.
+    assert grade(fault_rows(), [raised(A, "sensor_check", 30), raised(A, "sensor_check", 52)])["fault_episodes"][0]["outcome"] == "caught"
+    assert grade(fault_rows(), [])["fault_episodes"][0]["outcome"] == "missed"
+
+
+def test_a_plausible_offset_noticed_only_at_its_end_is_not_a_card_raised():
+    report = grade(fault_rows("plausible_offset", "ec_ms_cm", forbid=("ec_ms_cm",)), [raised(A, "sensor_check", 52)])
+    (ep,) = report["fault_episodes"]
+    assert ep["outcome"] == "undetectable" and ep["raised"] is None and ep["raised_at_recovery"]["tick"] == 52
+    assert report["summary"]["undetectable"]["sensor_check_raised"] == 0 and report["summary"]["false_alarms"] == 0
+    during = grade(fault_rows("plausible_offset", "ec_ms_cm", forbid=("ec_ms_cm",)), [raised(A, "sensor_check", 20)])
+    assert during["summary"]["undetectable"]["sensor_check_raised"] == 1
 
 
 def test_a_domain_card_on_the_faulty_field_is_a_trusted_wrong_card():
@@ -298,6 +324,8 @@ def test_a_card_active_from_an_earlier_fault_counts_only_if_this_fault_was_flagg
     assert flagged["fault_episodes"][0]["outcome"] == "caught"
     silent = score.Grader(rows, events, RULES, DEFAULTS, {(A, 3): frame_info(A, [3], [])[(A, 3)]}).report()
     assert silent["fault_episodes"][0]["outcome"] == "missed"  # nothing flagged in this fault's window
+    tail_only = score.Grader(rows, events, RULES, DEFAULTS, frame_info(A, range(64, 70), ["air_temperature_c"])).report()
+    assert tail_only["fault_episodes"][0]["outcome"] == "missed"  # flagged only on the snap back: the old card is not vouched for
 
 
 def test_aftermath_of_a_real_event_is_counted_apart_offline():
@@ -460,6 +488,19 @@ def test_offline_pomona_flags_a_ph_jump_for_as_long_as_it_lasts(tmp_path):
     # stopped after about eight), so the sensor check card stayed up and no high_ph card was shown.
     assert ep["sensor_check_frames"] >= 49
     assert report["reading_level"]["trusted_wrong_cards"] <= 1 and report["summary"]["false_alarms"] == 0
+
+
+def test_offline_a_slow_air_drift_is_noticed_only_when_it_ends(tmp_path):
+    report = run_offline(tmp_path, "air-drift", [
+        {"at_tick": 20, "start": "drift", "zone": A, "field": "air_temperature_c", "params": {"rate_per_min": 0.1}},
+        {"at_tick": 100, "stop": "drift", "zone": A}], 160)
+    (ep,) = report["fault_episodes"]
+    # 40 minutes at 0.1 C/min: the reading is 4 C off, yet nothing is flagged until it snaps back to the true value.
+    assert ep["outcome"] == "caught_at_recovery" and ep["raised"] is None and ep["wrong_cards"] == []
+    assert ep["raised_at_recovery"]["tick"] > ep["active_end_tick"] and ep["raised_at_recovery"]["rule"] == "sensor_check"
+    sensor = report["summary"]["sensor_fault_episodes"]
+    assert (sensor["sensor_check_caught"], sensor["missed"], sensor["missed_noticed_only_at_recovery"]) == (0, 1, 1)
+    assert report["summary"]["false_alarms"] == 0
 
 
 def run_offline(tmp_path, name, steps, ticks):

@@ -54,9 +54,10 @@ what Pomona raised, with a verdict.
 
 | Verdict | Meaning |
 |---------|---------|
-| caught | A real event raised its card (delay shown), or a sensor fault raised a sensor check |
+| caught | A real event raised its card (delay shown), or a sensor fault raised a sensor check while it was still going on |
 | caught as can't-confirm (safe) | A real event whose domain card never came, but the sensor check raised while that probe was flagged: Pomona said "check the probe" instead of acting on a doubtful reading |
 | MISSED | A real event that lasted longer than the rule's window raised nothing |
+| MISSED (noticed only when it ended) | A sensor fault whose check-the-sensor card was raised only after the fault stopped, when the reading snapped back to the true value (a slow drift of pH, EC or air temperature). The card's label began on the first honest reading, so the lie itself was not seen. Counted as a miss in the sensor-fault totals (the summary says how many of the misses were of this kind); a card whose label began during the fault but was raised a reading or two after it ended still counts as caught |
 | too short to raise | The episode was shorter than the rule's `raise_after`; no card was possible |
 | no card rule | The label (for example `cold_stress`, which the simulator cannot produce) has no rule in `rules.yaml`, so Pomona has no card for it |
 | WRONG CARD | A sensor fault on one field produced a domain card built on it |
@@ -74,7 +75,7 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
 - **Demos take time.** A card needs its label to persist for 10 minutes (30 for humidity) and a
   fault needs 11 samples to leave Pomona's history, so a meaningful run is 30 minutes or more.
 - What the scorer shows on the current rules: `heat_stress` raises the `heat_stress_check` card (check vents, fans and
-  shading) after 10 minutes; a slow drift (0.05 mS/cm per minute) is caught only once it has moved 0.4 from the trusted level; a stuck pH or EC
+  shading) after 10 minutes; a slow drift (0.05 mS/cm per minute) is not seen while it lasts, only when it ends and the reading snaps back (scored as missed, "noticed only when it ended"); a fast one (0.3 mS/cm per minute) is flagged within about 2 minutes; a stuck pH or EC
   probe is caught after about 16 minutes and a +4 C air-temperature jump within a minute; a noisy humidity
   probe (and a noisy air probe) is caught within about 5 minutes; a single-sample spike is flagged but too short to raise a card; `plausible_offset`
   started mid-stream is flagged for as long as it lasts (from the start of a stream nobody can see it).

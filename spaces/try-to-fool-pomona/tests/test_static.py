@@ -7,7 +7,7 @@ import engine_api
 import game
 from helpers import SPACE
 
-PLAN_VERDICTS = ["caught", "caught_cant_confirm", "missed", "wrong_card", "no_card_rule", "too_short_to_raise",
+PLAN_VERDICTS = ["caught", "caught_cant_confirm", "missed", "caught_at_recovery", "wrong_card", "no_card_rule", "too_short_to_raise",
                  "undetectable", "false_alarm"]
 PAGE = (SPACE / "index.html").read_text()
 
@@ -94,6 +94,7 @@ def test_info_lists_the_tricks_the_zones_and_the_verdict_table():
     assert plan_text["no_card_rule"]["headline"].startswith("You fooled Pomona")
     assert plan_text["undetectable"]["headline"].startswith("Unfair trick")
     assert plan_text["false_alarm"]["headline"] == "Pomona cried wolf"
+    assert plan_text["caught_at_recovery"]["scorer"].startswith("MISSED") and "fooled Pomona" in plan_text["caught_at_recovery"]["headline"]
     assert plan_text["caught_cant_confirm"]["headline"] == "Pomona couldn't confirm it and asked for a meter check"
     assert all(v["doc"].startswith("https://github.com/okyanu/pomona/blob/main/docs/") and v["why"] for v in info["verdicts"])
     dry = next(t for t in info["tricks"] if t["name"] == "dry_zone")

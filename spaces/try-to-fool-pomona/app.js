@@ -467,7 +467,7 @@
 
   function renderVerdictTable() {
     const rows = state.info.verdicts.filter((v) => v.code !== "accepted_by_core");
-    const plan = ["caught", "caught_cant_confirm", "missed", "wrong_card", "no_card_rule", "too_short_to_raise", "undetectable", "false_alarm"];
+    const plan = ["caught", "caught_cant_confirm", "missed", "caught_at_recovery", "wrong_card", "no_card_rule", "too_short_to_raise", "undetectable", "false_alarm"];
     fill($("#verdict-rows"), rows.map((v) => {
       const tr = el("tr", plan.includes(v.code) ? "" : "also");
       const shown = v.headline.replace("{after}", " (after N min)").replace("{card}", "X").replace("{n}", "N");

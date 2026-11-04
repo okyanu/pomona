@@ -66,9 +66,10 @@ METRIC_DEFINITIONS = {
     "no_card_rule": "the expected label has no rule in rules.yaml (for example cold_stress), so Pomona has no card to raise: not a miss",
     "missed": "a long enough real episode where the rule never raised",
     "sensor_fault_episode": "frames with a sensor fault active plus its recovering_from tail, where the fault leaves wrong readings in Pomona's 11-packet history",
-    "sensor_check_caught": "a sensor rule (sensor_check or sensor_flatline) raised inside the fault window",
+    "sensor_check_caught": "a sensor rule (sensor_check or sensor_flatline) raised while the fault was still active: its label run (the raise time less the rule's raise_after) began no later than the fault's last reading, or a card from an earlier fault was already open and the readings of this fault were flagged",
+    "caught_at_recovery": "a sensor rule raised only after the fault ended, in the recovery tail: the label run began on or after the first honest reading, so the trigger is the snap back to the true value (a slow air drift is invisible until then), not the lie. Counted as a miss, and also in the sensor-fault 'missed' total",
     "trusted_wrong_card": "a rule built on the faulty field raised inside the fault window (a wrong advice card, same idea as trusted_wrong_cards_gated in the fault replay benchmark)",
-    "undetectable": "plausible_offset: an in-range constant offset Pomona cannot tell from a real value; reported apart, never counted as a miss",
+    "undetectable": "plausible_offset: an in-range constant offset Pomona cannot tell from a real value; reported apart, never counted as a miss (a card raised only by its end does not count as sensor_check_raised)",
     "dead_clock": "the device stamped 1970: expected to be rejected by Core (delivery 422 or not stored)",
     "false_alarm": "a raise whose sample time is in no episode's window (real episodes: same rule, until its clear window ends; fault episodes: any rule)",
     "card_labels": "labels matched by any rule in rules.yaml except the sensor family (action check_sensor: sensor_check, sensor_flatline), i.e. labels that make an advice card",
@@ -184,10 +185,39 @@ class Grader:
         counts (an earlier fault's incident continues while the labels keep coming).
         """
         hit = self.find_raise(zone, self.sensor_rules, start, end)
-        if hit:
-            return hit
+        return hit or self.open_sensor_card(zone, start)
+
+    def open_sensor_card(self, zone: str, start: datetime) -> Optional[Dict[str, Any]]:
+        """A sensor card raised before `start` and still open at it."""
         return next((r for r in self.raises if r["zone"] == zone and r["rule"] in self.sensor_rules and r["time"] < start
                      and (r["until"] is None or r["until"] >= start)), None)
+
+    def run_began_by(self, hit: Dict[str, Any]) -> datetime:
+        """The latest time the label run behind a raise can have begun (the card follows from readings before it).
+
+        The monitor raises when the label has held for the rule's raise_after, or for raise_after_samples readings
+        in a row (sensor_check: 3), whichever comes first, so the run began no later than the later of the two.
+        """
+        rule = self.rules.get(hit["rule"], {})
+        by_time = hit["time"] - self.window(hit["rule"])[0]
+        samples = rule.get("raise_after_samples")
+        if not samples:
+            return by_time
+        readings = [f for f in self.zones[hit["zone"]] if f.accepted and f.tick <= hit["tick"]]
+        by_samples = readings[max(0, len(readings) - samples)].time
+        return max(by_time, by_samples)
+
+    def find_check_during(self, zone: str, start: datetime, active_end: datetime, end: datetime) -> Optional[Dict[str, Any]]:
+        """A sensor card whose trigger was in the fault, not in its recovery tail.
+
+        A raise counts when its label run began no later than the fault's last (wrong) reading: the card follows
+        from readings the lie caused, even if the raise itself lands a reading or two after the end. A card whose
+        label began on the first honest reading was caused by the snap back to the true value. A card already open
+        when the fault began counts as in find_check.
+        """
+        hit = next((r for r in self.raises if r["zone"] == zone and r["rule"] in self.sensor_rules
+                    and start <= r["time"] <= end and self.run_began_by(r) <= active_end), None)
+        return hit or self.open_sensor_card(zone, start)
 
     def find_raise(self, zone: str, rule_id: Any, start: datetime, end: datetime) -> Optional[Dict[str, Any]]:
         """The first raise of a rule (an id, or a set of ids) on the zone inside the window."""
@@ -269,7 +299,7 @@ class Grader:
                           "forbidden_fields": forbidden, "start_tick": start.tick, "end_tick": end.tick,
                           "active_end_tick": active_end.tick, "start_time": start.time, "end_time": end.time,
                           "active_end_time": active_end.time, "duration_s": (end.time - start.time).total_seconds(),
-                          "frames": len(run), "raised": None, "wrong_cards": []}
+                          "frames": len(run), "raised": None, "raised_at_recovery": None, "wrong_cards": []}
                     if name == "dropout":
                         ep["outcome"] = "not_published"
                     elif name == "dead_clock":
@@ -283,16 +313,21 @@ class Grader:
 
     def _grade_fault(self, ep: Dict[str, Any], name: str, real: List[Dict[str, Any]]) -> None:
         zone, start, end = ep["zone"], ep["start_time"], ep["end_time"]
-        flagged = None
+        active_end = ep["active_end_time"]
+        flagged_active = None
         if self.frame_info:  # offline: did the sensor check fire on a single reading, even if it never persisted?
-            flagged = ep["sensor_check_frames"] = sum(
-                1 for f in self.zones[zone] if start <= f.time <= end
-                and self.frame_info.get((zone, f.tick), {}).get("sensor_check_labels"))
-        check = self.find_check(zone, start, end)
-        if check and check["time"] < start and flagged == 0:
+            flags = [f.time for f in self.zones[zone] if start <= f.time <= end
+                     and self.frame_info.get((zone, f.tick), {}).get("sensor_check_labels")]
+            ep["sensor_check_frames"] = len(flags)
+            flagged_active = sum(1 for when in flags if when <= active_end)  # the recovery tail does not vouch for an old card
+        check = self.find_check_during(zone, start, active_end, end)
+        if check and check["time"] < start and flagged_active == 0:
             check = None  # an earlier incident, and this fault raised nothing itself
+        late = None if check else self.find_raise(zone, self.sensor_rules, start, end)  # raised only after the fault ended
         if check:
             ep["raised"] = self._raised(check, start, ep["start_tick"])
+        if late:
+            ep["raised_at_recovery"] = self._raised(late, start, ep["start_tick"])
         for hit in self.raises:
             fields = RULE_FIELDS.get(hit["rule"], ())
             if hit["zone"] != zone or not start <= hit["time"] <= end or not set(fields) & set(ep["forbidden_fields"]):
@@ -309,6 +344,8 @@ class Grader:
             ep["outcome"] = "wrong_card"
         elif check:
             ep["outcome"] = "caught"
+        elif late:
+            ep["outcome"] = "caught_at_recovery"  # not noticed while it lasted: a miss
         elif ep["duration_s"] < raise_after.total_seconds():
             ep["outcome"] = "too_short_to_raise"
         else:
@@ -381,6 +418,7 @@ class Grader:
         false_alarms = self.false_alarms(real, faults)
         count = lambda items, key, value: sum(1 for i in items if i[key] == value)
         sensor = [e for e in faults if e["fault"] not in ("dropout", "dead_clock", "plausible_offset")]
+        at_recovery = count(sensor, "outcome", "caught_at_recovery")
         delays = [e["raised"]["delay_s"] for e in real if e["raised"]]
         summary = {
             "real_episodes": {"total": len(real), "caught": count(real, "outcome", "caught"),
@@ -392,7 +430,8 @@ class Grader:
             "sensor_fault_episodes": {"total": len(sensor), "sensor_check_caught": count(sensor, "outcome", "caught"),
                                       "trusted_wrong_card": count(sensor, "outcome", "wrong_card"),
                                       "too_short_to_raise": count(sensor, "outcome", "too_short_to_raise"),
-                                      "missed": count(sensor, "outcome", "missed")},
+                                      "missed": count(sensor, "outcome", "missed") + at_recovery,  # a miss, whenever it was noticed
+                                      "missed_noticed_only_at_recovery": at_recovery},
             "undetectable": {"total": count(faults, "fault", "plausible_offset"),
                              "sensor_check_raised": sum(1 for e in faults if e["fault"] == "plausible_offset" and e["raised"]),
                              "wrong_card": sum(1 for e in faults if e["fault"] == "plausible_offset" and e["wrong_cards"])},
@@ -509,7 +548,7 @@ def jsonable(value: Any) -> Any:
     return value
 
 
-VERDICTS = {"caught": "caught", "caught_cant_confirm": "caught as can't-confirm (safe)", "missed": "MISSED", "too_short_to_raise": "too short to raise",
+VERDICTS = {"caught": "caught", "caught_cant_confirm": "caught as can't-confirm (safe)", "missed": "MISSED", "caught_at_recovery": "MISSED (noticed only when it ended)", "too_short_to_raise": "too short to raise",
             "no_card_rule": "no card rule", "wrong_card": "WRONG CARD", "undetectable": "undetectable",
             "rejected_by_core": "rejected by Core", "accepted_by_core": "ACCEPTED BY CORE",
             "not_published": "no data (not scored)"}
@@ -537,6 +576,9 @@ def raised_text(ep: Dict[str, Any]) -> str:
         c = ep["cant_confirm_from"]
         parts.append(f"can't-confirm ({c['rule']}) since {clock(c['time'])}"
                      + (" (before the crossing)" if c["already_active"] else f", +{c['delay_s']:.0f} s"))
+    if ep.get("raised_at_recovery"):
+        r = ep["raised_at_recovery"]
+        parts.append(f"{r['rule']} at {clock(r['time'])} (+{r['delay_s']:.0f} s), only after the fault ended")
     parts += [f"{w['rule']} at {clock(w['time'])}" for w in ep.get("wrong_cards", [])]
     if not parts and ep.get("sensor_check_frames"):
         return f"nothing raised (sensor check seen on {ep['sensor_check_frames']} readings, never lasted {ep['raise_after_s']:.0f} s)"
@@ -566,7 +608,9 @@ def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
               f"{real['too_short_to_raise']}, no card rule {real['no_card_rule']}"
               + (f"; slowest raise {real['max_delay_s']:.0f} s after the crossing." if real["max_delay_s"] is not None else "."),
               f"- Sensor faults: {sensor['total']}; sensor_check caught {sensor['sensor_check_caught']}, wrong domain card "
-              f"{sensor['trusted_wrong_card']}, too short to raise {sensor['too_short_to_raise']}, missed {sensor['missed']}.",
+              f"{sensor['trusted_wrong_card']}, too short to raise {sensor['too_short_to_raise']}, missed {sensor['missed']}"
+              + (f" (of which {sensor['missed_noticed_only_at_recovery']} noticed only after the fault ended)"
+                 if sensor["missed_noticed_only_at_recovery"] else "") + ".",
               f"- Undetectable (plausible_offset): {s['undetectable']['total']}; sensor_check raised "
               f"{s['undetectable']['sensor_check_raised']}, wrong card {s['undetectable']['wrong_card']}.",
               f"- Dead clock: {s['dead_clock']['total']}; rejected by Core {s['dead_clock']['rejected_by_core']}, "
@@ -596,7 +640,9 @@ def print_summary(report: Dict[str, Any], mode: str) -> None:
           f"missed {real['missed']}, "
           f"too short {real['too_short_to_raise']}, no card rule {real['no_card_rule']}")
     print(f"[{mode}] sensor faults {sensor['total']}: sensor_check caught {sensor['sensor_check_caught']}, "
-          f"wrong card {sensor['trusted_wrong_card']}, too short {sensor['too_short_to_raise']}, missed {sensor['missed']}")
+          f"wrong card {sensor['trusted_wrong_card']}, too short {sensor['too_short_to_raise']}, missed {sensor['missed']}"
+          + (f" (incl. {sensor['missed_noticed_only_at_recovery']} noticed only at recovery)"
+             if sensor["missed_noticed_only_at_recovery"] else ""))
     print(f"[{mode}] undetectable {s['undetectable']['total']}, dead clock rejected "
           f"{s['dead_clock']['rejected_by_core']}/{s['dead_clock']['total']}, false alarms {s['false_alarms']}")
     rl = report.get("reading_level")

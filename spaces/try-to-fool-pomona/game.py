@@ -131,6 +131,12 @@ VERDICTS: Dict[str, Dict[str, str]] = {
     "missed": {"class": "fooled", "scorer": "MISSED", "headline": "You fooled Pomona",
                "why": "The problem lasted longer than the card's waiting time and no card was raised.",
                "doc": f"{DOCS}/FAKE_GREENHOUSE.md#honest-limits"},
+    "caught_at_recovery": {"class": "fooled", "scorer": "MISSED (noticed only when it ended)",
+                           "headline": "You fooled Pomona: it only noticed when your trick ended",
+                           "why": "Pomona raised its check-the-sensor card only after the trick stopped and the reading "
+                                  "snapped back to the true value. It did not see the lie while it lasted, so this "
+                                  "counts as missed.",
+                           "doc": f"{DOCS}/FAKE_GREENHOUSE.md#honest-limits"},
     "wrong_card": {"class": "fooled", "scorer": "WRONG CARD",
                    "headline": "You fooled Pomona: it trusted your lying sensor and raised {card}",
                    "why": "Pomona believed the faulty reading and built advice on it. That is the worst outcome.",
@@ -166,7 +172,7 @@ VERDICTS: Dict[str, Dict[str, str]] = {
                          "why": "The dead-clock reading got past Core's ingest check.",
                          "doc": f"{DOCS}/FAKE_GREENHOUSE.md#reading-the-report"},
 }
-FOOLED = {"missed", "wrong_card", "no_card_rule", "accepted_by_core"}
+FOOLED = {"missed", "caught_at_recovery", "wrong_card", "no_card_rule", "accepted_by_core"}
 CAUGHT = {"caught", "caught_cant_confirm", "rejected_by_core"}
 
 
@@ -465,6 +471,7 @@ class Session:
         headline = spec["headline"].format(after=after, card=card, n=minutes)
         if running:  # not over yet: say what Pomona has done so far, grade it when it ends
             headline = ("Still running. Pomona has raised its card so far" + after) if code in CAUGHT \
+                else "Still running. Pomona has only raised a card since your trick ended" if code == "caught_at_recovery" \
                 else "Still running. Pomona has not raised a card yet"
         return {"headline": headline, "why": spec["why"], "doc": spec["doc"], "class": "running" if running else spec["class"]}
 

@@ -54,7 +54,7 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
 - Pomona only advises. It never controls irrigation, dosing or any other hardware.
 - Known gaps stay visible on purpose: a plausible offset is undetectable by design, and some sensor lies are still
   not caught: a pH or EC freeze shorter than about 16 minutes (or a second one soon after the first), a jump or drift
-  on humidity, substrate moisture or substrate temperature, a drift of air temperature before it ends, and a noisy
+  on humidity, substrate moisture or substrate temperature, a slow drift of air temperature, EC or pH (Pomona notices it only when the drift ends and the reading snaps back, which is scored as "MISSED (noticed only when it ended)", not as caught), and a noisy
   pH, EC, moisture or substrate-temperature probe. See
   [docs/FAKE_GREENHOUSE.md](https://github.com/okyanu/pomona/blob/main/docs/FAKE_GREENHOUSE.md#honest-limits).
 

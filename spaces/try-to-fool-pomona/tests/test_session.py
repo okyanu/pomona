@@ -120,6 +120,18 @@ def test_a_plausible_offset_is_unfair_and_a_short_trick_is_too_short(engine):
     assert "at least 10 min" in short["view"]["episodes"][0]["headline"]
 
 
+def test_a_slow_drift_noticed_only_when_it_ends_is_a_fooled_verdict(engine):
+    drift = play(engine, [("cmd", START("drift", A, "air_temperature_c")), ("ff", 80),
+                          ("cmd", STOP("drift", A, "air_temperature_c")), ("ff", 40)])
+    (episode,) = drift["view"]["episodes"]
+    assert episode["verdict"] == "caught_at_recovery" and episode["class"] == "fooled"
+    assert episode["headline"] == "You fooled Pomona: it only noticed when your trick ended"
+    assert (drift["view"]["totals"]["fooled"], drift["view"]["totals"]["caught"]) == (1, 0)
+    running = play(engine, [("cmd", START("drift", A, "air_temperature_c")), ("ff", 80),
+                            ("cmd", STOP("drift", A, "air_temperature_c")), ("ff", 8)])
+    assert running["view"]["episodes"][0]["class"] == "running"
+
+
 def test_a_calibration_is_recorded_and_replays(make_engine):
     steps = [("cmd", START("jump", B, "ph")), ("ff", 60), ("cmd", STOP("jump", B, "ph")), ("ff", 10), ("cmd", CAL(B, "ph")), ("ff", 20)]
     first = play(make_engine(), steps)
