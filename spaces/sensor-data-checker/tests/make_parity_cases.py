@@ -140,6 +140,20 @@ for n in range(600):
     temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"},
                                       packets[-1], [field], None, packets[:-1]))
 
+# Moisture freeze duration (2 min): frozen tails at 30 s, 60 s and 5 min cadence.
+mrng = random.Random(929)
+for n in range(300):
+    field = mrng.choice(["soil_moisture_pct", "substrate_moisture_pct"])
+    length = mrng.randrange(4, 13)
+    cadence = mrng.choice([15, 30, 40, 60, 300])
+    series = [round(60 + 0.1 * mrng.randrange(-8, 9), 1) for _ in range(length)]
+    tail = mrng.randrange(2, length + 1)
+    series[-tail:] = [60.8] * tail
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    packets = [{field: v, "timestamp": (start + timedelta(seconds=cadence * k)).isoformat()} for k, v in enumerate(series)]
+    temporal_cases.append(derive_case({"crop": "tomato", "system_type": "greenhouse_substrate"},
+                                      packets[-1], [field], None, packets[:-1]))
+
 # Probe error codes and edges on water/substrate temperature.
 for field in ("water_temperature_c", "substrate_temperature_c"):
     for value in (-127.0, 85.0, -10.0, -10.01, 0.0, -0.01, 50.0, 50.01, 60.0, 60.01, 18.5, "85"):

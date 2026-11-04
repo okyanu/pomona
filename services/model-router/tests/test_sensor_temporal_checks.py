@@ -98,6 +98,39 @@ def test_air_temperature_stuck_stays_sample_based():
     assert "stuck_value" in _series("air_temperature_c", air)[-1]
 
 
+def _moisture_series(values, seconds):
+    """Soil moisture readings `seconds` apart (plus a steady air temperature); labels per step."""
+    history, out = [], []
+    start = datetime(2026, 9, 6, 8, tzinfo=timezone.utc)
+    for step, value in enumerate(values):
+        now = start + timedelta(seconds=seconds * step)
+        sensor = {"ph": 6.0, "ec_ms_cm": 2.0, "air_temperature_c": 24.0 + (step % 2) * 0.1, "humidity_pct": 60.0,
+                  "soil_moisture_pct": value, "timestamp": now.isoformat()}
+        result = derive_sensor_quality(CONTEXT, sensor, FIELDS + ["soil_moisture_pct"], now=now, history=history[-11:])
+        out.append(result["data_quality_labels"])
+        history.append(sensor)
+    return out
+
+
+def test_moisture_repeat_within_two_minutes_at_30_s_is_not_stuck():
+    # 0.1 % steps with noise of several steps: four identical readings 90 s apart happen by chance.
+    moisture = [60.4, 61.1, 60.6, 61.0, 60.8, 60.8, 60.8, 60.8]
+    assert not any("stuck_value" in labels for labels in _moisture_series(moisture, 30))
+
+
+def test_moisture_freeze_longer_than_two_minutes_at_30_s_is_stuck():
+    moisture = [60.4, 61.1, 60.6, 61.0] + [60.8] * 5
+    labels = _moisture_series(moisture, 30)
+    assert "stuck_value" in labels[-1]
+    assert not any("stuck_value" in step for step in labels[:-1])
+
+
+def test_moisture_stuck_stays_sample_based_at_one_minute_sampling():
+    # Three identical readings one minute apart already span two minutes: unchanged from the plain 3-sample rule.
+    moisture = [60.4, 61.1, 60.6, 61.0, 60.8, 60.8, 60.8]
+    assert "stuck_value" in _moisture_series(moisture, 60)[-1]
+
+
 def test_noisy_ph_probe_is_reported_instead_of_drift():
     # Unshielded analog pH probe: large jumps every sample around a stable mean.
     ph = [7.6, 6.9, 7.8, 7.1, 7.9, 6.8, 7.7, 7.0, 7.8, 6.9, 7.9, 7.0]

@@ -50,9 +50,16 @@ PLAUSIBLE_RANGES = {"ph": (3.0, 11.0), "ec_ms_cm": (0.0, 12.0)}
 # Water volumes and substrate have thermal mass: a DS18B20 can legitimately hold one
 # 0.0625 C step for hours (real aquaponic pond at 5-minute samples: 99th percentile
 # 2.25 h, longest 4.75 h). A freeze on these fields must also last this long.
+#
+# Moisture probes report in 0.1 % steps with noise of several steps, so a run of identical readings happens by
+# chance; at 30 s sampling the plain 3-sample rule would call a 5-sample run (2.5 min) a freeze. A freeze must
+# also span 2 minutes: nothing changes at 1-minute or slower sampling (3 samples already span 2 minutes), and
+# at 30 s the card needs 7 identical readings instead of 5 (fake greenhouse, seeds 1-80: 2 chance cards, 0 after).
 STUCK_MIN_DURATION = {
     "water_temperature_c": timedelta(hours=3),
     "substrate_temperature_c": timedelta(hours=3),
+    "substrate_moisture_pct": timedelta(minutes=2),
+    "soil_moisture_pct": timedelta(minutes=2),
 }
 # Persistent stuck check, only when Core supplies a trusted per-stream reference (`stream_baseline`): a field
 # whose value has not changed for longer than its limit is stuck, however much earlier variation it showed.

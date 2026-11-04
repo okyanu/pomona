@@ -83,9 +83,13 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
   "can't confirm, check the probe" (a safe catch, scored as such) and the domain card follows only after
   a calibration confirms the level (`make fake-greenhouse` has a Calibrate button, and `calibrate` steps in
   scenarios). Until then the probe stays flagged: that is by design, and a risk if nobody confirms.
-- The `sensor_check` card is raised after 3 flagged readings in a row, so a chance run of three (the
-  stuck check on a quiet probe) can raise a card: 1 false card in 23 normal runs of 6 simulated hours at
-  30 s (both zones). The softer flatline hint has its own rule and waits 10 minutes.
+- The `sensor_check` card is raised after 3 flagged readings in a row, so a chance run of identical
+  readings (the stuck check) can raise a card. Soil moisture (0.1 % steps, noise of several steps) did
+  this once in 23 normal runs of 6 simulated hours at 30 s (seed 4; seed 66 in the next 57): five equal
+  readings in a row. A moisture freeze must now also span 2 minutes, so at 30 s the card needs seven equal
+  readings, and seeds 1 to 80 give no false card. A frozen moisture probe gets its card 1 minute later at
+  30 s sampling (after 3.5 minutes of repeats instead of 2.5); nothing changes at 1-minute or slower
+  sampling. The softer flatline hint has its own rule and waits 10 minutes.
 - Closing those gaps was bounded by real logs, not by the game: a stuck pH/EC probe is judged only if the
   stream normally changes in at least 70 % of its readings (real drain probes sit still for hours and are
   never judged), a freeze shorter than about 16 minutes, or a second freeze of the same probe soon after

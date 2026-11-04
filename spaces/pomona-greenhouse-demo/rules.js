@@ -34,7 +34,9 @@
     humidity_pct: 0.25, substrate_moisture_pct: 0.25, soil_moisture_pct: 0.25 };
   const US_PER_S = 1000000n;
   // Thermal-mass fields: a freeze must also last 3 h (see STUCK_MIN_DURATION in sensor_quality.py).
-  const STUCK_MIN_DURATION_US = { water_temperature_c: 3n * 3600n * US_PER_S, substrate_temperature_c: 3n * 3600n * US_PER_S };
+  // Moisture probes: 2 min (3 samples at 1-minute sampling already span it; see STUCK_MIN_DURATION in sensor_quality.py).
+  const STUCK_MIN_DURATION_US = { water_temperature_c: 3n * 3600n * US_PER_S, substrate_temperature_c: 3n * 3600n * US_PER_S,
+    substrate_moisture_pct: 120n * US_PER_S, soil_moisture_pct: 120n * US_PER_S };
   // pH/EC whose median step is >= the drift threshold is reported as noise, not drift.
   const NOISE_MIN_SAMPLES = 6;
   // Drift baseline = median of the first BASELINE_SAMPLES plausible readings in the window.
