@@ -31,9 +31,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # --- Thresholds the expected labels are computed from -------------------------------------
 # These mirror services/model-router/app/tomato_reasoner.py (derive_tomato_risk and
-# LOW_VPD_KPA). Keep them in step with that file. Only the four labels that a real event can
-# cause are modelled: heat_stress, fungal_pressure, high_ec, water_level_risk.
+# LOW_VPD_KPA). Keep them in step with that file. Only the five labels that a real event can
+# cause are modelled: heat_stress, cold_stress, fungal_pressure, high_ec, water_level_risk.
 HEAT_C = 30.0                 # air or substrate temperature >= this -> heat_stress
+COLD_C = 16.0                 # air or substrate temperature <= this -> cold_stress
 FUNGAL_HUMIDITY_PCT = 85.0    # humidity >= this -> fungal_pressure
 LOW_VPD_KPA = 0.4             # VPD < this -> fungal_pressure
 HIGH_EC_MS_CM = 4.5           # EC >= this -> high_ec
@@ -348,6 +349,19 @@ class HeatSpike(RampEvent):
     default_params = {"ramp_min": 20.0, "target": 33.0}
 
 
+class ColdNight(RampEvent):
+    # Heating failure on a cold night. The target stays above 12 C so that, with the night humidity, the
+    # air VPD stays above 0.4 kPa: the episode carries cold_stress only, not fungal_pressure as well.
+    name, true_field = "cold_night", "air_temperature_c"
+    description = "Air temperature ramps down to about 13 C (heating failure on a cold night)."
+    default_params = {"ramp_min": 30.0, "target": 13.0}
+
+    def overlay(self, field: str, value: float) -> float:
+        if field != self.true_field:
+            return value
+        return value + self.level * min(0.0, self.params["target"] - value)  # only ever pulls down
+
+
 class HumidNight(RampEvent):
     name, true_field = "humid_night", "humidity_pct"
     description = "Humidity ramps to about 90 %."
@@ -383,7 +397,7 @@ class DryZone(Event):
 
 REGISTRY: Dict[str, type] = {cls.name: cls for cls in (
     Stuck, Drift, Jump, Spike, Noisy, Dropout, DeadClock, PlausibleOffset,
-    DryZone, HeatSpike, HumidNight, NutrientOverConcentration)}
+    DryZone, HeatSpike, ColdNight, HumidNight, NutrientOverConcentration)}
 
 
 # --- Zone: true state and sensor layer ----------------------------------------------------
@@ -563,6 +577,8 @@ def expected_labels(true: Dict[str, Any]) -> List[str]:
     labels = []
     if true["air_temperature_c"] >= HEAT_C or true.get("substrate_temperature_c", 0.0) >= HEAT_C:
         labels.append("heat_stress")
+    if true["air_temperature_c"] <= COLD_C or true.get("substrate_temperature_c", 99.0) <= COLD_C:
+        labels.append("cold_stress")
     if true["humidity_pct"] >= FUNGAL_HUMIDITY_PCT or true["vpd_kpa"] < LOW_VPD_KPA:
         labels.append("fungal_pressure")
     if true["ec_ms_cm"] >= HIGH_EC_MS_CM:

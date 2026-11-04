@@ -131,3 +131,18 @@ def test_heat_stress_action_is_a_warn_card_that_still_blocks_actuators():
     assert card["severity"] == "warn"
     assert "direct_actuator_control" in card["blocked_actions"]
     assert card["human_review_required"] is True
+
+
+def test_cold_stress_action_is_a_warn_card_that_still_blocks_actuators():
+    card = suggestion_to_advice_card(
+        {
+            "id": "cold",
+            "action": "check_heating_and_insulation",
+            "message": "Check the heating and insulation",
+            "status": "pending",
+            "context": {"risk_labels": ["cold_stress"], "blocked_actions": ["direct_actuator_control"]},
+        }
+    )
+    assert card["severity"] == "warn"
+    assert "direct_actuator_control" in card["blocked_actions"]
+    assert card["human_review_required"] is True

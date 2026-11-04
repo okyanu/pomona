@@ -1,0 +1,10 @@
+{
+  "seed": 7,
+  "duration_ticks": 440,
+  "steps": [
+    {"at_tick": 20, "start": "cold_night", "zone": "greenhouse-a"},
+    {"at_tick": 160, "stop": "cold_night", "zone": "greenhouse-a"},
+    {"at_tick": 220, "start": "cold_night", "zone": "greenhouse-b"},
+    {"at_tick": 360, "stop": "cold_night", "zone": "greenhouse-b"}
+  ]
+}

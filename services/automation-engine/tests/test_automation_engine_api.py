@@ -97,6 +97,15 @@ def test_evaluate_heat_stress_creates_an_advisory_ventilation_and_shading_sugges
     assert suggestion["requires_approval"] is True and suggestion["status"] == "pending"
 
 
+def test_evaluate_cold_stress_creates_an_advisory_heating_and_insulation_suggestion(client: TestClient):
+    response = client.post("/v1/automation/evaluate", json={"risk_labels": ["cold_stress"]})
+    assert response.status_code == 200
+    (suggestion,) = response.json()["suggestions"]
+    assert suggestion["rule_id"] == "cold_stress_check"
+    assert suggestion["action"] == "check_heating_and_insulation" and suggestion["action"] not in FORBIDDEN_ACTIONS
+    assert suggestion["requires_approval"] is True and suggestion["status"] == "pending"
+
+
 def test_evaluate_with_no_matching_labels_creates_nothing(client: TestClient):
     response = client.post("/v1/automation/evaluate", json={"risk_labels": ["missing_critical_data"]})
     assert response.status_code == 200

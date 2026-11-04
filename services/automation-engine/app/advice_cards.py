@@ -15,6 +15,7 @@ SEVERITY_BY_ACTION = {
     "check_irrigation_system": "warn",
     "check_sensor": "warn",
     "check_ventilation_and_shading": "warn",
+    "check_heating_and_insulation": "warn",
 }
 
 

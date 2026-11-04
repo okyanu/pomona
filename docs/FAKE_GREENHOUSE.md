@@ -9,8 +9,8 @@ Two kinds of trouble are kept strictly apart:
 
 - **Sensor faults**: the reading is wrong, the plant is fine (stuck, drift, jump, spike, noisy,
   dropout, dead clock, plausible offset). A good system says "cannot confirm this sensor".
-- **Real events**: the plant really is in trouble and the readings are correct (heat spike, humid
-  night, nutrient over-concentration, dry zone). A good system raises the matching card.
+- **Real events**: the plant really is in trouble and the readings are correct (heat spike, cold night,
+  humid night, nutrient over-concentration, dry zone). A good system raises the matching card.
 
 ## With Docker
 
@@ -59,7 +59,7 @@ what Pomona raised, with a verdict.
 | MISSED | A real event that lasted longer than the rule's window raised nothing |
 | MISSED (noticed only when it ended) | A sensor fault whose check-the-sensor card was raised only after the fault stopped, when the reading snapped back to the true value (a slow drift of pH, EC or air temperature). The card's label began on the first honest reading, so the lie itself was not seen. Counted as a miss in the sensor-fault totals (the summary says how many of the misses were of this kind); a card whose label began during the fault but was raised a reading or two after it ended still counts as caught |
 | too short to raise | The episode was shorter than the rule's `raise_after`; no card was possible |
-| no card rule | The label (for example `cold_stress`, which the simulator cannot produce) has no rule in `rules.yaml`, so Pomona has no card for it |
+| no card rule | The label has no rule in `rules.yaml`, so Pomona has no card for it (every label the simulator can produce has one today) |
 | WRONG CARD | A sensor fault on one field produced a domain card built on it |
 | undetectable | `plausible_offset`: an in-range constant offset nobody can see from one reading |
 | rejected by Core | A dead-clock reading refused at ingest, as intended |
@@ -75,7 +75,7 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
 - **Demos take time.** A card needs its label to persist for 10 minutes (30 for humidity) and a
   fault needs 11 samples to leave Pomona's history, so a meaningful run is 30 minutes or more.
 - What the scorer shows on the current rules: `heat_stress` raises the `heat_stress_check` card (check vents, fans and
-  shading) after 10 minutes; a slow drift of pH (0.02 per minute) is flagged after about 18 minutes
+  shading) after 10 minutes, and `cold_stress` (`cold_night`, air or substrate at or below 16 C) raises `cold_stress_check` (check heating and insulation) after 10 minutes; a slow drift of pH (0.02 per minute) is flagged after about 18 minutes
   (0.01 per minute after about 36, but 0.005 per minute over two hours stays unseen); a slow EC drift (0.05 mS/cm per
   minute) is flagged after about 10 minutes when it lasts 40 minutes, but a gentle or short one may be noticed only when it ends; a slow drift of
   air temperature, humidity, substrate moisture or substrate temperature is not seen while it lasts, only when it

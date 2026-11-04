@@ -134,6 +134,17 @@ def test_shipped_heat_stress_rule_raises_after_the_default_window_with_an_adviso
     assert kinds(feed(monitor(rules=rules), [["heat_stress"], [], ["heat_stress"], ["heat_stress"]])) == []
 
 
+def test_shipped_cold_stress_rule_raises_after_the_default_window_with_an_advisory_action():
+    rules = load_rules(settings.rules_path)  # load_rules rejects forbidden actions, so loading proves it is advisory
+    cold = next(r for r in rules if r["id"] == "cold_stress_check")
+    assert cold["match_any_labels"] == ["cold_stress"] and cold["action"] == "check_heating_and_insulation"
+    assert not {"raise_after_seconds", "clear_after_seconds", "raise_after_samples"} & set(cold)  # default windows
+    assert "16" in cold["message"] and "second thermometer" in cold["message"]
+    assert kinds(feed(monitor(rules=rules), [["cold_stress"]] * 2)) == []  # 0 and 5 min: still waiting
+    assert kinds(feed(monitor(rules=rules), [["cold_stress"]] * 3)) == [("cold_stress_check", "raised")]
+    assert kinds(feed(monitor(rules=rules), [["cold_stress"], [], ["cold_stress"], ["cold_stress"]])) == []
+
+
 SAMPLE_RULES = [{"id": "check", "match_any_labels": ["stuck_value"], "action": "check_sensor", "message": "Check.",
                  "raise_after_samples": 3},
                 *RULES]

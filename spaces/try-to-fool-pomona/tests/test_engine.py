@@ -230,6 +230,23 @@ def test_a_heat_spike_stays_a_real_event_and_raises_the_heat_card_not_a_sensor_l
         session.close()
 
 
+@pytest.mark.parametrize("zone", [A, B])
+def test_a_cold_night_stays_a_real_event_and_raises_the_cold_card_not_a_sensor_lie(zone):
+    session = game.Session.start_new(1)
+    try:
+        session.command({"op": "start", "name": "cold_night", "zone": zone})
+        session.advance(120)
+        session.command({"op": "stop", "name": "cold_night", "zone": zone})
+        session.advance(90)
+        board = session.grade()
+        (real,) = board["real"]
+        assert (real["rule"], real["outcome"]) == ("cold_stress_check", "caught"), real
+        assert not board["faults"] and not board["false_alarms"]
+        assert not any(e["rule_id"] == "sensor_check" for e in session.alert_events)  # no check-the-sensor card either
+    finally:
+        session.close()
+
+
 # --- The browser build: no asyncio event loop -------------------------------------------------------------------
 
 def test_the_sync_loop_gives_the_same_answers_as_a_real_asyncio_loop(monkeypatch):

@@ -60,7 +60,7 @@ def test_same_seed_same_world_different_seed_different_world(engine):
 TRICK_CASES = [
     ("stuck", A, "ph"), ("drift", A, "ec_ms_cm"), ("jump", B, "ph"), ("spike", A, "ph"), ("noisy", B, "humidity_pct"),
     ("dropout", B, None), ("dead_clock", A, None), ("plausible_offset", A, "ec_ms_cm"),
-    ("heat_spike", A, None), ("humid_night", B, None), ("nutrient_over_concentration", B, None), ("dry_zone", A, None),
+    ("heat_spike", A, None), ("cold_night", B, None), ("humid_night", B, None), ("nutrient_over_concentration", B, None), ("dry_zone", A, None),
 ]
 
 

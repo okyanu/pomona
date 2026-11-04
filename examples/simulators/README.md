@@ -155,10 +155,12 @@ JSON, scheduled by tick (not wall time) so replays are exact:
 ```
 
 - `scenarios/demo.json`: 460 ticks, about 3.8 hours at the default interval, every fault and
-  event, realistic timing, plus a `calibrate` of greenhouse-b EC after the nutrient ramp so the
+  event except `cold_night`, realistic timing, plus a `calibrate` of greenhouse-b EC after the nutrient ramp so the
   demo shows the full flow (can't confirm, calibrate, high_ec card). Items in the same zone are
   at least 12 ticks apart, and the real events last long enough to pass the 30 minute humidity
   and 10 minute default debounces.
+- `scenarios/cold.json`: 440 ticks (about 3.7 hours): one `cold_night` per zone, 70 minutes each, to
+  grade the `cold_stress_check` card on its own (the demo's verdicts stay as they were).
 - `scenarios/quick.json`: 60 ticks (about 30 minutes): a few sensor faults and one fast `dry_zone`
   (400 %/h) that stays dry long enough for the 10 minute water-level debounce. Quick, but less
   realistic than the demo (a real EC ramp is too slow for a quick run: a fast one trips Pomona's
@@ -184,6 +186,7 @@ JSON, scheduled by tick (not wall time) so replays are exact:
 | Name | Effect (default ramp, wall minutes) | Expected label |
 |------|--------|----------------|
 | `heat_spike` | Air temperature ramps to about 33 C in 20 min (vent failure on a sunny day) | `heat_stress` once true air or substrate temperature >= 30 (card: `heat_stress_check`) |
+| `cold_night` | Air temperature ramps down to about 13 C in 30 min (heating failure on a cold night) | `cold_stress` once true air or substrate temperature <= 16 (card: `cold_stress_check`) |
 | `humid_night` | Humidity ramps to about 90 % in 20 min | `fungal_pressure` once true humidity >= 85 % or VPD < 0.4 kPa |
 | `nutrient_over_concentration` | EC ramps to about 5.0 mS/cm in 60 min (dosing or top-up error) | `high_ec` once true EC >= 4.5 |
 | `dry_zone` | Irrigation is blocked in the substrate zone; moisture falls about 70 %/h (`drying_pct_per_hour`), roughly 45 min from 60 % to under 10 % | `water_level_risk` once true moisture < 10 % |
@@ -257,8 +260,8 @@ wrong card. `make fake-greenhouse-score` runs a no-Docker stack and scores it bo
 - The hydroponic zone cannot send water temperature (Core's `SensorEvent` has no field for it) and
   sends a neutral `soil_moisture_pct` of 50.0 because Core requires one; the truth log marks it a
   placeholder and keeps the true water temperature.
-- `expected_labels` covers only the four labels above. Derived labels such as
-  `nutrient_uptake_issue`, and pH, cold-stress or low-EC labels, are not listed.
+- `expected_labels` covers only the five labels above (heat, cold, fungal, high EC, water level). Derived
+  labels such as `nutrient_uptake_issue`, and pH or low-EC labels, are not listed.
 - `plausible_offset` is by design not detectable from a single reading.
 - Sequence numbers count published events, so a dropout leaves no gap in `sequence`.
 - The control page has no auth and only a Host-header guard; it is a local test tool.

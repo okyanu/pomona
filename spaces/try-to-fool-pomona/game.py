@@ -84,6 +84,8 @@ TRICKS: Dict[str, Dict[str, str]] = {
                          "group": "lie"},
     "heat_spike": {"title": "Heat spike", "blurb": "A vent fails on a sunny day and the air really heats up.",
                    "group": "hurt"},
+    "cold_night": {"title": "Cold night", "blurb": "The heating fails and the air really cools to about 13 °C.",
+                   "group": "hurt"},
     "humid_night": {"title": "Humid night", "blurb": "Humidity really climbs to about 90 %.", "group": "hurt"},
     "nutrient_over_concentration": {"title": "Nutrient overdose",
                                     "blurb": "A doser error really pushes the EC up.", "group": "hurt"},
@@ -106,16 +108,18 @@ FIELD_PARAMS: Dict[str, Dict[str, Dict[str, float]]] = {
 CARD_TITLES = {
     "high_humidity_fan": "a humidity card", "high_ec_alert": "a high-EC card", "low_ec_alert": "a low-EC card",
     "ph_out_of_range": "a pH card", "water_level_check": "a substrate-moisture card",
-    "heat_stress_check": "a heat card", "sensor_check": "a check-the-sensor card",
+    "heat_stress_check": "a heat card", "cold_stress_check": "a cold card",
+    "sensor_check": "a check-the-sensor card",
     "sensor_flatline": "a flat-probe hint",
 }
 CARD_NAMES = {
     "high_humidity_fan": "Humidity", "high_ec_alert": "High EC", "low_ec_alert": "Low EC", "ph_out_of_range": "pH",
-    "water_level_check": "Substrate moisture", "heat_stress_check": "Heat", "sensor_check": "Check the sensor",
-    "sensor_flatline": "Flat probe hint",
+    "water_level_check": "Substrate moisture", "heat_stress_check": "Heat", "cold_stress_check": "Cold",
+    "sensor_check": "Check the sensor", "sensor_flatline": "Flat probe hint",
 }
-LABEL_WORDS = {"fungal_pressure": "fungal pressure (humid)", "heat_stress": "heat stress", "high_ec": "high EC",
-               "low_ec": "low EC", "high_ph": "high pH", "low_ph": "low pH", "water_level_risk": "water level risk"}
+LABEL_WORDS = {"fungal_pressure": "fungal pressure (humid)", "heat_stress": "heat stress",
+               "cold_stress": "cold stress", "high_ec": "high EC", "low_ec": "low EC", "high_ph": "high pH",
+               "low_ph": "low pH", "water_level_risk": "water level risk"}
 
 # verdict code -> how it is shown. `class`: caught / fooled / unfair / short / info. `{n}` and `{card}` are filled in.
 VERDICTS: Dict[str, Dict[str, str]] = {

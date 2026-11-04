@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -83,7 +84,7 @@ def test_same_seed_and_scenario_is_byte_identical(tmp_path, capsys):
 
 def test_registry_has_all_faults_and_events():
     sensor = {"stuck", "drift", "jump", "spike", "noisy", "dropout", "dead_clock", "plausible_offset"}
-    real = {"dry_zone", "heat_spike", "humid_night", "nutrient_over_concentration"}
+    real = {"dry_zone", "heat_spike", "cold_night", "humid_night", "nutrient_over_concentration"}
     assert set(fg.REGISTRY) == sensor | real
     assert {n for n, c in fg.REGISTRY.items() if c.kind == "sensor_fault"} == sensor
     assert {n for n, c in fg.REGISTRY.items() if c.kind == "real_event"} == real
@@ -181,6 +182,8 @@ def test_dead_clock_sends_1970_and_core_rejects_it():
 EVENTS = [
     ("heat_spike", {"ramp_min": 5}, A, "air_temperature_c", "heat_stress",
      lambda t: t["air_temperature_c"] >= 30),
+    ("cold_night", {"ramp_min": 5}, B, "air_temperature_c", "cold_stress",
+     lambda t: t["air_temperature_c"] <= 16 or t.get("substrate_temperature_c", 99.0) <= 16),
     ("humid_night", {"ramp_min": 5}, B, "humidity_pct", "fungal_pressure",
      lambda t: t["humidity_pct"] >= 85),
     ("nutrient_over_concentration", {"ramp_min": 5}, B, "ec_ms_cm", "high_ec",
@@ -214,6 +217,23 @@ def test_real_event_changes_truth_and_label_follows_the_crossing(name, params, z
         if label in labels and first_label is None:
             first_label = truth["tick"]
     assert first_label is not None and first_label > 6  # active for a while before it crosses
+
+
+@pytest.mark.parametrize("zone", [A, B])
+def test_cold_night_alone_expects_cold_stress_only_and_the_ramp_is_gentle(zone):
+    """Default ramp (30 min to about 13 C): only cold_stress is expected (the night humidity keeps VPD above
+    0.4 kPa), the air never moves more than a sensor step check would flag, and it only pulls down."""
+    rows = by_zone(run_sim(240, steps(("start", 6, "cold_night", zone, None, {}), ("stop", 160, "cold_night", zone))), zone)
+    labels = [t["expect"]["expected_labels"] for _, t in rows]
+    assert ["cold_stress"] in labels and all(l in ([], ["cold_stress"]) for l in labels)
+    air = [t["true"]["air_temperature_c"] for _, t in rows]
+    assert min(air) < 14.0 and all(abs(b - a) < 0.5 for a, b in zip(air, air[1:]))  # 30 s steps, 3 C check is far away
+    assert labels[-1] == []  # recovered above 16 C after the stop
+    assert fg.vpd_kpa(fg.ColdNight.default_params["target"], max(fg.HUMIDITY_RANGE_PCT) + 2.5) >= fg.LOW_VPD_KPA
+    full = SimpleNamespace(level=1.0, true_field="air_temperature_c", params=fg.ColdNight.default_params)
+    assert fg.ColdNight.overlay(full, "air_temperature_c", 25.0) == pytest.approx(13.0)
+    assert fg.ColdNight.overlay(full, "air_temperature_c", 11.0) == 11.0  # already colder than the target: left alone
+    assert fg.ColdNight.overlay(full, "humidity_pct", 60.0) == 60.0
 
 
 def test_dry_zone_needs_a_substrate_zone():

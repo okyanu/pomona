@@ -41,6 +41,7 @@ RULE_FIELDS = {
     "high_humidity_fan": ("humidity_pct", "air_temperature_c"),
     "water_level_check": ("soil_moisture_pct", "substrate_moisture_pct"),
     "heat_stress_check": ("air_temperature_c", "substrate_temperature_c"),
+    "cold_stress_check": ("air_temperature_c", "substrate_temperature_c"),
 }
 # The fields behind each label a real event can cause: where a "can't confirm" for that episode must be.
 LABEL_FIELDS = {
@@ -63,7 +64,7 @@ METRIC_DEFINITIONS = {
     "cant_confirm_from": "when the sensor_check card began for a real episode that later raised its domain card (for example after a calibration)",
     "too_short_to_raise": "the episode (or fault window) is shorter than the rule's raise_after, so no raise was possible: not counted as missed",
     "sensor_check_frames": "offline: readings in a sensor-fault window where the sensor check fired, even when no alert was raised because the label never lasted raise_after",
-    "no_card_rule": "the expected label has no rule in rules.yaml (for example cold_stress), so Pomona has no card to raise: not a miss",
+    "no_card_rule": "the expected label has no rule in rules.yaml, so Pomona has no card to raise: not a miss",
     "missed": "a long enough real episode where the rule never raised",
     "sensor_fault_episode": "frames with a sensor fault active plus its recovering_from tail, where the fault leaves wrong readings in Pomona's 11-packet history",
     "sensor_check_caught": "a sensor rule (sensor_check or sensor_flatline) raised while the fault was still active: its label run (the raise time less the rule's raise_after) began no later than the fault's last reading, or a card from an earlier fault was already open and the readings of this fault were flagged",

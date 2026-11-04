@@ -30,7 +30,7 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
 
 - **Lie to Pomona** (sensor faults, the plants are fine): stuck, drift, jump, spike, noisy, dropout, dead clock,
   plausible offset.
-- **Hurt the plants** (real events, the readings are honest): heat spike, humid night, nutrient overdose, dry zone.
+- **Hurt the plants** (real events, the readings are honest): heat spike, cold night, humid night, nutrient overdose, dry zone.
 - **Check the probe with a meter**: tells Pomona a reference meter confirmed a probe, so it may accept the probe's
   current level.
 - **Pomona's blind test**: a random trick starts and stays hidden until you reveal it.
@@ -48,7 +48,7 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
   The first visit downloads about 9 MB (Pyodide and Pomona's code, served by the Space itself) and the browser keeps
   them for later visits.
 - The **physics is fake**: a simple simulator (`examples/simulators/fake_greenhouse.py`), not a crop model. The dry
-  zone dries in minutes, a heat spike is a vent failure on a sunny day, and so on.
+  zone dries in minutes, a heat spike is a vent failure on a sunny day, a cold night is a heating failure, and so on.
 - Time is simulated on a virtual clock (a reading every 30 seconds, physics at the real rate, so it is **not** a
   time-lapse): two simulated hours take a few seconds in the browser. A session is capped at 24 simulated hours.
 - Pomona only advises. It never controls irrigation, dosing or any other hardware.
