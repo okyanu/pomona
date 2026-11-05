@@ -69,6 +69,9 @@ cover them).
 - **Water-irrigation and nutrient specialists.** The full pipeline also runs
   them (behind the same veto); the demo runs the tomato rules only.
 - **Any model.** Deterministic rules only.
+- **Time.** To watch the checks work over time on a simulated greenhouse
+  (faults, drift, cold nights, cards), play
+  [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona).
 
 ## Tomato only
 

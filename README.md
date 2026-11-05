@@ -16,6 +16,8 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 **[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
+**[🎯 Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona)** — break a sensor in a pretend greenhouse and see if Pomona catches it. No install, no login.
+
 ![Pomona dashboard demo: a routine reading, then a high-risk nutrient reading that blocks an unsafe fertigation action, then the specialist breakdown](docs/assets/pomona-demo.gif)
 
 </div>
@@ -161,7 +163,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 | 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |
 | 6 | Automation engine | ⏳ partial — YAML rules, dashboard evaluate/approve/reject, bounded SQLite history in local Compose; [public API demo](https://automation-engine-fawn.vercel.app) remains ephemeral |
-| 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live |
+| 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live |
 | 8 | ESP32 devices | ⬜ |
 | 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |
 | 10 | Fine-tune pipeline | ⏳ partial — builders, validators, Colab, clean eval |
