@@ -18,7 +18,7 @@ from app.agronomy_calc import (
 )
 from app.audit import write_pipeline_audit
 from app.config import settings
-from app.expected_fields import expected_fields_for
+from app.expected_fields import MOISTURE_FIELDS, expected_fields_for, narrow_to_device
 from app.nutrient_ph_ec import route_nutrient_ph_ec_reasoner
 from app.safety_triage import route_safety_triage_reasoner
 from app.sensor_quality import route_sensor_quality_reasoner
@@ -104,15 +104,34 @@ async def evaluate_pipeline(
     scenario_id: str | None = None,
     history: list[dict[str, Any]] | None = None,
     stream_baseline: dict[str, dict[str, Any]] | None = None,
+    device_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Evaluate all deterministic specialists, then apply the final gate.
 
     `stream_baseline` is Core's sticky trusted reference for the sensor's stream (see
     sensor_quality.apply_persistent_checks); callers without stream state (the dashboard) omit it.
+
+    `device_fields` (multi-device zones, docs/design/multi-device-zones.md 1.3): the fields the sensor's device has
+    reported lately. Without an explicit `expected_fields`, only those of the system type's fields are expected, and the
+    tomato reasoner is told which critical fields to skip (`not_expected_fields`). Omitted: nothing changes.
     """
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
     fields = expected_fields or expected_fields_for(farm_context, sensor)
+    not_expected: list[str] | None = None
+    if device_fields and not expected_fields:
+        narrowed = narrow_to_device(fields, device_fields)
+        if len(narrowed) < len(fields):  # a device that carries none (or all) of them keeps today's behaviour
+            carried = set(device_fields)
+            # What the tomato reasoner's own critical list must skip: the system type's fields the device does not carry,
+            # and the substrate readings (which are not in `fields`) it has never sent.
+            not_expected = [f for f in fields if f not in narrowed]
+            if "substrate_temperature_c" not in carried:
+                not_expected.append("substrate_temperature_c")
+            if not carried & set(MOISTURE_FIELDS):
+                not_expected.append("substrate_moisture_pct")
+            not_expected = list(dict.fromkeys(not_expected))
+            fields = narrowed
     specialist_input: dict[str, Any] = {
         "farm_context": farm_context,
         "sensor": sensor,
@@ -143,6 +162,8 @@ async def evaluate_pipeline(
         nutrient_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
         nutrient = await route_nutrient_ph_ec_reasoner(gated_input, specialist_mode, NUTRIENT_MODEL_ID, nutrient_backend)
         crop_input = {**_combined_input(farm_context, masked_sensor), "vetoed_fields": gate["vetoed_fields"]}
+        if not_expected is not None:
+            crop_input["not_expected_fields"] = not_expected
         tomato = derive_tomato_risk(crop_input) if str(farm_context.get("crop") or "").strip().lower() == "tomato" else {
             "risk_labels": [],
             "missing_data": [],

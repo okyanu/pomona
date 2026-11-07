@@ -1,6 +1,7 @@
 """SQLite history for full sensor packets and separate modular observations."""
 import json
 import hashlib
+import math
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -9,10 +10,18 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import settings
-from app.schemas import SensorEvent, SensorObservation, CalibrationEvent, CorrectedObservation, utc_now
+from app.schemas import READING_FIELDS, SensorEvent, SensorObservation, CalibrationEvent, CorrectedObservation, utc_now
 
 
 STORED = {"stored": True}  # validation context: rows already in the database skip the sample-time floor
+PACKET_FIELD = "__packet__"  # device_fields pseudo-field: the device's live full packets (the multi-device test)
+
+
+def finite_reading_fields(packet) -> list:
+    """The READING_FIELDS of a packet (event or payload dict) that hold a finite number: context numbers and nulls do not count."""
+    get = packet.get if isinstance(packet, dict) else (lambda name: getattr(packet, name, None))
+    return [name for name in READING_FIELDS
+            if isinstance(get(name), (int, float)) and not isinstance(get(name), bool) and math.isfinite(get(name))]
 
 
 class SensorEventStore:
@@ -52,11 +61,41 @@ class SensorEventStore:
                 farm_id TEXT NOT NULL, zone_id TEXT NOT NULL, device_id TEXT NOT NULL, sample_time TEXT NOT NULL,
                 trust_verdict TEXT NOT NULL, vetoed_fields TEXT NOT NULL, created_at TEXT NOT NULL,
                 PRIMARY KEY (farm_id, zone_id, device_id, sample_time))""")
+            # Which fields each device has sent in a live full packet, and when (first and last `received_at`): the
+            # multi-device test and each device's expected fields (docs/design/multi-device-zones.md 1.3).
+            created = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='device_fields'").fetchone() is None
+            db.execute("""CREATE TABLE IF NOT EXISTS device_fields (
+                farm_id TEXT NOT NULL, zone_id TEXT NOT NULL, device_id TEXT NOT NULL, field TEXT NOT NULL,
+                first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+                PRIMARY KEY (farm_id, zone_id, device_id, field))""")
+            if created:  # an existing database: fill it once from the live packets still stored
+                self._backfill_device_fields(db)
+            db.execute("CREATE INDEX IF NOT EXISTS sensor_events_device ON sensor_events(farm_id, zone_id, device_id, id)")
             for table in ("calibration_events", "corrected_observations"):
                 db.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
                     id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,
                     farm_id TEXT, zone_id TEXT, device_id TEXT, sensor_id TEXT, received_at TEXT)""")
                 db.execute(f"CREATE INDEX IF NOT EXISTS {table}_zone ON {table}(farm_id, zone_id, id)")
+
+    @staticmethod
+    def _backfill_device_fields(db) -> None:
+        """One-time scan of the stored live full packets (current-eligible, not retained) within `retention_days`."""
+        cutoff = (utc_now() - timedelta(days=settings.retention_days)).isoformat()
+        for row in db.execute("SELECT payload, farm_id, zone_id, device_id, received_at FROM sensor_events "
+                              "WHERE current_eligible=1 AND received_at >= ? ORDER BY id", (cutoff,)).fetchall():
+            payload = json.loads(row["payload"])
+            if payload.get("mqtt_retained"):
+                continue
+            SensorEventStore._record_fields(db, row["farm_id"], row["zone_id"], row["device_id"],
+                                            [*finite_reading_fields(payload), PACKET_FIELD], row["received_at"])
+
+    @staticmethod
+    def _record_fields(db, farm_id, zone_id, device_id, fields, received_at: str) -> None:
+        for field in fields:
+            db.execute("""INSERT INTO device_fields VALUES (?,?,?,?,?,?)
+                ON CONFLICT(farm_id, zone_id, device_id, field) DO UPDATE SET
+                first_seen=MIN(first_seen, excluded.first_seen), last_seen=MAX(last_seen, excluded.last_seen)""",
+                       (farm_id, zone_id, device_id, field, received_at, received_at))
 
     @contextmanager
     def _connect(self):
@@ -117,7 +156,11 @@ class SensorEventStore:
                 db.execute("""INSERT INTO device_presence VALUES (?,?,?,?)
                     ON CONFLICT(farm_id,zone_id,device_id) DO UPDATE SET payload=excluded.payload""",
                            (event.farm_id, event.zone_id, event.device_id, json.dumps(data)))
+                if table == "sensor_events" and not event.mqtt_retained:  # a live full packet: remember what it carried
+                    self._record_fields(db, event.farm_id, event.zone_id, event.device_id,
+                                        [*finite_reading_fields(event), PACKET_FIELD], event.received_at.isoformat())
             db.execute(f"DELETE FROM {table} WHERE received_at < ?", (cutoff,))
+            db.execute("DELETE FROM device_fields WHERE last_seen < ?", (cutoff,))
             # A busy zone cannot evict a different zone's data.
             db.execute(f"""DELETE FROM {table} WHERE farm_id=? AND zone_id=? AND id NOT IN
                 (SELECT id FROM {table} WHERE farm_id=? AND zone_id=? ORDER BY id DESC LIMIT ?)""",
@@ -260,28 +303,28 @@ class SensorEventStore:
         return [model.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
     @staticmethod
-    def _filters(farm_id=None, zone_id=None):
+    def _filters(farm_id=None, zone_id=None, device_id=None):
         clauses, values = [], []
-        for name, value in (("farm_id", farm_id), ("zone_id", zone_id)):
+        for name, value in (("farm_id", farm_id), ("zone_id", zone_id), ("device_id", device_id)):
             if value is not None:
                 clauses.append(f"{name} = ?")
                 values.append(value)
         return (" WHERE " + " AND ".join(clauses) if clauses else ""), values
 
-    def _list(self, table, model, limit, farm_id, zone_id, offset=0):
+    def _list(self, table, model, limit, farm_id, zone_id, offset=0, device_id=None):
         if limit <= 0:
             return []
-        where, values = self._filters(farm_id, zone_id)
+        where, values = self._filters(farm_id, zone_id, device_id)
         with self._lock, self._connect() as db:
             rows = db.execute(f"SELECT payload FROM {table}{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                               (*values, limit, offset)).fetchall()
         return [model.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
-    def list_events(self, limit: int = 50, farm_id=None, zone_id=None, offset=0) -> list[SensorEvent]:
-        return self._list("sensor_events", SensorEvent, limit, farm_id, zone_id, offset)
+    def list_events(self, limit: int = 50, farm_id=None, zone_id=None, offset=0, device_id=None) -> list[SensorEvent]:
+        return self._list("sensor_events", SensorEvent, limit, farm_id, zone_id, offset, device_id)
 
     def prior_events(self, event: SensorEvent, limit: int = 11) -> list[SensorEvent]:
-        """Up to `limit` packets of the same farm/zone sampled before `event`, oldest first.
+        """Up to `limit` packets of the same stream (farm, zone, device) sampled before `event`, oldest first.
 
         Strictly earlier sample time; a packet with the same sample time counts only if it was stored
         before `event` (lower id). Independent of how many newer packets arrived since.
@@ -291,23 +334,23 @@ class SensorEventStore:
         with self._lock, self._connect() as db:
             own = db.execute("SELECT MAX(id) FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=? AND timestamp=?",
                              (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat())).fetchone()[0]
-            rows = db.execute("""SELECT payload FROM sensor_events WHERE farm_id=? AND zone_id=?
+            rows = db.execute("""SELECT payload FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=?
                 AND (julianday(timestamp) < julianday(?) OR (julianday(timestamp) = julianday(?) AND id < ?))
                 ORDER BY julianday(timestamp) DESC, id DESC LIMIT ?""",
-                              (event.farm_id, event.zone_id, event.timestamp.isoformat(), event.timestamp.isoformat(),
+                              (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat(), event.timestamp.isoformat(),
                                own if own is not None else -1, limit)).fetchall()
         return [SensorEvent.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
-    def latest_event(self, farm_id=None, zone_id=None) -> Optional[SensorEvent]:
-        where, values = self._filters(farm_id, zone_id)
+    def latest_event(self, farm_id=None, zone_id=None, device_id=None) -> Optional[SensorEvent]:
+        where, values = self._filters(farm_id, zone_id, device_id)
         where += (" AND " if where else " WHERE ") + "current_eligible=1 AND julianday(timestamp) <= julianday(?)"
         with self._lock, self._connect() as db:
             row = db.execute(f"SELECT payload FROM sensor_events{where} ORDER BY julianday(timestamp) DESC, id DESC LIMIT 1",
                              (*values, (utc_now() + timedelta(seconds=60)).isoformat())).fetchone()
         return SensorEvent.model_validate(json.loads(row["payload"]), context=STORED) if row else None
 
-    def list_observations(self, limit=50, farm_id=None, zone_id=None, offset=0):
-        return self._list("sensor_observations", SensorObservation, limit, farm_id, zone_id, offset)
+    def list_observations(self, limit=50, farm_id=None, zone_id=None, offset=0, device_id=None):
+        return self._list("sensor_observations", SensorObservation, limit, farm_id, zone_id, offset, device_id)
 
     def devices(self, farm_id=None, zone_id=None):
         where, values = self._filters(farm_id, zone_id)
@@ -329,6 +372,27 @@ class SensorEventStore:
                             "availability": "unknown" if received is None else ("recent" if age <= settings.device_timeout_seconds else "silent"),
                             "sample_stale": sample_age > 3600 or sample_age < -60})
         return results
+
+    def device_fields_for(self, event: SensorEvent) -> Optional[list]:
+        """The fields `event`'s device is expected to report, or None when its zone is single-device for this reading.
+
+        Multi-device (docs/design/multi-device-zones.md 1.1): besides the event's own device, another device of the same
+        farm and zone has sent a live full packet within `retention_days` before the event's `received_at`. A row counts
+        when first_seen <= received_at and last_seen >= received_at - retention_days. The value is then the sorted list of
+        the event's device fields whose rows count by the same rule (1.3).
+        """
+        if not settings.multi_device_zones:
+            return None
+        received = event.received_at or utc_now()
+        until = received.isoformat()
+        since = (received - timedelta(days=settings.retention_days)).isoformat()
+        with self._lock, self._connect() as db:
+            counting = db.execute("""SELECT device_id, field FROM device_fields WHERE farm_id=? AND zone_id=?
+                AND julianday(first_seen) <= julianday(?) AND julianday(last_seen) >= julianday(?)""",
+                                  (event.farm_id, event.zone_id, until, since)).fetchall()
+        if not any(row["field"] == PACKET_FIELD and row["device_id"] != event.device_id for row in counting):
+            return None
+        return sorted(row["field"] for row in counting if row["device_id"] == event.device_id and row["field"] != PACKET_FIELD)
 
     def add_trust(self, event: SensorEvent, trust_verdict: str, vetoed_fields: list) -> None:
         """Record the pipeline's trust verdict for a stored reading (replaces an earlier verdict for it)."""
@@ -387,6 +451,7 @@ class SensorEventStore:
                 "calibration_events",
                 "corrected_observations",
                 "event_trust",
+                "device_fields",
             ):
                 db.execute(f"DELETE FROM {table}")
 

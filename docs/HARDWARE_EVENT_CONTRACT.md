@@ -58,8 +58,32 @@ reading (`missing_ec`, ...) instead of showing a calm zone: the dashboard's sens
 - **The schema version stays `1.0`:** every 1.x sender may send a partial packet. Behaviour change worth knowing:
   a firmware bug that drops a field used to get a 422 only the device log saw; now the grower sees the missing
   reading and a `sensor_check` alert.
-- **One device per zone** sending the full set of probes is the supported case. A zone where two devices each carry
-  some of the probes is not supported: the zone's latest packet would flip between devices and report `missing_*`.
+- **One device per zone** sending the full set of probes is the simplest case and behaves as always. Two or more
+  devices in one zone (for example a climate node with air temperature and humidity, and a substrate node with pH, EC
+  and moisture) are judged **per device** from the first live full packet of the second device on
+  (`docs/design/multi-device-zones.md`, slice 1):
+  - Each device's sensor checks run on its own history, so an offset between two probes of one field is not noise and a
+    frozen probe is still "stuck".
+  - Each device is expected to report only the fields it has reported in the last 7 days (`retention_days`), so no
+    device gets `missing_*` for a probe it never had. Only finite numbers count, not `null`.
+  - A probe that stops reporting stays expected for 7 days: `missing_*` and the `sensor_check` alert stay up that long,
+    then the field is forgotten. In a multi-device zone a probe silent for 7 days is forgotten; remove it from the
+    zone or fix it. A single-device zone keeps today's rule (missing until it reports).
+  - A zone returns to single-device when the other device has sent no live full packet for 7 days. The remaining device
+    must then carry everything the system type expects, or it gets `missing_*`. That is the first signal a node dead for
+    a week gives: there is no whole-node silence alert.
+  - A device that carries none of the expected fields gets today's behaviour; give such a device its own zone.
+  - Only live full packets count: modular observations, retained MQTT messages and packets with a bad clock do not.
+  - `MULTI_DEVICE_ZONES=0` turns this off (every zone is judged as single-device).
+  - A fast device in a shared zone shortens how far back a slow device's stored history reaches (retention is per
+    zone).
+  - **Known limits until slice 2:** the dashboard overview, tiles, trust line and "Evaluate current risk" show the
+    zone's newest packet, which flips between devices (tiles from the other device show "--"). A risk that needs fields
+    from two devices (heat on the climate node together with low moisture on the substrate node) is not raised
+    automatically: each device is evaluated alone.
+  - Core's `/v1/sensors/events`, `/v1/sensors/events/latest`, `/v1/sensors/export.csv` and `/v1/sensors/observations`
+    take an optional `device_id` filter; `/v1/sensors/events` also returns `zone_multi_device` and
+    `latest_device_fields`.
 - A probe not fitted for the zone's system type (for example substrate moisture on a hydroponic zone) is not
   expected, so leaving it out raises nothing.
 

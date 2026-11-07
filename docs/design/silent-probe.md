@@ -121,10 +121,10 @@ Simulators / scorer: `fake_greenhouse.py`, `inprocess_pomona.py`, `score_fake_gr
 - **Retained MQTT message:** never live (existing rule).
 - **Dashboard re-posting the latest event:** a repeated sample time is ignored by the alert monitor.
 - **Device clock lagging:** shows an old age on the panel, which is visible and correct.
-- **Multi-device zones (limit):** `latest_event` and router history are zone-wide while alerts and
-  baselines are per device. Zones where two devices each carry some of the probes are not supported
-  by this design (the latest packet would flip between devices and report `missing_*`); one device
-  per zone sending the full set is the supported case. Written into the hardware contract.
+- **Multi-device zones (limit):** this design assumes one device per zone sending the full set of probes.
+  `docs/design/multi-device-zones.md` (slice 1) now judges each device on its own history and expected fields in
+  a multi-device zone, so no device gets `missing_*` for a probe it never had; `latest_event` and the dashboard
+  views stay zone-wide until its slice 2. Written into the hardware contract.
 
 ## Out of scope (later, own designs)
 

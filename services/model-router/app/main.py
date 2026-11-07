@@ -13,6 +13,7 @@ from app.advisor import explain
 from app.actuator_gate import route_actuator_gate_reasoner
 from app.audit import read_pipeline_audit, write_pipeline_audit
 from app.config import settings
+from app.expected_fields import KNOWN_SENSOR_FIELDS
 from app.registry import discover_models, get_model
 from app.sensor_quality import route_sensor_quality_reasoner
 from app.safety_triage import route_safety_triage_reasoner
@@ -280,10 +281,24 @@ class PipelineEvaluateRequest(BaseModel):
         description=("Core's sticky trusted reference per field: {median, n, window_s, last_change_at}, optionally "
                      "{spread, spread_lag, last_value, last_at, change_share, change_steps, longest_run_s}."),
     )
+    device_fields: Optional[List[str]] = Field(
+        default=None,
+        description=("Multi-device zones: the reading fields the sensor's device has reported lately. Without an explicit "
+                     "expected_fields, only those of the system type's fields are expected. Unknown names are dropped."),
+    )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
     mode: Literal["rules_only", "hybrid_guarded"] = "hybrid_guarded"
     scenario_id: Optional[str] = None
+
+    @field_validator("device_fields", mode="before")
+    @classmethod
+    def keep_known_device_fields(cls, value):
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError("device_fields must be a list of field names")
+        return [name for name in value if isinstance(name, str) and name in KNOWN_SENSOR_FIELDS]
 
     @field_validator("stream_baseline")
     @classmethod
@@ -656,6 +671,7 @@ async def evaluate_pomona_pipeline(request: PipelineEvaluateRequest) -> Pipeline
         request.scenario_id,
         history=request.history,
         stream_baseline=request.stream_baseline,
+        device_fields=request.device_fields,
     )
     logger.info(
         "pipeline id=%s scenario=%s risk=%s review=%s",

@@ -50,6 +50,13 @@ This model is crop-agnostic and useful across:
 }
 ```
 
+`POST /v1/pipeline/evaluate` also takes an optional `device_fields` (list of reading field names). Core's outcome feed
+sends it only for a device in a multi-device zone (`docs/design/multi-device-zones.md`): the fields that device has
+reported in the last 7 days. Without an explicit `expected_fields`, the router then expects only those of the system
+type's fields (a moisture field counts when any moisture name is present; an empty result falls back to the full list),
+and the tomato reasoner skips the others as missing critical data. An explicit `expected_fields` always wins. Absent
+`device_fields`, nothing changes.
+
 ## Output Shape
 
 ```json

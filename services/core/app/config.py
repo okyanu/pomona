@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     mqtt_observation_topic_pattern: str = "pomona/+/+/sensor/+/observation"
     max_events: int = Field(default=100000, ge=1)
     retention_days: int = Field(default=7, ge=1, le=3650)
+    # Judge each device of a multi-device zone on its own expected fields (docs/design/multi-device-zones.md).
+    # 0 = every zone is single-device, as before.
+    multi_device_zones: bool = True
     device_timeout_seconds: int = Field(default=120, ge=1)
     db_path: Path = Path("data/pomona.db")
     api_key: str = ""

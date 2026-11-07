@@ -99,7 +99,7 @@ class OutcomeFeed:
                                event.device_id, event.farm_id, event.zone_id, exc)
 
     def _history(self, event: SensorEvent) -> List[Dict[str, Any]]:
-        """Prior-only packets for the same farm/zone, oldest first: what the dashboard sends (newest 12
+        """Prior-only packets of the same stream (farm, zone, device), oldest first: what the dashboard sends (newest 12
         minus the latest = 11), taken relative to this reading so a backed-up queue cannot shrink it."""
         history = []
         for item in self._store.prior_events(event, HISTORY_LIMIT - 1):
@@ -120,6 +120,7 @@ class OutcomeFeed:
         sensor = event.model_dump(mode="json")
         sensor.pop("source", None)
         baseline = self._stream_baseline(event)
+        device_fields = self._store.device_fields_for(event)  # None in a single-device zone: the key is then absent
         result = _post(settings.model_router_url, "/v1/pipeline/evaluate", {
             "scenario_id": "core_feed",
             "farm_context": {
@@ -137,6 +138,7 @@ class OutcomeFeed:
             "proposed_command": {"action_type": "continue_monitoring"},
             "actor": "core_feed",
             "mode": "rules_only",
+            **({"device_fields": device_fields} if device_fields is not None else {}),
         })
         gate = result.get("trust_gate")
         if gate:  # what this reading's verdict was, so later readings' references leave vetoed values out

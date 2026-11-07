@@ -780,3 +780,92 @@ def test_evaluate_context_carries_missing_fields(monkeypatch):
     assert client.post("/api/automation/evaluate").json()["available"]
     assert sent["context"]["missing_fields"] == ["ec_ms_cm"] and sent["context"]["vetoed_fields"] == ["ec_ms_cm"]
     assert sent["context"]["readings"] == {"ec_ms_cm": None}
+
+
+# --- Multi-device zones, slice 1 (docs/design/multi-device-zones.md 1.6) ---------------------------------------
+
+def _two_device_pipeline(monkeypatch, overview_fields, core_events):
+    """Run /api/pipeline against fakes: returns (what the dashboard asked Core, what it posted to the router)."""
+    event = {"farm_id": "f", "zone_id": "z", "device_id": "substrate-1", "timestamp": "2026-07-20T10:00:00Z",
+             "ph": 6.0, "ec_ms_cm": 2.0, "soil_moisture_pct": 40.0, "source": "mqtt"}
+    sent = {"core": [], "router": []}
+
+    async def fake_overview():
+        return dashboard_main.OverviewResponse(core_available=True, latest_event=event, recent_events=[event],
+                                               **overview_fields)
+
+    class FakeResponse:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): return None
+        def json(self): return self.body
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path, params=None):
+            sent["core"].append((path, dict(params or {})))
+            return FakeResponse({"events": core_events})
+        async def post(self, path, json):
+            sent["router"].append((path, json))
+            return FakeResponse({"pipeline_id": "p"})
+
+    monkeypatch.setattr(dashboard_main, "overview", fake_overview)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    assert client.get("/api/pipeline").json()["available"]  # unscoped request: no farm_id or zone_id in the query
+    return sent
+
+
+def _packet(stamp, ph=6.0, **extra):
+    return {"farm_id": "f", "zone_id": "z", "device_id": "substrate-1", "timestamp": stamp, "ph": ph,
+            "source": "mqtt", "received_at": "2026-07-20T11:00:00Z", "mqtt_retained": False, **extra}
+
+
+def test_multi_device_pipeline_uses_the_devices_own_history_and_its_fields(monkeypatch):
+    # Core answers oldest first. The evaluated packet (10:00:00) is among them, a late packet (10:00:30, sampled after it)
+    # arrived before it, and an older packet (09:58:30) arrived after it.
+    events = [_packet("2026-07-20T09:59:00Z", 6.1), _packet("2026-07-20T10:00:30Z", 6.9),
+              _packet("2026-07-20T10:00:00Z", 6.0), _packet("2026-07-20T09:58:30Z", 6.2),
+              _packet("2026-07-20T09:59:00Z", 6.15)]
+    sent = _two_device_pipeline(monkeypatch, {"zone_multi_device": True, "latest_device_fields": ["ec_ms_cm", "ph"]}, events)
+    assert sent["core"] == [("/v1/sensors/events", {"limit": 24, "farm_id": "f", "zone_id": "z", "device_id": "substrate-1"})]
+    _, body = sent["router"][0]
+    assert body["device_fields"] == ["ec_ms_cm", "ph"]
+    # strictly earlier than the evaluated sample, in sample-time order, API order breaking the tie at 09:59:00
+    assert [(h["timestamp"], h["ph"]) for h in body["history"]] == [
+        ("2026-07-20T09:58:30Z", 6.2), ("2026-07-20T09:59:00Z", 6.1), ("2026-07-20T09:59:00Z", 6.15)]
+    assert not {"source", "received_at", "mqtt_retained"} & set(body["history"][0])
+
+
+def test_multi_device_history_keeps_the_newest_11(monkeypatch):
+    events = [_packet(f"2026-07-20T09:{minute:02d}:00Z", 6.0 + minute / 100) for minute in range(20, 60)]
+    sent = _two_device_pipeline(monkeypatch, {"zone_multi_device": True, "latest_device_fields": ["ph"]}, events)
+    stamps = [h["timestamp"] for h in sent["router"][0][1]["history"]]
+    assert len(stamps) == 11 and stamps[0] == "2026-07-20T09:49:00Z" and stamps[-1] == "2026-07-20T09:59:00Z"
+
+
+def test_single_device_pipeline_request_is_unchanged(monkeypatch):
+    events = [_packet("2026-07-20T09:59:00Z", 6.1), _packet("2026-07-20T10:00:00Z", 6.0)]
+    sent = _two_device_pipeline(monkeypatch, {}, events)
+    assert sent["core"] == [("/v1/sensors/events", {"limit": 12})]  # no device filter, no farm and zone from the event
+    _, body = sent["router"][0]
+    assert "device_fields" not in body
+    assert [h["ph"] for h in body["history"]] == [6.1]  # the existing "drop the last by arrival" rule
+
+
+def test_overview_passes_the_two_core_keys_on(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self): return None
+        def json(self):
+            return {"events": [], "latest_event": {"timestamp": "2026-07-20T10:00:00Z"},
+                    "zone_multi_device": True, "latest_device_fields": ["ph"]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path, params=None): return FakeResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    body = client.get("/api/overview").json()
+    assert body["zone_multi_device"] is True and body["latest_device_fields"] == ["ph"]
