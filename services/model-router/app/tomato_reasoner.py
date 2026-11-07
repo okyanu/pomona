@@ -224,7 +224,8 @@ def _validate_model_labels(output: List[Any]) -> List[str]:
         raise ValueError("model output labels must all be strings")
     unknown = set(output) - ALLOWED_RISK_LABELS
     if unknown:
-        raise ValueError(f"model output used labels outside the allowlist: {', '.join(sorted(unknown))}")
+        # Count only: the unknown labels are model-written text and this message is returned to callers.
+        raise ValueError(f"model output used {len(unknown)} label(s) outside the allowlist")
     return list(dict.fromkeys(output))
 
 

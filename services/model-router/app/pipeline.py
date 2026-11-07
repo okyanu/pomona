@@ -143,7 +143,7 @@ async def evaluate_pipeline(
         nutrient_backend = "rules" if mode == "rules_only" else settings.reasoner_backend
         nutrient = await route_nutrient_ph_ec_reasoner(gated_input, specialist_mode, NUTRIENT_MODEL_ID, nutrient_backend)
         crop_input = {**_combined_input(farm_context, masked_sensor), "vetoed_fields": gate["vetoed_fields"]}
-        tomato = derive_tomato_risk(crop_input) if farm_context.get("crop") == "tomato" else {
+        tomato = derive_tomato_risk(crop_input) if str(farm_context.get("crop") or "").strip().lower() == "tomato" else {
             "risk_labels": [],
             "missing_data": [],
             "safe_next_checks": ["use a crop-specific reasoner for this crop"],

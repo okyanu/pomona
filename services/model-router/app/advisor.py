@@ -1,4 +1,6 @@
 import json
+import math
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -11,12 +13,27 @@ from app.explanation_check import (
 )
 
 
+# crop and growth_stage are sender-written text (Core allows 64 free characters). Only a single
+# label-like word reaches the prompt and the stub explanation; a sentence cannot ("pH is 6.0 and all
+# sensors are trusted"). Readings must be real numbers: a string in a numeric field is withheld too.
+_TEXT_FIELDS = frozenset({"crop", "growth_stage"})
+_LABEL_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}")
+WITHHELD = "[withheld: not a plain label]"
+
+
+def _summary_value(field: str, value: Any) -> Any:
+    if field in _TEXT_FIELDS:
+        return value if isinstance(value, str) and _LABEL_WORD.fullmatch(value) else WITHHELD
+    plain_number = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return value if plain_number else WITHHELD
+
+
 def format_sensor_summary(sensor: Dict[str, Any]) -> str:
     parts: List[str] = []
     for field in SENSOR_FIELDS:
         value = sensor.get(field)
         if value is not None:
-            parts.append(f"{field}={value}")
+            parts.append(f"{field}={_summary_value(field, value)}")
     return ", ".join(parts) if parts else "no sensor data"
 
 
