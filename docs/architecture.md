@@ -41,11 +41,14 @@ on a named volume in Docker Compose, with bounded history retention. Neither
 the model nor a recorded approval has a hardware execution path. Local
 operation does not provide authenticated reviewer identity.
 
-## First MVP (running now)
+## First MVP (2026-06, historical)
 
 ```text
 greenhouse_tomato simulator → MQTT → core → model-router (stub)
 ```
+
+The current local stack is the full chain at the top of this page, with
+SQLite persistence and a dashboard; see [PROJECT_STATUS.md](./PROJECT_STATUS.md).
 
 Run: `./scripts/up.sh` then `./scripts/sim.sh`
 

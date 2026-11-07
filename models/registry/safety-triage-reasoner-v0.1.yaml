@@ -8,7 +8,7 @@ type: safety_reasoner
 status: needs_targeted_improvement_v0_1_retained
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/SAFETY_TRIAGE_REASONER.md
 
 huggingface:

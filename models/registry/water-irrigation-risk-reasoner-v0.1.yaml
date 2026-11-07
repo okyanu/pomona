@@ -8,7 +8,7 @@ type: water_irrigation_risk_reasoner
 status: published_release_candidate
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/WATER_IRRIGATION_RISK_REASONER.md
 
 huggingface:

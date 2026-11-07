@@ -22,8 +22,8 @@ Sensor / Simulator → MQTT → pomona-core → DB → model-router
    → reasoner / advisor LLM → safety-checker → automation-engine → dashboard
 ```
 
-The LLM **advises** — it never directly controls actuators. A deterministic
-safety-checker is the final authority on any automation action.
+The LLM **advises** — it never directly controls actuators. Deterministic
+rules make every decision; there is no actuator execution path, only suggestions a person approves or rejects.
 
 ## Repos & releases
 

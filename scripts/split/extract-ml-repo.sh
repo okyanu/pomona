@@ -97,7 +97,7 @@ Training pipeline and deployment tools for the Pomona Agronomist advisor model.
 | Artifact | Location |
 |----------|----------|
 | **Weights** | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
-| **Platform** | [Okyanus/pomona](https://github.com/Okyanus/pomona) |
+| **Platform** | [okyanu/pomona](https://github.com/okyanu/pomona) |
 | **Registry** | `models/registry/agronomist-gemma4.yaml` in platform repo |
 
 ## Quickstart

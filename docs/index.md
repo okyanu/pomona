@@ -37,7 +37,7 @@ Sensor / Simulator → MQTT → Pomona Core → SQLite → Model Router
 
     ---
 
-    Test guarded tomato, irrigation, and nutrient scenarios in the public browser demo.
+    Try guarded tomato-rule scenarios (sensor trust check, risk labels, blocked actions) in the browser. Rules only; no model runs in the demo.
 
     [:octicons-arrow-right-24: Open the demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)
 

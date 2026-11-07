@@ -8,8 +8,8 @@ type: advisor_llm
 status: published_advisory
 
 github:
-  training_repo: Okyanus/pomona-agronomist-llm
-  platform_repo: Okyanus/pomona
+  training_repo: okyanu/pomona-agronomist-llm  # not yet published
+  platform_repo: okyanu/pomona
 
 huggingface:
   repo_id: Okyanus/ai-pomona-agronomist-gemma4

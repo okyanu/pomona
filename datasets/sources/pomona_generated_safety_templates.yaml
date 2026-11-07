@@ -1,6 +1,6 @@
 id: pomona_generated_safety_templates
 name: Pomona Generated Safety Templates
-url: https://github.com/Okyanus/pomona
+url: https://github.com/okyanu/pomona
 doi: null
 license: apache-2.0
 allowed_use: Pomona-authored generated examples for safety, actuator, and command-gate model scaffolds.

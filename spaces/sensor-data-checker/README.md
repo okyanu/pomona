@@ -62,7 +62,7 @@ applied.
 
 Why rules instead of an AI model? We measured it on the
 [Agri Telemetry Sanity Bench](https://huggingface.co/datasets/Okyanus/agri-telemetry-sanity-bench):
-fine-tuned small models scored 0.34–0.68, the rules 1.00.
+fine-tuned small models scored 0.34–0.68 label F1. The bench's ground truth is Pomona's own rules on synthetic packets, so the rules score 1.00 by construction; the point is that the small models could not reproduce simple threshold checks.
 
 Advisory only. This tool checks whether data is trustworthy; it does not judge whether growing
 conditions are good, and it never controls equipment.

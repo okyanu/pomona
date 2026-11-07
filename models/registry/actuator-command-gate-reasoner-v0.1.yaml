@@ -8,7 +8,7 @@ type: actuator_command_gate_reasoner
 status: published_research_preview_below_standalone_gate
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/ACTUATOR_COMMAND_GATE_REASONER.md
 
 huggingface:

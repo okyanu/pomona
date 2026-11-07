@@ -1,6 +1,6 @@
 # Pomona Safety Triage Reasoner
 
-The Safety Triage Reasoner is the planned second small specialist model in Pomona's model factory.
+The Safety Triage Reasoner is a small specialist model in Pomona's model factory. A local v0.1 adapter was trained but failed its publish gate (safety F1 about 0.78, blocked-action F1 about 0.71 on a generated holdout); it is not published.
 
 It is inspired by the same small-verifiable-reasoner direction as the tomato risk model, but its task is different:
 
@@ -202,7 +202,7 @@ private/colab/pomona-safety-triage-v0.1.1-hardcases-training-data.zip
 
 ## Training Status
 
-Status: dataset builder ready, not trained.
+Status: local v0.1 adapter trained; failed the publish gate; not published.
 
 Recommended next training run is v0.1.1 hardcases in Colab, followed by local evaluation against held-out safety cases.
 

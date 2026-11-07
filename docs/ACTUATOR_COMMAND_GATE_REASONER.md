@@ -190,7 +190,7 @@ private/colab/pomona-actuator-command-gate-v0.1.1-hardcases-training-data.zip
 
 ## v0.1.2 Targeted Correction
 
-The independent 126-case clean holdout showed that v0.1 is structurally
+The 126-case clean holdout (generated from rule templates plus hand-written cases) showed that v0.1 is structurally
 reliable but still confuses chemical requests, irrigation control,
 actuator-conflict review, and clean manual checks. The v0.1.1 hardcase adapter
 regressed, so v0.1.2 uses a broader correction curriculum instead of simply
@@ -207,7 +207,7 @@ datasets/processed/pomona-actuator-command-gate-v0.1.2-correction/
 
 The split contains 5,294 records: 4,237 train, 528 validation, and 529 test.
 It has zero exact input overlap across splits and zero overlap with the
-independent 126-case clean holdout. The correction curriculum covers chemical,
+126-case clean holdout. The correction curriculum covers chemical,
 irrigation-control, actuator-conflict, clean/bad-sensor manual checks, climate,
 fertigation, and observation controls.
 
@@ -240,7 +240,7 @@ private/venvs/pomona-model-test/bin/python \
 ### v0.1.2 Evaluation Decision
 
 The generated 50-case Colab smoke test scored 1.0 on every metric. That score
-did not generalize to the independent 126-case clean holdout.
+did not generalize to the 126-case clean holdout.
 
 | Metric | v0.1 | v0.1.2 |
 |---|---:|---:|
@@ -256,7 +256,7 @@ cases were routed to human approval. It also invented
 `safe_irrigation_control_request` twice and missed blocked actions in chemical
 and irrigation cases. Decision: reject v0.1.2 as a standalone release and
 retain v0.1 as the development candidate. The deterministic gate remains the
-production authority.
+only authority (Pomona is an alpha, not a production system).
 
 ## Safety Boundary
 

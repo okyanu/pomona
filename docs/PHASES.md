@@ -19,12 +19,12 @@
 | **0** | Project setup & open source | ✅ Done |
 | **1** | Local MVP (Docker, core, simulator) | ✅ Done |
 | **2** | Dashboard + database | ⏳ **In progress** |
-| **3** | Tomato greenhouse reasoner | ⏳ Partial — HF adapter + guarded local Ollama/GGUF runtime; model quality hardening pending |
+| **3** | Tomato greenhouse reasoner | ⏳ Partial — deterministic rules decide; the HF adapter (v0.1.7) is experimental (learned a training shortcut, see [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)); retrain pending |
 | **4** | Safety checker | ⏳ Partial — deterministic tomato and actuator gates implemented; full chain pending |
 | **5** | Agronomist LLM adapter | ⏳ Partial — HF adapter + model-router contract; live backend wiring pending |
 | **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; dashboard integration (evaluate, list, approve/reject) live in `services/dashboard` |
-| **7** | Public browser demo | ⏳ Partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
-| **8** | ESP32 / real devices | ⬜ Planned — see [EDGE_CONTROLLER_DESIGN_NOTES.md](./EDGE_CONTROLLER_DESIGN_NOTES.md) (exploratory, pre-implementation) |
+| **7** | Public browser demo | ⏳ Partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live; full platform playground still planned |
+| **8** | ESP32 / real devices | ⬜ Planned — monitoring-only SD-card logger firmware ([`devices/esp32-cress-logger`](https://github.com/okyanu/pomona/tree/main/devices/esp32-cress-logger)) compiles but is not yet bench-tested on a board; no field data. Controller design: [EDGE_CONTROLLER_DESIGN_NOTES.md](./EDGE_CONTROLLER_DESIGN_NOTES.md) (exploratory) |
 | **9** | Model registry standard | ⏳ Partial — public YAML registry and HF lifecycle metadata |
 | **10** | Fine-tune pipeline | ⏳ Partial — dataset builders, validators, Colab training, and clean evaluation |
 

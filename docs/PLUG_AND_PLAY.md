@@ -14,16 +14,16 @@ No OS-specific setup. No manual database install. No separate Python venv for co
 
 ---
 
-## Today (Phase 1) vs target (Phase 2+)
+## Phase 1 vs now
 
-| Piece | Phase 1 (now) | Full plug & play (target) |
-|-------|---------------|---------------------------|
-| MQTT broker | ✅ Docker | ✅ Docker |
+| Piece | Phase 1 (2026-06) | Now (2026-11, local) |
+|-------|-------------------|----------------------|
+| MQTT broker | ✅ Docker | ✅ Docker, login required |
 | Core API | ✅ Docker | ✅ Docker |
 | Model router | ✅ Docker | ✅ Docker |
-| **Database** | ❌ in-memory only | ✅ **SQLite or Postgres in Docker** |
-| **Web dashboard** | ❌ none | ✅ **Dashboard container :3000** |
-| Simulator | Host Python script | ✅ Optional container |
+| **Database** | ❌ in-memory only | ✅ SQLite on a Docker volume |
+| **Web dashboard** | ❌ none | ✅ Dashboard container :3000 |
+| Simulator | Host Python script | Host Python script |
 | One command | `./scripts/up.sh` | Same — more services inside |
 
 **Phase 2 is what makes it feel like a complete product in Docker**, not just an API demo.

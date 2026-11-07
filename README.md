@@ -12,7 +12,7 @@
 
 Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE).
 
-[Website](https://okyanu.github.io/pomona/) · [GitHub](https://github.com/okyanu/pomona) · [Hugging Face](https://huggingface.co/Okyanus) · [Automation API](https://automation-engine-fawn.vercel.app) · [Quickstart](#-quickstart-any-os--docker) · [Contribute](#-open-source--contribute)
+[Website](https://okyanu.github.io/pomona/) · [GitHub](https://github.com/okyanu/pomona) · [Hugging Face](https://huggingface.co/Okyanus) · [Automation API](https://automation-engine-fawn.vercel.app) · [Quickstart](#-quickstart-docker) · [Contribute](#-open-source--contribute)
 
 **[🌱 Try the guarded greenhouse & hydroponic demo in your browser](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)** — no install, no login.
 
@@ -26,7 +26,7 @@ Anyone can clone, use, fork, and contribute — free under [Apache-2.0](LICENSE)
 
 > **Early MVP.** Simulated sensors → SQLite-backed API → guarded reasoner pipeline → monitoring dashboard with manual suggestion decisions. No actuator execution. Docker remains the recommended deployment path; local validation also works without Docker. [What to expect →](docs/GETTING_STARTED.md)
 
-## 🚀 Quickstart (any OS — Docker)
+## 🚀 Quickstart (Docker)
 
 ```bash
 git clone https://github.com/okyanu/pomona.git
@@ -86,7 +86,7 @@ Sensor / Simulator → MQTT → pomona-core → DB → model-router
    → reasoner / advisor LLM → safety-checker → automation-engine → dashboard
 ```
 
-**Hard rule:** the LLM advises — it never directly controls actuators. A deterministic safety-checker is the final authority on any automation action.
+**Hard rule:** the LLM advises — it never directly controls actuators. Deterministic rules make every decision, and there is no actuator execution path: automation only raises suggestions for a person to approve or reject. The rules are tested but not field-calibrated.
 
 More detail: **[docs/architecture.md](docs/architecture.md)**
 
@@ -101,7 +101,7 @@ More detail: **[docs/architecture.md](docs/architecture.md)**
 | **Roadmap** | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | **Website** | [Project documentation →](https://okyanu.github.io/pomona/) |
 
-**Good first contributions:** dashboard (Phase 2), tests, docs, simulators, crop templates.
+**Good first contributions:** tests, docs, simulators, crop templates, dashboard polish.
 
 Fork → branch → `make test` → open PR.
 
@@ -129,14 +129,14 @@ Pomona keeps platform code, routing, deterministic safety logic, and metadata in
 
 | Model | Current status | Use now? |
 |-------|----------------|----------|
-| Tomato risk reasoner `v0.1.7` | Published on Hugging Face | ✅ Use |
-| Water/irrigation reasoner `v0.1.8` | Published release candidate | ✅ Advisory + deterministic validation |
-| Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ✅ Use for integration |
-| Safety triage reasoner `v0.1` | Local candidate, not published | ✅ Use for integration |
+| Tomato risk reasoner `v0.1.7` | Published on Hugging Face, experimental: learned a training shortcut and answers `[]` on 146 of 153 varied benchmark cases ([details](docs/TOMATO_RISK_REASONER.md#evaluation-snapshot)) | ⚠️ Research only; the guarded route uses deterministic rules |
+| Water/irrigation reasoner `v0.1.8` | Published release candidate; evaluated only on synthetic, rule-derived cases | ⚠️ Advisory only, behind deterministic validation |
+| Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ⚠️ Owner's local integration tests only; not available publicly |
+| Safety triage reasoner `v0.1` | Local candidate, not published | ⚠️ Owner's local integration tests only; not available publicly |
 | Actuator command gate `v0.1` | Published research preview, below standalone release gate | ⚠️ Advisory only; deterministic checker required |
 | Actuator command gate `v0.1.1-hardcases` | Regression in local eval | ❌ Do not use |
-| Actuator command gate `v0.1.2-correction` | Regression in independent eval | ❌ Do not use |
-| Nutrient / pH-EC reasoner `v0.1.1-correction` | LoRA, GGUF, and MLX published | ✅ Use only through deterministic guarded route |
+| Actuator command gate `v0.1.2-correction` | Regression on a held-out (mostly generated) eval | ❌ Do not use |
+| Nutrient / pH-EC reasoner `v0.1.1-correction` | LoRA, GGUF, and MLX published; evaluated only on synthetic, rule-generated cases | ⚠️ Only through the deterministic guarded route; the rules make the decision |
 
 Near-term integration chain:
 
@@ -164,7 +164,7 @@ Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [doc
 | 5 | LLM advisor | ⏳ partial — published adapter + router contract |
 | 6 | Automation engine | ⏳ partial — YAML rules, dashboard evaluate/approve/reject, bounded SQLite history in local Compose; [public API demo](https://automation-engine-fawn.vercel.app) remains ephemeral |
 | 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live |
-| 8 | ESP32 devices | ⬜ |
+| 8 | ESP32 devices | ⬜ — logger firmware compiles; not yet bench-tested, no field data |
 | 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |
 | 10 | Fine-tune pipeline | ⏳ partial — builders, validators, Colab, clean eval |
 

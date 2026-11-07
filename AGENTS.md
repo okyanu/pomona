@@ -16,7 +16,7 @@ Human quickstart: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 
 **Current phase:** 2 — dashboard + SQLite persistence (see [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md))
 
-**Maturity:** Early MVP. Works: `./scripts/up.sh`, simulator, REST API, stub advisor. Missing: dashboard UI, DB persistence, real LLM in router, reasoner, safety, automation, ESP32.
+**Maturity (2026-11-07):** Early MVP, tested in software only. Works locally: Docker stack with MQTT broker login, SQLite persistence, monitoring dashboard, deterministic tomato/water/nutrient rules with sensor-quality checks, deterministic safety checker and deny-by-default actuator gate, suggestion-only automation with manual approve/reject, fake-greenhouse simulator with a scorer, static browser demos. Small LoRA models are advisory only and the rules decide (tomato v0.1.7 learned a training shortcut; nutrient scores are on synthetic cases). Missing: bench-tested ESP32 hardware (logger firmware compiles but has not run on a board), any field data or field validation, live LLM backend by default, production hardening, actuator execution (by design).
 
 ---
 
@@ -97,7 +97,7 @@ Block or flag: pesticide dosage, definite diagnosis without evidence, fertilizer
 ```text
 services/core/           ✅ FastAPI + MQTT ingest
 services/model-router/   ✅ stub/ollama advisor
-services/dashboard/      ⏳ Phase 2
+services/dashboard/      ✅ monitoring UI (Phase 2 partial)
 models/registry/         YAML metadata → HF models
 examples/simulators/     greenhouse_tomato.py
 private/                 gitignored owner notes

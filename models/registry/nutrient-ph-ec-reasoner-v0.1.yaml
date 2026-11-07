@@ -7,7 +7,7 @@ type: nutrient_ph_ec_reasoner
 status: release_candidate_guarded_runtime_published
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/NUTRIENT_PH_EC_REASONER.md
 
 huggingface:
@@ -37,7 +37,14 @@ evaluation:
   blocked_action_f1: 1.0
   human_review_match: 1.0
   exact_match: 0.0
-  note: Exact match misses are rationale wording variation; semantic fields matched.
+  holdout_source: synthetic_rule_generated
+  note: >-
+    The 140 held-out cases are synthetic, generated from Pomona's own rule
+    templates (expected labels = rule output), so these scores measure
+    agreement with the rules, not real-world accuracy. Exact match misses are
+    rationale wording variation. Unguarded GGUF re-measured 2026-10-25 on the
+    same cases: label F1 0.5214; guarded scores below come from the
+    deterministic rules correcting model output.
   guarded_runtime:
     ollama_gguf_f16:
       valid_json_rate: 1.0

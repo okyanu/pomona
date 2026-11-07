@@ -58,4 +58,4 @@ License: Apache-2.0
 - [Edge controller design notes](https://okyanu.github.io/pomona/EDGE_CONTROLLER_DESIGN_NOTES/)
 - [Repository map](https://okyanu.github.io/pomona/REPOS/)
 - [Versioning policy](https://okyanu.github.io/pomona/VERSIONING/)
-- [Sibling ML training repository](https://github.com/okyanu/pomona-agronomist-llm)
+- Sibling ML training repository `pomona-agronomist-llm` (not yet published)

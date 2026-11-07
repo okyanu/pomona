@@ -78,7 +78,7 @@ passes the same holdout as the reference adapter and Ollama model.
 
 ## Local Acceptance Results
 
-Frozen independent holdout: 168 cases, 24 per category.
+Frozen held-out synthetic set (rule-derived, no train overlap): 168 cases, 24 per category.
 
 | Runtime | Precision | Label F1 | Blocked F1 | Review match | Time |
 |---|---:|---:|---:|---:|---:|
@@ -99,7 +99,7 @@ published. Detailed evaluation reports remain private under
 ## Nutrient / pH-EC v0.1.1 Guarded Runtime
 
 The v0.1.1 LoRA, GGUF, and MLX artifacts are published as guarded experimental
-runtime formats. Keep the independent 140-case adapter evaluation as the
+runtime formats. Keep the 140-case synthetic adapter evaluation as the
 reference baseline when preparing any new conversion:
 
 ```bash
@@ -112,12 +112,16 @@ MODEL_PYTHON=private/venvs/pomona-mlx/bin/python \
 
 These scripts write only to `private/models/`. The GGUF/Ollama and MLX artifacts
 are prepared locally. The latest exact-prompt raw Ollama runtime failed the
-140-case holdout with allowed-label rate `0.8571`, label F1 `0.6690`,
+140-case holdout. The first run (2026-07-19) reported allowed-label rate
+`0.8571` and label F1 `0.6690`; it could not be reproduced, and the
+2026-10-25 re-measurement gave allowed-label rate `0.7857`, label F1 `0.5214`,
 blocked-action F1 `0.8571`, and human-review match `0.8571`. The MLX 8-bit
 smoke test scored label F1 `0.8667` and has not passed the full holdout. Both
 packages are structurally uploadable as experimental artifacts, but neither
-is an approved standalone runtime release. The guarded hybrid path now passes
-the same full holdout at `1.0000` on every gate for both Ollama and MLX. The
+is an approved standalone runtime release. The guarded hybrid path scores
+`1.0000` on every gate for both Ollama and MLX on the same synthetic holdout;
+that is the deterministic rules correcting the model on rule-generated cases,
+not a measure of real-world accuracy. The
 deterministic guard remains mandatory for API/runtime integration.
 
 ## API
@@ -172,8 +176,11 @@ python3 scripts/models/evaluate_tomato_risk_runtime.py \
 For MLX, run a local server first and then use `--backend mlx --host
 http://127.0.0.1:8085`. The golden suite has 15 hand-selected cases; the
 larger test split is development data and must not be described as an
-independent release benchmark. No Tomato GGUF or MLX candidate is published
-until the owner explicitly approves a release.
+independent release benchmark. Tomato GGUF and MLX conversions were
+published on Hugging Face as a research preview (2026-09-27); on 2026-11-07
+the adapter was found to have learned a training shortcut (see
+[TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)), so they are research
+only.
 
 If an Ollama or MLX output is unavailable or invalid, `hybrid_guarded` falls
 back to deterministic rules. Direct actuator control remains forbidden.

@@ -7,15 +7,15 @@ Local-first edge platform for greenhouse and hydroponic automation — inspired 
 ```text
 Devices / Simulator
        ↓ MQTT
-  Pomona Core          ← ingest + API (✅ today)
+  Pomona Core          ← ingest, SQLite, sensor checks + API (✅ local)
        ↓
-  Model Router         ← advisor / reasoner (✅ stub today)
+  Model Router         ← deterministic rules; advisor stub or optional Ollama (✅ local)
        ↓
-  Safety Checker       ← filter unsafe output (planned)
+  Safety Checker       ← deterministic checks, deny-by-default actuator gate (✅ local)
        ↓
-  Automation Engine    ← suggested actions only (planned)
+  Automation Engine    ← suggestions only, manual approve/reject (✅ local)
        ↓
-  Dashboard            ← UI (planned)
+  Dashboard            ← monitoring UI (✅ local)
 ```
 
 **Hard rule:** the LLM advises — it never directly controls actuators.
@@ -26,9 +26,9 @@ Devices / Simulator
 |---------|------|--------|
 | **core** | Sensor ingest, storage, REST API | ✅ MVP |
 | **model-router** | Route tasks to models / rules | ✅ MVP |
-| **dashboard** | Live data and alerts | ⏳ Phase 2 |
-| **safety-checker** | Block unsafe recommendations | ⏳ Phase 4 |
-| **automation-engine** | YAML rules → suggestions | ⏳ Phase 6 |
+| **dashboard** | Live data and alerts | ✅ local (Phase 2 partial) |
+| **safety-checker** | Block unsafe recommendations | ✅ local (Phase 4 partial) |
+| **automation-engine** | YAML rules → suggestions | ✅ local (Phase 6 partial) |
 
 ## Sensor event schema
 

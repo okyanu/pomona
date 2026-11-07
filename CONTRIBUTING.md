@@ -28,9 +28,9 @@ make test
 
 Read before coding:
 
-1. [docs/architecture.md](architecture.md) — system design and safety boundaries
-2. [docs/PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done; pick unclaimed work
-3. [docs/ROADMAP.md](ROADMAP.md) — phase goals
+1. [docs/architecture.md](docs/architecture.md) — system design and safety boundaries
+2. [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) — what's done; pick unclaimed work
+3. [docs/ROADMAP.md](docs/ROADMAP.md) — phase goals
 
 ---
 
@@ -45,7 +45,7 @@ Read before coding:
 | **Templates** | Greenhouse / crop deployment templates |
 | **Issues** | Bug reports, feature ideas, discussion |
 
-**Good first issues:** Phase 2 (dashboard + persistence), tests, docs improvements.
+**Good first issues:** tests, docs improvements, simulators, crop templates, dashboard polish.
 
 ---
 
@@ -73,7 +73,7 @@ Agriculture software can affect real crops and people. Flag unsafe model output,
    - What changed and why
    - How you tested it
    - Screenshots if UI-related
-5. Wait for review — we aim to respond to all PRs
+5. Wait for review (one maintainer, so it may take a while)
 
 No force-push to `main`. No commits with secrets (`.env`, tokens, weights).
 

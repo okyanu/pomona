@@ -15,7 +15,7 @@ Try the guarded tomato reasoner without installing anything:
 | Family | Version | Status | Canonical artifact | Runtime role |
 |---|---:|---|---|---|
 | Agronomist assistant | Gemma4 | Published | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Broad advisory explanation |
-| Tomato risk | v0.1.7 | Published | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato greenhouse risk labels |
+| Tomato risk | v0.1.7 | Published, experimental (learned a training shortcut; see [caveat](TOMATO_RISK_REASONER.md#evaluation-snapshot)) | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato greenhouse risk labels |
 | Water / irrigation risk | v0.1.8 | Published release candidate | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | Moisture and irrigation triage |
 | Actuator command gate | v0.1 | Published research preview | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Advisory command classification; deterministic gate is final |
 | Sensor quality | v0.1.1-boundary | Unpublished local candidate | Local adapter only | Telemetry quality classification |
@@ -31,12 +31,23 @@ Try the guarded tomato reasoner without installing anything:
 
 ## Nutrient / pH-EC v0.1.1
 
-The current local candidate uses `Qwen/Qwen2.5-0.5B-Instruct` with a PEFT LoRA
-adapter and explicit derived pH/EC state features. On the independent 140-case
-holdout it achieved valid JSON, allowed labels/actions, label F1,
-blocked-action F1, and human-review match of `1.0`. Rationale wording varies,
-so exact object matching is `0.0`; this is not a reason to bypass deterministic
-validation.
+The published adapter uses `Qwen/Qwen2.5-0.5B-Instruct` with a PEFT LoRA
+adapter and explicit derived pH/EC state features. On a 140-case held-out set
+it scored `1.0` for valid JSON, allowed labels/actions, label F1,
+blocked-action F1, and human-review match (exact object match `0.0`, because
+rationale wording varies). **That held-out set is synthetic:** it was generated
+from Pomona's own rule templates, so the expected labels are what the rules say.
+It is a self-consistency test, not a measure of real-world accuracy.
+
+Harder measurements are much lower. The published GGUF, re-measured on
+2026-10-25 on the same 140 cases without the guard, scored label F1 `0.5214`;
+without the `derived_signals` input block it fell to about `0.14`-`0.19`. On
+7 packets shaped like real pipeline input, the unguarded model scored label F1
+about `0.21` and none passed the output validator. The guarded route's `1.0`
+comes from the deterministic rules correcting the model's output afterwards.
+On 120 real lab analyses (AGC2) the rules themselves flagged 55 cases that
+contradict commercial rockwool practice; see
+[NUTRIENT_PH_EC_REASONER.md](NUTRIENT_PH_EC_REASONER.md).
 
 The model is advisory only. It must never dose nutrients, alter pH/EC, change
 fertigation, or control equipment. Pomona's deterministic rules and human
@@ -45,8 +56,8 @@ review remain authoritative.
 ## Runtime Formats
 
 For accepted candidates, Pomona can prepare PEFT LoRA, GGUF/Ollama, and MLX
-deployment formats. Nutrient GGUF and MLX builds are prepared by local scripts
-only for local testing and are not published by this repository. Every
+deployment formats. Nutrient GGUF and MLX builds are prepared by local scripts;
+the published Hugging Face copies are experimental runtime artifacts. Every
 conversion requires a fresh runtime evaluation. A conversion is not a new
 trained model family.
 

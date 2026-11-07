@@ -1,6 +1,6 @@
 # Getting started
 
-**Early MVP** — simulated sensors, REST API, demo advisor. No dashboard yet.
+**Early MVP, tested in software only** — simulated sensors, SQLite-backed REST API, deterministic rules, a monitoring dashboard and suggestion-only automation. No hardware has been bench-tested and nothing is actuated.
 
 Full install guide (Docker + pip, all OS): **[INSTALL.md](./INSTALL.md)**
 
@@ -13,7 +13,7 @@ cp .env.example .env
 curl http://localhost:8080/health
 ```
 
-No `make` required. Works on macOS, Linux, Windows (Docker Desktop).
+No `make` required. Developed on macOS; CI runs on Linux. Windows with Docker Desktop should work but is not tested.
 
 ## The MQTT broker needs a login
 
@@ -45,12 +45,13 @@ pip3 install -r requirements-dev.txt
 
 ## What works / doesn't
 
-| Works | Not yet |
-|-------|---------|
-| MQTT + simulator | Web dashboard |
-| REST API + in-memory store | Database persistence |
-| Stub agronomist advice | Real LLM in Docker |
-| | ESP32, automation, safety |
+| Works locally | Not yet |
+|---------------|---------|
+| MQTT (login required) + simulator and fake greenhouse | Bench-tested ESP32 hardware (firmware compiles, not run on a board) |
+| REST API + SQLite persistence | Any field data or field validation |
+| Monitoring dashboard (http://localhost:3000) | Live LLM advisor by default (stub unless you enable Ollama) |
+| Deterministic sensor checks, crop rules and safety checker | Actuator execution (by design: suggestions only) |
+| Suggestion-only automation with manual approve/reject | Production hardening |
 
 ## Contribute
 

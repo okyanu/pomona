@@ -285,7 +285,7 @@ Pomona does **not** use VibeThinker code, weights, or training data.
 
 ## Related Pomona Artifacts
 
-- Platform repo: `Okyanus/pomona`
+- Platform repo: `okyanu/pomona`
 - Related model: `Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora`
 - Planned dataset scaffold: `Okyanus/pomona-safety-triage-v0.1`
 

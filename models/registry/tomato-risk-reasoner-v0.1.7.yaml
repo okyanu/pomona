@@ -8,7 +8,7 @@ type: reasoner
 status: published_experimental_specialist
 
 github:
-  platform_repo: Okyanus/pomona
+  platform_repo: okyanu/pomona
   docs: docs/TOMATO_RISK_REASONER.md
 
 huggingface:

@@ -1,6 +1,6 @@
 # Pomona Water / Irrigation Risk Reasoner
 
-The Water / Irrigation Risk Reasoner is a planned small specialist model for crop-agnostic irrigation telemetry.
+The Water / Irrigation Risk Reasoner is a small specialist model for crop-agnostic irrigation telemetry. v0.1.8 is published as a release candidate, evaluated only on synthetic, rule-derived cases.
 
 Task:
 
@@ -79,7 +79,7 @@ leakage-free internal test: 392 cases
   human-review match:   1.000
   allowed outputs:      1.000
 
-independent holdout: 168 cases
+held-out synthetic set (no train overlap): 168 cases
   label F1:             1.000
   blocked-action F1:    1.000
   human-review match:   1.000

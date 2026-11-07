@@ -1,6 +1,6 @@
 # Install & run (macOS, Linux, Windows)
 
-Pomona runs the **same way on every OS** if you use Docker. Pip is optional for local development.
+Pomona runs in Docker, so it should run the same way on any OS with Docker. It is developed on macOS and CI runs on Linux; Windows is not tested. Pip is optional for local development.
 
 ---
 
@@ -19,7 +19,7 @@ Pomona runs the **same way on every OS** if you use Docker. Pip is optional for 
 
 ## Path A — Docker (recommended)
 
-Works on **macOS, Linux, Windows** (Docker Desktop + WSL2 on Windows).
+Developed on **macOS**, CI on **Linux**; **Windows** (Docker Desktop + WSL2) should work but is not tested.
 
 ```bash
 git clone https://github.com/okyanu/pomona.git

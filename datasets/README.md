@@ -79,6 +79,6 @@ Schema and labeling rules:
 
    Set `PUSH_TO_HF=1` only when you intend to commit and push the HF repo.
 
-Published release target: [Okyanus/pomona-tomato-risk-v0.1](https://huggingface.co/datasets/Okyanus/pomona-tomato-risk-v0.1).
+Published on Hugging Face as [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data). The labels are rule-derived, not field observations (see also the tomato reasoner caveat on how its training split was built, in [docs/TOMATO_RISK_REASONER.md](../docs/TOMATO_RISK_REASONER.md)).
 
 See [datasets/pomona-tomato-risk-v0.1/README.md](pomona-tomato-risk-v0.1/README.md) for validate and publish commands.

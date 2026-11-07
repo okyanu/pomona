@@ -4,7 +4,7 @@ title: "Pomona Tomato Risk v0.1"
 type: dataset
 authors:
   - name: Okyanus
-repository-code: "https://github.com/Okyanus/pomona"
+repository-code: "https://github.com/okyanu/pomona"
 url: "https://huggingface.co/datasets/Okyanus/pomona-tomato-risk-v0.1"
 license: Apache-2.0
 version: "0.1.0"

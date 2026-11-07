@@ -6,13 +6,14 @@ Hugging Face. See [Versioning](https://github.com/okyanu/pomona/blob/main/docs/V
 
 | Model | Current status | Use now? |
 |-------|----------------|----------|
-| Tomato risk reasoner `v0.1.7` | Published on Hugging Face | ✅ Use |
-| Water/irrigation reasoner `v0.1.8` | Published release candidate | ✅ Advisory + deterministic validation |
-| Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ✅ Use for integration |
-| Safety triage reasoner `v0.1` | Local candidate, not published | ✅ Use for integration |
+| Tomato risk reasoner `v0.1.7` | Published, experimental: learned a training shortcut ([details](https://github.com/okyanu/pomona/blob/main/docs/TOMATO_RISK_REASONER.md)) | ⚠️ Research only; deterministic rules decide |
+| Water/irrigation reasoner `v0.1.8` | Published release candidate; synthetic evaluation only | ⚠️ Advisory only, behind deterministic validation |
+| Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ⚠️ Owner's local tests only |
+| Safety triage reasoner `v0.1` | Local candidate, failed its publish gate | ⚠️ Owner's local tests only |
 | Actuator command gate `v0.1` | Published research preview, below standalone release gate | ⚠️ Advisory only; deterministic checker required |
 | Actuator command gate `v0.1.1-hardcases` | Regression in local eval | ❌ Do not use |
-| Actuator command gate `v0.1.2-correction` | Regression in independent eval | ❌ Do not use |
+| Actuator command gate `v0.1.2-correction` | Regression on a held-out eval | ❌ Do not use |
+| Nutrient / pH-EC reasoner `v0.1.1-correction` | Published (LoRA, GGUF, MLX); synthetic evaluation only | ⚠️ Only through the deterministic guarded route |
 
 ## Published Hugging Face assets
 
@@ -22,6 +23,7 @@ Hugging Face. See [Versioning](https://github.com/okyanu/pomona/blob/main/docs/V
 | Tomato risk reasoner | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) |
 | Water/irrigation reasoner | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) |
 | Actuator command gate | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) |
+| Nutrient / pH-EC reasoner | [Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-lora](https://huggingface.co/Okyanus/pomona-nutrient-ph-ec-reasoner-v0.1.1-lora) |
 | Greenhouse sensor dataset | [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data) |
 
 ## Safety rule
@@ -33,4 +35,4 @@ approval.
 
 ## Next model families
 
-Tracked in [Roadmap](Roadmap) and `docs/SMALL_MODEL_FACTORY.md`: nutrient/pH-EC reasoner, strawberry risk reasoner, lettuce risk reasoner.
+Tracked in [Roadmap](Roadmap) and `docs/SMALL_MODEL_FACTORY.md`: strawberry risk reasoner, lettuce risk reasoner.

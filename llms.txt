@@ -17,12 +17,12 @@ Pomona's hard rule: an LLM or reasoner model may advise, but a deterministic saf
 - [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora): irrigation/moisture risk reasoner, release candidate
 - [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4): advisor LLM adapter
 - [Okyanus/greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data): published greenhouse sensor dataset
-- [docs/TOMATO_RISK_REASONER.md](docs/TOMATO_RISK_REASONER.md): model card with a real, reproducible input/output example
+- [docs/TOMATO_RISK_REASONER.md](docs/TOMATO_RISK_REASONER.md): model card with a reproducible input/output example (the adapter is experimental; the guarded route's output comes from the rules)
 
 ## Try it
 - [Pomona Greenhouse Demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): live in-browser demo of the guarded tomato reasoner for greenhouse and hydroponic systems, no install, no login
 - [examples/tomato_risk_quickstart.py](examples/tomato_risk_quickstart.py): standalone script, no extra dependencies, runs against a local `docker compose` stack
-- [examples/scenarios/](examples/scenarios/): real greenhouse sensor JSON scenarios (routine, high-risk, missing/stale data)
+- [examples/scenarios/](examples/scenarios/): simulated greenhouse sensor JSON scenarios (routine, high-risk, missing/stale data)
 
 ## Contribute
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md)

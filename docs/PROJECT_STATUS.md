@@ -15,6 +15,39 @@ Living record of completed work. **Update when a phase completes** — see check
 
 Agents: read [PHASES.md](./PHASES.md) before starting work.
 
+Local checkpoint (2026-11-07), software only, from the git log since 2026-09-27.
+No phase completed; no hardware bench test, field data or model release claimed.
+
+- **Sensor checks on real logs.** Real sensor logs are replayed (`make real-replay`)
+  to tune the step, freeze, noise and drift checks; a failed check vetoes the
+  reading before the crop rules and raises a `sensor_check` card. A noisy EC
+  check covers streams sampled every 90 s or faster. Slow drift of air,
+  humidity, moisture and substrate temperature is still not caught (see
+  [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md)).
+- **Fake greenhouse.** A simulator with injected sensor faults and real-world
+  events, a truth log and a scorer (`make fake-greenhouse-score`), and the
+  public [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona)
+  game built on the same alert path.
+- **Core and safety.** Required sample times, dead-clock and future-time
+  rejection, farm time zone display; partial packets accepted, with a missing
+  probe shown as "can't confirm"; MQTT broker login required by default;
+  actuator command gate denies unknown action types by default; prompt-injection
+  tests through sender text; numbers in model-written advisor text are checked.
+- **Alerts and automation.** Alerts raise after a risk persists and clear after
+  it stays away; heat and cold stress cards; outcomes confirmed from later
+  readings after an approval. Still suggestion-only; nothing is actuated.
+- **Hardware (not bench-tested).** ESP32 logger firmware (pH median reads, pH
+  calibration check, optional Wi-Fi upload of the SD log) and 3D-print designs
+  for sensor stations, mounts and a probe lid. The firmware has not run on a
+  board yet.
+- **Models.** Tomato v0.1.7 was found to have learned a training-template
+  shortcut (see [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)); the
+  nutrient adapter's published scores are on synthetic cases (see
+  [NUTRIENT_PH_EC_REASONER.md](./NUTRIENT_PH_EC_REASONER.md)). The rules decide
+  in both routes.
+
+Unit suite (`make test-local`, 2026-11-07): 14 passed + 1 skipped (datasets), 541 (core, dashboard, safety-checker, digital-twin), 80 (simulators), 50 (scripts), 440 passed + 12 expected failures (model-router; known holes), 145 (automation-engine).
+
 Local checkpoint (2026-09-25): removed unsupported root-moisture proxy, added
 offline twin-versus-persistence replay, persisted advice-card evidence and an
 offline exact-source retrieval prototype. Unit suite: 198 passed, 1 skipped;
@@ -72,7 +105,7 @@ checks. This checkpoint does not complete a phase or approve a model release.
 | This status file | ✅ |
 | GitHub remote | ⏳ User action — see `docs/GITHUB.md` |
 
-**Success condition met:** A visitor can read README + architecture and understand Pomona.
+**Success condition (intended):** a visitor can read README + architecture and understand Pomona. Not tested with outside readers.
 
 ---
 
@@ -127,10 +160,10 @@ checks. This checkpoint does not complete a phase or approve a model release.
 
 | Reasoner | Status | Decision |
 |----------|--------|----------|
-| Tomato risk `v0.1.7` | Published on Hugging Face | Use with deterministic tomato rules |
+| Tomato risk `v0.1.7` | Published on Hugging Face, experimental | Research only; learned a training shortcut (2026-11-07); deterministic tomato rules decide |
 | Water/irrigation `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
-| Sensor quality `v0.1.1-boundary` | Local candidate, not published | Use for first integration |
-| Safety triage `v0.1` | Local candidate, not published | Use for first integration |
+| Sensor quality `v0.1.1-boundary` | Local candidate, not published | Training paused; best label F1 0.684 on a 123-case holdout; rules do the work |
+| Safety triage `v0.1` | Local candidate, failed its publish gate | Local tests only; rules do the work |
 | Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker is final authority |
 | Actuator command gate `v0.1.1-hardcases` | Local regression | Do not use |
 | Actuator command gate `v0.1.2-correction` | Independent-eval regression | Do not use |
@@ -176,7 +209,6 @@ services/safety-checker:
 Future models after platform integration:
 
 ```text
-nutrient / pH-EC reasoner
 crop-specific reasoners
 digital twin scenario reasoner
 ```
@@ -287,7 +319,7 @@ be extended to call the live model-router API once a public backend exists.
 
 ## Quick reference for agents
 
-**Current focus:** Phase 2 — database persistence + dashboard skeleton.
+**Current focus (2026-11-07):** sensor-check coverage on real logs, fake-greenhouse scoring and hardware bench testing; Phase 2 hardening continues.
 
 **Do not:**
 - Let the LLM directly control actuators

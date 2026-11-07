@@ -9,15 +9,15 @@ Open edge AI for controlled agriculture.
 | 0 | Repo, docs, open source | ✅ |
 | 1 | Docker, core API, MQTT, simulator | ✅ |
 | 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; optional sensor-ingestion API-key auth added; authentication elsewhere, signed device identity, and production observability remain |
-| 3 | Tomato reasoner | ⏳ partial — local Ollama/GGUF runtime is wired behind deterministic guarding; checkpoint quality still needs improvement |
+| 3 | Tomato reasoner | ⏳ partial — deterministic rules decide; the v0.1.7 adapter learned a training shortcut (answers `[]` on 146 of 153 varied benchmark cases) and needs a retrain |
 | 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
 | 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
 | 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
 | 6 | Automation (suggestions) | ⏳ partial — [services/automation-engine](https://github.com/okyanu/pomona/tree/main/services/automation-engine) live: YAML rules, suggestions, manual approve/reject; deployed at [automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app); dashboard integration and bounded SQLite history available locally |
-| 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) live; full platform playground still planned |
-| 8 | ESP32 devices | ⬜ |
+| 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live; full platform playground still planned |
+| 8 | ESP32 devices | ⬜ — logger firmware compiles; not yet bench-tested, no field data |
 | 9 | Model registry | ⏳ partial — `models/registry/` |
-| 10 | Train reasoner models | ⏳ partial — v0.1.7 LoRA on HF |
+| 10 | Train reasoner models | ⏳ partial — small LoRAs on HF; evaluations so far are on generated data |
 
 Product phases and release versions are separate. See [VERSIONING.md](./VERSIONING.md).
 
@@ -29,8 +29,10 @@ every time). Closing the second list is how the first list stays true.
 
 ### Sustainable — shipped and self-maintaining
 
-- Deterministic safety layer is the final authority everywhere; it's rule
-  code, not a model, so it doesn't drift or degrade over time.
+- Deterministic rules make every decision; models only advise and there is
+  no actuator execution path. Rule code does not drift the way a model can,
+  but it can have defects (the actuator gate was a denylist until it became
+  deny-by-default on 2026-11-07) and its thresholds are not field-calibrated.
 - 5 models + 1 dataset published on Hugging Face, bundled in one
   [Collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9).
 - Free, static public demo Space — no server to run, no paid tier, no
@@ -110,14 +112,14 @@ Current best model set:
 
 | Reasoner | Status | Notes |
 |----------|--------|-------|
-| Tomato risk `v0.1.7` | Published | Best tomato risk-label adapter; use with deterministic tomato rules |
-| Sensor quality `v0.1.1-boundary` | Local, not published | Good enough for first integration; detects missing/suspect/stale/conflicting sensor packets |
-| Safety triage `v0.1` | Local, not published | Good enough for first integration; classifies unsafe proposed actions |
+| Tomato risk `v0.1.7` | Published, experimental | Learned a training shortcut; research only, deterministic tomato rules decide |
+| Sensor quality `v0.1.1-boundary` | Local, not published | Candidate for first integration tests; trained to label missing/suspect/stale/conflicting packets (generated data only) |
+| Safety triage `v0.1` | Local, not published | Candidate for first integration tests; trained to classify unsafe proposed actions (generated data only) |
 | Water / irrigation risk `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
 | Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker remains final authority |
 | Actuator command gate `v0.1.1-hardcases` | Rejected | Local eval regression; do not use |
-| Actuator command gate `v0.1.2-correction` | Rejected | Independent-eval regression; do not use |
-| Nutrient / pH-EC `v0.1.1-correction` | Published | LoRA, GGUF, and MLX; use only through the deterministic guarded route |
+| Actuator command gate `v0.1.2-correction` | Rejected | Held-out eval regression; do not use |
+| Nutrient / pH-EC `v0.1.1-correction` | Published | LoRA, GGUF, and MLX; evaluated on synthetic cases only; use only through the deterministic guarded route |
 
 Next integration work:
 

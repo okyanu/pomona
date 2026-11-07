@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a real greenhouse sensor scenario to Pomona's tomato risk reasoner.
+"""Send a simulated greenhouse sensor scenario to Pomona's tomato risk reasoner.
 
 Requires the platform running locally (see README quickstart):
 

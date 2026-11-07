@@ -22,9 +22,28 @@ high_ph, low_ph, high_ec, low_ec, nutrient_uptake_issue,
 sensor_anomaly, missing_critical_data
 ```
 
-This is a rules scaffold, not a trained model and not evidence of real-world
-agronomic efficacy. A dataset and model should be created only after the rule
-thresholds and independent evaluation cases are reviewed.
+The endpoint's decision comes from these rules, not from a trained model, and
+is not evidence of real-world agronomic efficacy.
+
+## Trained adapter: what the numbers mean
+
+A small LoRA (`v0.1.1-correction`, on `Qwen/Qwen2.5-0.5B-Instruct`) is
+published on Hugging Face. Its card reports `1.0` label F1, blocked-action F1
+and human-review match on a 140-case held-out set. **Those cases are synthetic:**
+they were generated from Pomona's own rule templates, and the expected labels
+are what the rules say. The score shows the adapter can copy the rules on
+rule-shaped input; it does not measure real-world accuracy.
+
+Harder checks, all unguarded model output:
+
+- Published GGUF, same 140 cases, re-measured 2026-10-25: label F1 `0.5214`.
+- Same cases without the `derived_signals` block: label F1 about `0.14`-`0.19`.
+- 7 packets shaped like real pipeline input: label F1 about `0.21`; 0 of 7
+  passed the output validator.
+
+The guarded route reaches `1.0` on the synthetic set because the deterministic
+rules correct the model's output afterwards. No real labelled pH/EC dataset has
+been used to evaluate the adapter yet.
 
 ## Try the published GGUF locally with Ollama
 

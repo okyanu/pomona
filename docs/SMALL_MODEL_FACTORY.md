@@ -28,14 +28,16 @@ Best practical system: v0.1.7 adapter + deterministic tomato rules
 
 ## Why This Matters
 
-The small model learned useful task behavior, but strict threshold reasoning was imperfect. The deterministic rule checker corrected missing data, impossible sensor readings, water risk, fungal pressure, and actuator conflicts.
+The small model learned the output format, but not the thresholds: a 2026-11-07
+check found it learned a training-template shortcut and answers `[]` on 146 of
+153 varied benchmark cases (see [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)). The deterministic rule checker corrected missing data, impossible sensor readings, water risk, fungal pressure, and actuator conflicts.
 
 This is the Pomona thesis pattern:
 
 ```text
 small local model = flexible task reasoner
 deterministic rules = safety and agronomy guardrails
-hybrid output = usable system behavior
+hybrid output = the rules' decision; the model adds little so far
 ```
 
 Do not let any model directly control actuators. The model advises or classifies; hard safety logic gates downstream action.
@@ -100,7 +102,7 @@ golden eval:
   corrections:        5 / 15
 
 v0.1.7 staged test:
-  model-only risk F1: 0.902
+  model-only risk F1: 0.902   (this script's run; the card's 0.924 is a separate eval run; both on template-built data)
   hybrid risk F1:     1.000
   corrections:        59 / 473
 ```

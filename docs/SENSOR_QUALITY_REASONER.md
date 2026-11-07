@@ -1,6 +1,6 @@
 # Pomona Sensor Quality Reasoner
 
-The Sensor Quality Reasoner is the next planned small specialist model in Pomona's small-model factory.
+The Sensor Quality Reasoner is a small specialist model in Pomona's small-model factory. A local adapter was trained; training is paused and the deterministic sensor checks below do the work (see Current Status).
 
 Task:
 
@@ -177,8 +177,8 @@ The limits come from the real logs (`make real-replay`, whose "sticky" pass repl
 feed does): pH and EC have no fixed "stuck" limit because drain and tank probes sit on one value for
 hours as a matter of course (80 % of real readings are beyond 20 minutes), so they get the adaptive check
 that leaves such probes alone (0 pH and at most 0.02 % of EC readings flagged); the air temperature, humidity,
-moisture and substrate-temperature step limits and the noise limits keep real-log false flags under 0.15 % of
-readings (and on 3 months of real 10-second data the 30-second air, humidity and pH noise limits and the fast EC
+moisture and substrate-temperature step limits and the noise limits keep the flag rate on real logs under 0.15 % of
+readings (the logs are not labelled, so not every flag is known to be false) (and on 3 months of real 10-second data the 30-second air, humidity and pH noise limits and the fast EC
 noise limit flag none); substrate temperature needs 6 h because real
 slab probes hold one 0.1 C value for up to 9 h; and a drift needs 3 times the probe's own spread because real
 drain pH and EC leave their 2 h median by 0.35 / 0.4 on 1 to 3 % of readings. Moisture has no persistent stuck
