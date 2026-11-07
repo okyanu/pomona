@@ -5,6 +5,7 @@
   * a step in air temperature, humidity, substrate moisture or substrate temperature faster than the field can
     change, against the newest trusted reading
   * noise on humidity, air temperature, pH, substrate moisture and substrate temperature, scaled to the sample interval
+  * noise on EC, one fixed limit, only for a stream sampled every 90 seconds or faster
 """
 
 from datetime import datetime, timedelta, timezone
@@ -15,8 +16,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.sensor_quality import (
-    ADAPTIVE_STUCK_FLOOR, ADAPTIVE_STUCK_MIN_CHANGE_SHARE, ADAPTIVE_STUCK_MIN_RUN, ADAPTIVE_STUCK_MIN_STEPS, NOISE_STEP_FLOOR,
-    NOISE_STEP_LIMIT_5MIN, STEP_LIMITS, STEP_MAX_RATE_C_PER_MIN, STEP_MIN_C, adaptive_stuck_limit, derive_sensor_quality,
+    ADAPTIVE_STUCK_FLOOR, ADAPTIVE_STUCK_MIN_CHANGE_SHARE, ADAPTIVE_STUCK_MIN_RUN, ADAPTIVE_STUCK_MIN_STEPS, NOISE_FIXED_LIMIT,
+    NOISE_STEP_FLOOR, NOISE_STEP_LIMIT_5MIN, STEP_LIMITS, STEP_MAX_RATE_C_PER_MIN, STEP_MIN_C, adaptive_stuck_limit, derive_sensor_quality,
 )
 
 T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
@@ -272,7 +273,7 @@ def run_noise(field, base, sigma, step_s):
 # (field, level, the simulator's healthy noise, ten times that): the fake greenhouse's own probes.
 NOISE_CASES = (("humidity_pct", 62.0, 0.8, 8.0), ("air_temperature_c", 24.0, 0.1, 1.0), ("ph", 6.1, 0.02, 0.2),
                ("soil_moisture_pct", 60.0, 0.5, 5.0), ("substrate_moisture_pct", 60.0, 0.5, 5.0),
-               ("substrate_temperature_c", 21.0, 0.1, 1.0))
+               ("substrate_temperature_c", 21.0, 0.1, 1.0), ("ec_ms_cm", 2.6, 0.03, 0.3))
 
 
 @pytest.mark.parametrize("field,base,healthy,noisy", NOISE_CASES)
@@ -365,10 +366,7 @@ def test_moisture_and_substrate_temperature_noise_sit_on_their_floors():
             assert flagged_noise(field, low, over, step_s), (field, step_s)
 
 
-def test_ec_noise_is_not_judged_here_and_a_ph_plateau_or_irrigation_swing_is_quiet():
-    # Real drain EC jumps by itself (Automatoes), so there is no EC noise limit the real logs allow.
-    ec = alternating("ec_ms_cm", 2.6, 2.9, 30)  # under the 11-packet noise limit (0.4) but a median step of 0.3 mS/cm
-    assert derive(ec[-1], ec[:-1], quiet_reference("ec_ms_cm", 2.6), ["ec_ms_cm"])["data_quality_labels"] == []
+def test_a_ph_plateau_or_irrigation_swing_is_quiet():
     # One irrigation swing among steady readings leaves the median step at zero.
     swing = [packet(i, ph=6.1 if i < 6 else 6.4) for i in range(12)]
     assert derive(swing[-1], swing[:-1], quiet_reference("ph", 6.1), ["ph"])["data_quality_labels"] == []
@@ -376,6 +374,59 @@ def test_ec_noise_is_not_judged_here_and_a_ph_plateau_or_irrigation_swing_is_qui
     healthy = alternating("soil_moisture_pct", 60.0, 61.5, 30)
     assert derive(healthy[-1], healthy[:-1], quiet_reference("soil_moisture_pct", 60.0), ["soil_moisture_pct"]) \
         ["data_quality_labels"] == []
+
+
+def ec_flagged(series):
+    result = derive(series[-1], series[:-1], quiet_reference("ec_ms_cm", 2.6), ["ec_ms_cm"])
+    # The 11-packet rule (median step 0.4 mS/cm) words its check differently: this is the stream check's own text.
+    flagged = any("inspect ec_ms_cm: readings jump between samples; check probe shielding, wiring and averaging" in check
+                  for check in result["safe_next_checks"])
+    if flagged:
+        assert "noisy_signal_possible" in result["data_quality_labels"] and "ec_ms_cm" in result["suspect_fields"]
+    return flagged
+
+
+def test_ec_noise_uses_one_fixed_limit_that_is_not_scaled():
+    assert NOISE_FIXED_LIMIT == {"ec_ms_cm": (0.20, 90.0)}
+    assert "ec_ms_cm" not in NOISE_STEP_LIMIT_5MIN and "ec_ms_cm" not in NOISE_STEP_FLOOR
+    # A median step just under and just over the limit, at every interval up to the gate: no square-root scaling.
+    for step_s in (10, 30, 60, 90):
+        assert not ec_flagged(alternating("ec_ms_cm", 2.6, 2.79, step_s)), step_s  # 0.19
+        assert ec_flagged(alternating("ec_ms_cm", 2.6, 2.81, step_s)), step_s  # 0.21
+        assert ec_flagged(alternating("ec_ms_cm", 2.6, 2.9, step_s)), step_s  # 0.30, the simulator's noisy probe
+
+
+def test_ec_noise_is_judged_only_when_the_median_interval_is_90_seconds_or_less():
+    # The same window (a median step of 0.3 mS/cm, under the 11-packet limit of 0.4) at the boundary intervals.
+    assert [ec_flagged(alternating("ec_ms_cm", 2.6, 2.9, step_s)) for step_s in (60, 90, 91, 300)] == [True, True, False, False]
+
+
+def test_ec_noise_gate_uses_the_median_interval_so_one_long_gap_does_not_switch_it_off():
+    series = alternating("ec_ms_cm", 2.6, 2.9, 30)
+    # One 5-minute hole in the window: 10 of its 11 gaps are still 30 s.
+    gap = [packet(i + (10 if i >= 6 else 0), ec_ms_cm=p["ec_ms_cm"]) for i, p in enumerate(series)]
+    assert ec_flagged(gap)
+    # The reverse: 2-minute readings with one 30-second pair stay unjudged.
+    slow = [{"timestamp": (T0 + timedelta(seconds=120 * i - (90 if i >= 7 else 0))).isoformat(), "ec_ms_cm": p["ec_ms_cm"]}
+            for i, p in enumerate(series)]
+    assert not ec_flagged(slow)
+
+
+def test_a_one_way_ec_ramp_a_dose_or_a_single_glitch_is_not_noise():
+    ramp = [packet(i, ec_ms_cm=round(1.2 + 0.25 * i, 3)) for i in range(12)]  # steps of 0.25, all one way
+    assert not ec_flagged(ramp)
+    dose = [packet(i, ec_ms_cm=1.2 if i < 6 else 2.4) for i in range(12)]
+    assert not ec_flagged(dose)
+    glitch = [packet(i, ec_ms_cm=0.0 if i == 6 else 1.2) for i in range(12)]  # 1.2 -> 0.0 -> 1.2: two of 11 steps
+    assert not ec_flagged(glitch)
+
+
+def test_healthy_fast_ec_stays_quiet_at_every_interval_up_to_90_seconds():
+    rng = random.Random(11)
+    for step_s in (10, 30, 60, 90):
+        for _ in range(40):
+            series = [packet(i, step_s=step_s, ec_ms_cm=round(1.2 + rng.gauss(0, 0.03), 3)) for i in range(12)]
+            assert not ec_flagged(series), step_s
 
 
 # --- the API ---------------------------------------------------------------------------------------------------------

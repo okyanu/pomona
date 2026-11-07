@@ -167,7 +167,7 @@ browser checker mirrors in JavaScript) and every threshold was set on the real l
 |---|---|---|
 | `stuck_value` for pH and EC (adaptive) | The value repeats for longer than 5 minutes **and** 4 times the longest hold the stream showed in its last 200 trusted readings, **and** it is at least 3 readings in a row (at 10 or 15-minute sampling one pair of equal readings is already longer than 5 minutes), **and** the stream changed in at least 70 % of those steps (15 steps minimum). Core sends `change_share`, `change_steps`, `longest_run_s` for pH and EC | pH: 0 of 7 real streams. EC: 0.02 % (IUACAAS, no-lapse replay only), 0.004 % (Automatoes), 0 elsewhere. The floor was 15 minutes; 5 minutes (one real 5-minute sample: a pair of equal readings never counts) flags exactly the same real readings |
 | `sensor_drift_possible` (step) for air temperature, humidity, substrate moisture and substrate temperature | The reading differs from the newest trusted reading (`last_value`, `last_at`) by more than max(smallest allowance, speed x minutes since that reading). Air 3 C and 1 C/min; humidity 12 %RH and 4 %RH/min; moisture 8 % and 2 %/min; substrate temperature 1.5 C and 0.3 C/min. A flagged reading is vetoed, so the reference stays put and the step stays flagged until the allowance has grown to cover it (4 minutes for +4 C air, 4 for +15 %RH, 8 for +15 % moisture, 13 for +4 C substrate), then the new level is accepted | air 0.054 % (the Reference compartment holds 17 C glitches), 0.002 % elsewhere; humidity 0.021 % (Reference glitches), 0.010 % (IUACAAS), 0.008 % (Digilog), about 0 elsewhere; moisture 0.017 % (Digilog, one 79 % glitch held until the allowance covers it), 0 elsewhere; substrate temperature 0.006 % (Digilog, one 2.4 C glitch), 0 elsewhere |
-| `noisy_signal_possible` for humidity, air temperature, pH, substrate moisture and substrate temperature | The median step over the last 12 readings is at least the limit **and** the window has not simply moved in one direction (its net movement is at most half of the distance it travelled). The 5-minute limits are 10 %RH, 2 C, 0.5 pH, 1 % moisture and 0.4 C; they shrink with the square root of the sample interval, never below the floors 3 %RH, 0.4 C, 0.1 pH, 2.5 % and 0.5 C | humidity: 0.084 % (AICU), 0.056 % (IUACAAS), 0.025 % (Digilog), about 0 elsewhere; air: 0.029 % (Reference), about 0 elsewhere; pH: 0.061 % (AICU), 0 elsewhere (the unshielded pond pH is noisy on purpose and already flagged by the 11-packet rule); moisture and substrate temperature: 0 |
+| `noisy_signal_possible` for humidity, air temperature, pH, substrate moisture and substrate temperature | The median step over the last 12 readings is at least the limit **and** the window has not simply moved in one direction (its net movement is at most half of the distance it travelled). The 5-minute limits are 10 %RH, 2 C, 0.5 pH, 1 % moisture and 0.4 C; they shrink with the square root of the sample interval, never below the floors 3 %RH, 0.4 C, 0.1 pH, 2.5 % and 0.5 C. **EC** has one fixed limit, 0.20 mS/cm, used as it is (no scaling), and is judged only when the median sample interval of the window is 90 seconds or less | humidity: 0.084 % (AICU), 0.056 % (IUACAAS), 0.025 % (Digilog), about 0 elsewhere; air: 0.029 % (Reference), about 0 elsewhere; pH: 0.061 % (AICU), 0 elsewhere (the unshielded pond pH is noisy on purpose and already flagged by the 11-packet rule); moisture and substrate temperature: 0. At 30 seconds, on 3 months of real 10-second data (see the last section): air, humidity and pH 0 of 308,285 windows each; EC at 0.20, 0 of about 0.92 million windows per probe at every rate from 10 to 90 seconds |
 | `baseline_drift_possible` for pH, now also for a slow drift | As before, but a pH stream that normally changes every sample (the same 70 % test) is judged against the spread of its trusted readings older than half an hour (Core's `spread_lag`) instead of the spread of the whole window. A drift in progress is trusted until it is a threshold away, which widens the whole-window spread until 3 x spread hides it; the lagged spread has not seen the newest half hour | no change in the real logs: no real drain stream changes every sample, so they keep the full spread. Only the pond pH is judged this way: 0.49 % to 0.64 % of its readings (with the 2 h lapse), inside the 2 % guard. EC is not judged this way (see below) |
 
 Why each shape:
@@ -199,11 +199,13 @@ Why each shape:
   10 %RH. A legitimate swing is spread over more samples when readings come faster, so the limit shrinks with
   the square root of the interval, down to a floor above what a healthy simulated probe's windows reach (fake
   greenhouse, normal runs of seeds 1 to 80: the largest window median step is humidity 2.5 %RH, air 0.32 C,
-  pH 0.06, moisture 1.5 %, substrate temperature 0.31 C). No real log is sampled faster than 5 minutes, so the
-  scaling at 30 seconds (limit 3.2 %RH, 0.63 C, 0.16 pH; the floors 2.5 % and 0.5 C for moisture and substrate
-  temperature) is argued from the physics and checked only against the simulator's normal runs (0 flags in
-  seeds 1 to 80), not against real data. A fast ramp has large steps too (the quick scenario's dry zone loses
-  3 to 4 % moisture per sample), so a window that mostly moved in one direction is not called noisy.
+  pH 0.06, moisture 1.5 %, substrate temperature 0.31 C). None of the real logs above is sampled faster than 5
+  minutes, so the scaling at 30 seconds (limit 3.2 %RH, 0.63 C, 0.16 pH; the floors 2.5 % and 0.5 C for moisture
+  and substrate temperature) was argued from the physics and checked against the simulator's normal runs (0 flags
+  in seeds 1 to 80). Air, humidity and pH have since also been checked against one real fast log, see
+  [Real data at 30 seconds](#real-data-at-30-seconds-and-the-fixed-ec-noise-limit). A fast ramp has large steps
+  too (the quick scenario's dry zone loses 3 to 4 % moisture per sample), so a window that mostly moved in one
+  direction is not called noisy.
 - **Slow drift is judged against the lagged spread only for a steady pH stream.** A pH probe that moves every
   sample (the simulator, the pond) has a spread that is its own noise, so the threshold may follow the older
   readings. For the real drain probes the same lagged spread flagged 2.2 to 2.3 % of the EC readings with the 2 h
@@ -253,9 +255,44 @@ Limits that remain:
   0.0125 per minute over 80 to 120 minutes are caught in 2 of 3 seeds and otherwise noticed only when the drift
   ends, and demo.json's EC drift (0.05 per minute for only 15 minutes) is noticed only when it ends, as before this
   change.
-- **Still MISSED: a noisy EC probe.** The Automatoes drain EC really jumps (1.0 % of its windows have a median
-  step of 0.4 mS/cm or more, 0.29 % of 2 mS/cm), so every EC noise limit the real logs allow (above 2 mS/cm at 5
-  minutes, 0.63 at 30 seconds) is beyond what a noisy simulated probe shows (median step 0.28). It is caught
-  now and then when the noise pushes the level check over its threshold, which is luck, not detection.
+- **Caught for fast streams, still MISSED for slow ones: a noisy EC probe.** The Automatoes drain EC (5-minute
+  samples) really jumps (1.0 % of its windows have a median step of 0.4 mS/cm or more, 0.29 % of 2 mS/cm), so no
+  EC noise limit that real 5-minute data allows is below what a noisy simulated probe shows (median step about
+  0.29). A stream sampled every 90 seconds or faster is different, see the last section: a noisy EC probe there is
+  flagged, and a card follows. A slower stream (a 5-minute drain probe) is not judged; it is caught only now and
+  then when the noise pushes the level check over its threshold, which is luck, not detection.
 - A frozen substrate-temperature probe (3 h of thermal mass; real slab probes hold one value for up to 9 h) is
   still missed, and so are jumps smaller than the allowances above.
+
+## Real data at 30 seconds, and the fixed EC noise limit
+
+Every real log the limits above were set on is sampled every 5 minutes, so the 30-second jump and noise limits
+were scaled guesses. One public log is much faster: a University of Florida lettuce growth chamber, four
+recirculating nutrient-solution loops with pH and EC probes, and air temperature and humidity at four positions,
+logged every 10 seconds for 3 months (926,903 rows, 2022-03-03 to 2022-09-27; "Identifying Uncertainties In Air
+Temperature Data Of An Indoor Farming System", Mendeley Data, CC BY 4.0, see
+[LICENSE_AND_ATTRIBUTION.md](./LICENSE_AND_ATTRIBUTION.md)). It has no fault labels. It is not part of
+`make real-replay` (that is built for 5-minute data); `scripts/analyze_fast_sensor_log.py <dataset folder>` prints
+the numbers below.
+
+- **Air, humidity and pH at 30 seconds (every third row, 12-reading windows):** no flags with the scaled limits,
+  0 of 308,285 windows each. The largest real window median step is 0.21 to 0.42 C (limit 0.63), 1.9 to 2.4 %RH
+  (limit 3.2) and 0.05 to 0.10 pH (limit 0.16). The step allowances (3 C, 12 %RH) are passed only by
+  single-reading glitches (air 64.6 C, humidity 25 to 70 %RH and back); real humidity drops of about 10 %RH within
+  30 seconds do happen, so 12 %RH is about right. No limit changed. This is one closed chamber; a greenhouse with
+  vents and doors can move faster.
+- **EC at every rate and phase (10, 30, 60 and 90 seconds, every starting offset):** the largest real 12-reading
+  window median step is 0.143 mS/cm (60 seconds, one probe); 0 windows reach 0.20 at any rate or offset. Healthy
+  tank EC (about 1.2 mS/cm, with active dosing) barely moves when sampled fast.
+- **So EC has a fixed noise limit: 0.20 mS/cm, only for a window whose median sample interval is 90 seconds or
+  less.** It is used as it is, without the square-root scaling. A noisy simulated EC probe (median step about
+  0.29) is caught: at least 6 of the 11 steps in the window must be noisy before the median crosses the limit (about
+  3 minutes at 30 seconds, more in practice because a noisy step is only about 2 in 3 likely to reach the limit),
+  then 3 flagged readings in a row make the `sensor_check` card. In the fake greenhouse (noise on EC multiplied by
+  10, a reading every 30 seconds) the card came 8 and 6 minutes after the fault began in the two zones tried. A one-way move (a dose) is excluded by the same direction rule as the other fields, and a single glitch
+  moves only 1 or 2 of the 11 steps.
+- **Limits of this evidence:** all four probes sit in recirculating tanks at about 1.2 mS/cm. There is no public
+  fast-sampled drain EC (tomato substrate, 2 to 6 mS/cm, where a probe may also see intermittent drain flow), so
+  the check applies to every stream at 90 seconds or faster and can be revisited when real drain data arrives. A
+  false EC flag has a cost: the trust gate stops the specialists from reasoning on a flagged reading. Streams
+  slower than 90 seconds are unchanged.

@@ -68,6 +68,19 @@ Pomona platform code is Apache-2.0. Dataset source material may have different l
 - Raw data policy: keep local only in `datasets/raw/`; never commit raw files.
 - Downloaded raw files: `datasets/raw/mendeley_aquaponic_pond_iot/pond_iot_2023.csv` and `pond_iot_2023_raw.csv` (ignored by Git)
 
+### mendeley_uf_hydroponic_chamber
+
+- Title: Identifying Uncertainties In Air Temperature Data Of An Indoor Farming System (University of Florida)
+- DOI: `10.17632/rmvgvkg8vn.1`
+- URL: `https://data.mendeley.com/datasets/rmvgvkg8vn`
+- License: CC BY 4.0
+- Verification date: 2026-11-07
+- Attribution required: yes
+- Used for: checking the 30-second sensor-check limits on real data (air temperature, humidity, pH, EC logged every
+  10 seconds for 3 months). It is evidence only: it is not in any dataset release, training set or `make real-replay`.
+  `scripts/analyze_fast_sensor_log.py` reads a local copy.
+- Raw data policy: keep local only; never commit raw files. Anyone can download it from the link above.
+
 ## Excluded From v0.1
 
 ### mendeley_hydroponics_fertigation

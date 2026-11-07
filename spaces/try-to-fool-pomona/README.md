@@ -57,8 +57,9 @@ key: **you fooled Pomona**, **it caught it**, or **the trick was unfair** (nobod
   less than about 21 minutes), a jump smaller than a real probe can make (humidity below 12 %RH, substrate moisture
   below 8 %, substrate temperature below 1.5 C), a slow drift of air temperature, humidity, substrate moisture or
   substrate temperature (Pomona notices it only when the drift ends and the reading snaps back, which is scored as
-  "MISSED (noticed only when it ended)", not as caught), a very slow pH drift (0.005 per minute), a gentle or short EC drift, a noisy EC probe
-  and a frozen substrate-temperature probe. Each of these is limited by what real greenhouse logs allow, see
+  "MISSED (noticed only when it ended)", not as caught), a very slow pH drift (0.005 per minute), a gentle or short EC drift
+  and a frozen substrate-temperature probe. A noisy EC probe is caught here (the game logs every 30 seconds); on a
+  log sampled every 5 minutes it would not be. Each of these is limited by what real greenhouse logs allow, see
   [docs/FAKE_GREENHOUSE.md](https://github.com/okyanu/pomona/blob/main/docs/FAKE_GREENHOUSE.md#honest-limits).
 
 ## How it works

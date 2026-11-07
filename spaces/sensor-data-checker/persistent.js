@@ -75,6 +75,12 @@
     soil_moisture_pct: 1.0, substrate_moisture_pct: 1.0, substrate_temperature_c: 0.4 };
   const NOISE_STEP_FLOOR = { humidity_pct: 3.0, air_temperature_c: 0.4, ph: 0.1,
     soil_moisture_pct: 2.5, substrate_moisture_pct: 2.5, substrate_temperature_c: 0.5 };
+  // field: [limit as it is, in the field's unit; largest median sample interval of the window it is judged at, in seconds].
+  // EC is judged only on a fast stream (90 s or less): 3 months of real 10-second tank EC (four probes, about 1.2 mS/cm)
+  // never give a 12-reading window with a median step above 0.143 mS/cm at any rate from 10 to 90 s, so 0.20 flags
+  // none of about 0.92 million windows per probe. A slower stream has no real data behind a limit (5-minute drain EC
+  // really jumps) and is not judged. The limit is used as it is, without the square-root scaling of the other fields.
+  const NOISE_FIXED_LIMIT = { ec_ms_cm: [0.20, 90.0] };
   const NOISE_REFERENCE_INTERVAL_S = 300.0;
   const NOISE_WINDOW = 12;
   const NOISE_MAX_NET_SHARE = 0.5;
@@ -444,8 +450,15 @@
     }
     gaps.sort(cmp);
     if (!gaps.length) return;
-    const limit = Math.max(NOISE_STEP_FLOOR[field],
-      NOISE_STEP_LIMIT_5MIN[field] * Math.sqrt(median(gaps) / NOISE_REFERENCE_INTERVAL_S));
+    let limit;
+    if (has(NOISE_FIXED_LIMIT, field)) {
+      let longestInterval;
+      [limit, longestInterval] = NOISE_FIXED_LIMIT[field];
+      if (median(gaps) > longestInterval) return; // no real data behind a limit for a slower stream
+    } else {
+      limit = Math.max(NOISE_STEP_FLOOR[field],
+        NOISE_STEP_LIMIT_5MIN[field] * Math.sqrt(median(gaps) / NOISE_REFERENCE_INTERVAL_S));
+    }
     const values = points.map((p) => p[0]);
     const steps = values.slice(1).map((b, i) => Math.abs(b - values[i]));
     let travelled = 0.0;
@@ -496,7 +509,7 @@
         checks.push(`inspect ${field}: the same value for ${floorDiv(sampled - changedAt, MINUTE_US)} minutes${habit}; ${CALIBRATION_HINT}`);
       }
       if (has(STEP_LIMITS, field)) applyStepCheck(field, current, sampled, stats, labels, suspect, checks);
-      if (has(NOISE_STEP_LIMIT_5MIN, field)) applyNoiseCheck(field, sensor, history, labels, suspect, checks);
+      if (has(NOISE_STEP_LIMIT_5MIN, field) || has(NOISE_FIXED_LIMIT, field)) applyNoiseCheck(field, sensor, history, labels, suspect, checks);
     }
   }
 

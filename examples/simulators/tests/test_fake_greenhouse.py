@@ -99,6 +99,7 @@ FAULTS = [
     ("spike", B, "ph", {}),
     ("noisy", A, "humidity_pct", {}),
     ("noisy", A, "soil_moisture_pct", {}),
+    ("noisy", B, "ec_ms_cm", {}),
     ("plausible_offset", B, "ec_ms_cm", {}),
 ]
 

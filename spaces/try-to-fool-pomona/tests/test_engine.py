@@ -198,6 +198,7 @@ def test_the_page_download_is_a_scenario_make_fake_greenhouse_loads(tmp_path):
     ("stuck", "ph", A), ("stuck", "ph", B), ("stuck", "ec_ms_cm", A), ("stuck", "ec_ms_cm", B),
     ("jump", "air_temperature_c", A), ("jump", "air_temperature_c", B),
     ("noisy", "humidity_pct", A), ("noisy", "humidity_pct", B),
+    ("noisy", "ec_ms_cm", A), ("noisy", "ec_ms_cm", B),  # caught since the fixed EC noise limit (streams at 90 s or faster)
 ])
 def test_the_four_old_gaps_are_caught_after_forty_minutes(name, field, zone):
     session = game.Session.start_new(1)

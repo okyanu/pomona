@@ -117,6 +117,11 @@ ADAPTIVE_STUCK_MIN_RUN = 3
 #       apart from one 2.4 C glitch. 0.006 % (Digilog).
 # A smaller offset than the allowance (a humidity shift of 10 %RH, a moisture shift of 5 %) cannot be told from a
 # real change in one sample and is not caught here.
+# The air temperature and humidity allowances were also checked at 30 seconds on 3 months of real 10-second data (a
+# small closed growth chamber, four positions): the 99.99th percentile of a real 30-second step is 0.23 to 0.46 C and
+# 4.3 to 5.2 %RH, and only single-reading glitches (64.6 C, humidity 25 to 70 %RH and back) go past the allowances.
+# Real humidity drops of about 10 %RH within 30 seconds do happen, so 12 %RH is about right there. A greenhouse with
+# vents and doors can move faster than that closed chamber. No limit changed.
 STEP_LIMITS = {
     "air_temperature_c": (3.0, 1.0, "C", "a second thermometer"),
     "humidity_pct": (12.0, 4.0, "%RH", "a second hygrometer"),
@@ -141,12 +146,22 @@ STEP_MIN_C, STEP_MAX_RATE_C_PER_MIN = STEP_LIMITS["air_temperature_c"][:2]
 # Share of real 12-reading windows at or above the 5-minute limit (worst compartment):
 #   humidity 10 %RH 0.084 %, air 2 C 0.029 %, pH 0.5 0.13 % (AICU; the pond pH is noisy by nature, see
 #   noisy_signal_possible above), moisture 1.0 % 0.009 %, substrate temperature 0.4 C 0 %.
-# EC is not here: the Automatoes drain EC really jumps (1.0 % of its windows have a median step of 0.4 mS/cm or
-# more, 0.29 % of 2 mS/cm), so no limit that real data allows is below what a noisy simulator probe shows.
+# EC is not in these two tables: the Automatoes drain EC (5-minute samples) really jumps (1.0 % of its windows have a
+# median step of 0.4 mS/cm or more, 0.29 % of 2 mS/cm), so no limit that real data allows is below what a noisy
+# simulator probe shows. A fast logger is different: 3 months of 10-second tank data (University of Florida hydroponic
+# chamber, four EC probes, about 1.2 mS/cm) never gives a 12-reading window with a median step above 0.143 mS/cm at any
+# rate from 10 to 90 seconds and any starting offset (0 of about 0.92 million windows per probe flagged at 0.20). So EC
+# has a fixed limit, used as it is (no square-root scaling), and only when the window's median sample interval is 90
+# seconds or less; a slower stream has no real data behind a limit and is not judged. The same data shows no false
+# flag on air temperature, humidity or pH at 30 seconds with the scaled limits above (0 of 308,285 windows each); that
+# was a scaled guess before. The data is tank EC (no fast-sampled drain EC is public), so a fast drain-EC stream is
+# judged on the same limit until real data says otherwise. scripts/analyze_fast_sensor_log.py reproduces these numbers.
 NOISE_STEP_LIMIT_5MIN = {"humidity_pct": 10.0, "air_temperature_c": 2.0, "ph": 0.5,
                          "soil_moisture_pct": 1.0, "substrate_moisture_pct": 1.0, "substrate_temperature_c": 0.4}
 NOISE_STEP_FLOOR = {"humidity_pct": 3.0, "air_temperature_c": 0.4, "ph": 0.1,
                     "soil_moisture_pct": 2.5, "substrate_moisture_pct": 2.5, "substrate_temperature_c": 0.5}
+# field: (limit as it is, in the field's unit; largest median sample interval of the window it is judged at, in seconds)
+NOISE_FIXED_LIMIT = {"ec_ms_cm": (0.20, 90.0)}
 NOISE_REFERENCE_INTERVAL_S = 300.0
 NOISE_WINDOW = 12
 NOISE_MAX_NET_SHARE = 0.5
@@ -403,7 +418,7 @@ def apply_persistent_checks(
                           + habit + "; " + CALIBRATION_HINT)
         if field in STEP_FIELDS:
             apply_step_check(field, current, sampled, stats, labels, suspect_fields, checks)
-        if field in NOISE_STEP_LIMIT_5MIN:
+        if field in NOISE_STEP_LIMIT_5MIN or field in NOISE_FIXED_LIMIT:
             apply_noise_check(field, sensor, history, labels, suspect_fields, checks)
 
 
@@ -472,8 +487,13 @@ def apply_noise_check(
     gaps = sorted(g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:]) if a and b) if g > 0)
     if not gaps:
         return
-    limit = max(NOISE_STEP_FLOOR[field],
-                NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(_median(gaps) / NOISE_REFERENCE_INTERVAL_S))
+    if field in NOISE_FIXED_LIMIT:
+        limit, longest_interval = NOISE_FIXED_LIMIT[field]
+        if _median(gaps) > longest_interval:
+            return  # no real data behind a limit for a slower stream
+    else:
+        limit = max(NOISE_STEP_FLOOR[field],
+                    NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(_median(gaps) / NOISE_REFERENCE_INTERVAL_S))
     values = [value for value, _ in points]
     steps = [abs(b - a) for a, b in zip(values, values[1:])]
     # Noise goes nowhere, a trend does: a real fast ramp (a dry zone drying, a vent opening) has large steps that all
