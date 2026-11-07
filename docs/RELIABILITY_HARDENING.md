@@ -11,9 +11,11 @@
 
 ## Verification and remaining work
 
-`make test-local`: 172 passed, 1 skipped (optional dependency), one upstream
-TestClient deprecation warning. Notebook JSON/Python syntax, shell syntax and
-`git diff --check` passed. Live integration could not start because the approval
+`make test-local` at the 2026-09-16 checkpoint: 172 passed, 1 skipped (optional
+dependency), one upstream TestClient deprecation warning. That count is old. On
+2026-11-07 the same command gave 14 passed + 1 skipped / 541 / 80 / 50 / 440 passed +
+12 xfailed / 145, one figure per test group (groups named in [PROJECT_STATUS.md](./PROJECT_STATUS.md)). Notebook
+JSON/Python syntax, shell syntax and `git diff --check` passed at the 2026-09-16 checkpoint. Live integration could not start because the approval
 system hit a usage limit on the first attempt. An owner-authorized retry later
 passed the live six-service HTTP validation, including scoped data, suggestion
 retry handling, dashboard HTML and SQLite restart recovery. Real MQTT reconnects

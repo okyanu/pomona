@@ -72,10 +72,10 @@ evaluation:
   clean_holdout:
     status: failed_publish_gate
     cases: 126
-    dataset_zip: private/colab/pomona-actuator-command-gate-v0.1-clean-eval-data.zip
-    notebook: private/colab/pomona_actuator_command_gate_v0_1_clean_eval_colab.ipynb
+    dataset_zip: private/colab/pomona-actuator-command-gate-v0.1-clean-eval-data.zip (maintainer-local, not in repo)
+    notebook: private/colab/pomona_actuator_command_gate_v0_1_clean_eval_colab.ipynb (maintainer-local, not in repo)
     exact_train_overlap: 0
-    local_full_eval_report: private/colab/outputs/unpublished_model_full_clean_eval.json
+    local_full_eval_report: private/colab/outputs/unpublished_model_full_clean_eval.json (maintainer-local, not in repo)
     results:
       valid_json_rate: 1.0
       required_fields_rate: 1.0
@@ -123,9 +123,9 @@ evaluation:
     generated_test_records: 529
     clean_holdout_records: 126
     exact_clean_holdout_overlap: 0
-    training_zip: private/colab/pomona-actuator-command-gate-v0.1.2-correction-training-data.zip
-    notebook: private/colab/pomona_actuator_command_gate_reasoner_v0_1_2_correction_colab.ipynb
-    expected_adapter: private/colab/adapters/actuator-command-gate-v0.1.2-correction-local.zip
+    training_zip: private/colab/pomona-actuator-command-gate-v0.1.2-correction-training-data.zip (maintainer-local, not in repo)
+    notebook: private/colab/pomona_actuator_command_gate_reasoner_v0_1_2_correction_colab.ipynb (maintainer-local, not in repo)
+    expected_adapter: private/colab/adapters/actuator-command-gate-v0.1.2-correction-local.zip (maintainer-local, not in repo)
     training:
       epochs: 1
       learning_rate: 0.00015
@@ -138,7 +138,7 @@ evaluation:
       decision_match_rate: 1.0
       human_approval_match_rate: 1.0
     independent_clean_holdout:
-      report: private/colab/outputs/actuator-v0.1.2-clean-diagnostic.json
+      report: private/colab/outputs/actuator-v0.1.2-clean-diagnostic.json (maintainer-local, not in repo)
       cases: 126
       valid_json_rate: 1.0
       required_fields_rate: 1.0

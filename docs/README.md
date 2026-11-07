@@ -31,19 +31,21 @@ Public docs for contributors and users.
 | [SAFETY_TRIAGE_REASONER.md](./SAFETY_TRIAGE_REASONER.md) | Planned safety triage small model |
 | [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md) | Planned sensor quality small model |
 
-## Later patterns (local design drafts)
+## Later patterns (design notes, mostly implemented in software)
 
-Unimplemented design notes. Do not treat as phase commitments. Index:
-[LATER_PATTERNS_BACKLOG.md](./LATER_PATTERNS_BACKLOG.md).
+Design notes for patterns borrowed from the literature. Most now have a software
+implementation, tested locally only (no field use); each doc's header says what
+exists and what is still design. Do not treat the remaining design parts as phase
+commitments. Index: [LATER_PATTERNS_BACKLOG.md](./LATER_PATTERNS_BACKLOG.md).
 
-| Doc | Purpose |
-|-----|---------|
-| [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md) | Stuck / flatline / baseline-drift SQI (Plexus-style) |
-| [CALIBRATION_PROVENANCE.md](./CALIBRATION_PROVENANCE.md) | Calibration events + tagged corrections (Hurst-style) |
-| [ADVICE_CARDS.md](./ADVICE_CARDS.md) | HITL advice cards (CottonBot-style) |
-| [DIGITAL_TWIN.md](./DIGITAL_TWIN.md) | Advisory calibrate → estimate twin (Frontzek-style) |
-| [LOCAL_ADVICE_RETRIEVAL.md](./LOCAL_ADVICE_RETRIEVAL.md) | Offline exact-excerpt retrieval prototype |
-| [WATERCRESS_PILOT.md](./WATERCRESS_PILOT.md) | Two-zone watercress monitoring pilot (SD logger + importer) |
+| Doc | Purpose | Status |
+|-----|---------|--------|
+| [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md) | Stuck / flatline / baseline-drift SQI (Plexus-style) | Implemented in the deterministic sensor-quality rules |
+| [CALIBRATION_PROVENANCE.md](./CALIBRATION_PROVENANCE.md) | Calibration events + tagged corrections (Hurst-style) | Core APIs implemented; GPR modelling and a dashboard recalibrate-next list are not |
+| [ADVICE_CARDS.md](./ADVICE_CARDS.md) | HITL advice cards (CottonBot-style) | Automation and dashboard endpoints implemented |
+| [DIGITAL_TWIN.md](./DIGITAL_TWIN.md) | Advisory calibrate → estimate twin (Frontzek-style) | Linear forecast service implemented; no FMU / Modelica |
+| [LOCAL_ADVICE_RETRIEVAL.md](./LOCAL_ADVICE_RETRIEVAL.md) | Offline exact-excerpt retrieval prototype | Script and tests exist; not attached to the advice endpoint |
+| [WATERCRESS_PILOT.md](./WATERCRESS_PILOT.md) | Two-zone watercress monitoring pilot (SD logger + importer) | Logger firmware and importer exist; firmware not bench-tested, no pilot data yet |
 
 ## Maintainer-only (local, not in Git)
 

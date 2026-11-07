@@ -44,28 +44,23 @@ every time). Closing the second list is how the first list stays true.
 - First tagged GitHub release
   ([`v0.1.0-alpha.1`](https://github.com/okyanu/pomona/releases/tag/v0.1.0-alpha.1)).
 
-### Manual toil — real, current, tracked here so it doesn't get lost
+### Manual toil — open items
 
 - Keep the combined local and per-service CI suites aligned as new services
   and shared contracts are added. Run `make test-local` to verify the current
   baseline across all six Python services.
-- `scripts/run_local_validation.sh` didn't start the `digital-twin` service,
-  so the dashboard's new digital-twin health check always failed
-  `make local-check` — fixed by starting it alongside the other four
-  services in that script.
-- Tomato, water/irrigation, and nutrient/pH-EC now have guarded local Ollama
-  runtime paths with schema-constrained decoding, but sensor quality, safety
-  triage, and actuator gate still use deterministic fallback in the
-  platform. The tomato v0.1.7 GGUF also remains below standalone quality
-  (0.60 F1 on the 15-case golden smoke suite), so deterministic rules must
-  remain authoritative — `hybrid_guarded` mode validates model output but
-  intentionally discards it in favor of rules; only `model_only` (evaluation)
-  surfaces raw model output.
-- One maintainer, one set of GitHub/HF credentials. No documented
-  continuity or handoff process if that becomes unavailable.
-- Naming drift between the dataset, hardware contract, and deployed code
-  (e.g. today's `hydroponic` / `hydroponic_greenhouse` / `controlled_greenhouse`
-  fix) isn't caught automatically — only manual review finds it.
+- Sensor quality, safety triage and the actuator gate still use deterministic
+  fallback in the platform (no model path). Tomato, water/irrigation and
+  nutrient/pH-EC have guarded local Ollama paths with schema-constrained
+  decoding, but the tomato v0.1.7 GGUF is below standalone quality (0.60 F1 on
+  the 15-case golden smoke suite), so deterministic rules stay authoritative:
+  `hybrid_guarded` mode validates model output but discards it in favor of
+  rules, and only `model_only` (evaluation) surfaces raw model output.
+- One maintainer, one set of GitHub/HF credentials. No documented continuity
+  or handoff process if that becomes unavailable.
+- Naming drift between the dataset, hardware contract and deployed code (for
+  example the `hydroponic` / `hydroponic_greenhouse` / `controlled_greenhouse`
+  system types) is not caught automatically; only manual review finds it.
 
 ## Phase 8 hardware design inspiration
 

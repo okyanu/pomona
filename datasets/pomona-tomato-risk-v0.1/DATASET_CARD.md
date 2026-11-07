@@ -58,6 +58,18 @@ The train/validation/test split files are generated from local processed artifac
 
 `golden_eval.jsonl` is a small hand-curated safety regression suite intended for rules and model adapters. It focuses on normal/no-risk states, pH/EC risks, temperature risks, fungal pressure, missing data, sensor anomalies, water risk, and actuator conflicts.
 
+## Known limitation: constant background context (2026-11-07)
+
+The tomato v0.1.7 adapter trained on this dataset learned a template shortcut instead of the thresholds. In the processed train split, the risk examples share one constant background context (for example CO2 600, light PPFD 350, water temperature 21.0) and only the risky reading changes. The adapter learned to key on that background and answered `[]` on 146 of 153 varied-reading benchmark cases. Details: `docs/TOMATO_RISK_REASONER.md`.
+
+What is visible in the files committed to the Pomona GitHub repo:
+
+- `data/samples.jsonl` (10 hand-written seed rows) and `data/eval_cases.jsonl` (20 hand-written rows) have varied background values. The constant context is not visible there.
+- `data/golden_eval.jsonl` (15 rows) does share it: 13 of 15 rows, including 12 of its 13 risk rows, use CO2 600, PPFD 350 and water temperature 21.0. Scores on this file are therefore weak evidence of threshold learning.
+- The processed train/validation/test split files are not committed (see Splits), so the constant context in the train split could not be re-checked from the repo. That statement rests on the findings in `docs/TOMATO_RISK_REASONER.md`.
+
+A retrain needs varied background readings for risk and normal examples alike. Until then treat the published tomato adapter as research only.
+
 ## Licensing
 
 Pomona-generated schema, examples, and documentation are Apache-2.0. Third-party derived labels follow CC BY 4.0 with required attribution. See `LICENSES.md` for source-specific notes.

@@ -1,8 +1,10 @@
-# Sensor temporal checks (design draft)
+# Sensor temporal checks
 
-**Status:** implemented locally in deterministic sensor-quality rules
+**Status:** implemented in the deterministic sensor-quality rules
 (`services/model-router/app/sensor_quality.py`) with fault-replay coverage.
-Not committed/deployed unless the owner requests it.
+Tested on synthetic faults and replayed third-party logs only; not field-tested.
+The sections "Detection sketch" and "Implementation order" below are the original
+design notes, kept for history.
 
 Pattern peer: [Makeph/plexus](https://github.com/Makeph/plexus) (startup-baseline
 drift, stuck/flatline). Pomona keeps SQLite in `pomona-core` as system of
@@ -14,14 +16,14 @@ Prerequisite: trustworthy dual-time and zone-identity hygiene
 
 ## Goal
 
-Detect stream faults that packet-level rules miss today:
+Stream faults that packet-level rules alone miss. The last column is the fault-replay gap: the old figures are historical (2026-09-06), the current ones come from `make fault-replay` run 2026-11-07:
 
 | Fault | Symptom | Current fault-replay gap |
 |-------|---------|--------------------------|
-| Stuck value | Same numeric reading across samples, fresh timestamps | 0/6 detected |
+| Stuck value | Same numeric reading across samples, fresh timestamps | Was 0/6 detected (2026-09-06). Now 5 detected, 0 missed (the first frame is before a detector can fire and is not counted) |
 | Flatline | Near-zero variance over a window | related to stuck |
-| Startup-baseline drift | Slow walk away from values seen at stream start | 0/6 slow drift |
-| Dropout (temporal) | No new samples; last packet ages | partial via stale |
+| Startup-baseline drift | Slow walk away from values seen at stream start | Was 0/6 (2026-09-06). Now 3 detected, 0 missed (earlier frames are before the baseline delta is reached and are not counted) |
+| Dropout (temporal) | No new samples; last packet ages | Was 3 of 6 detected (2026-09-06). Now 3 detected, 0 missed, same counting rule; replayed with a frozen last-packet timestamp, not a broker failure |
 
 See [SENSOR_FAULT_REPLAY.md](./SENSOR_FAULT_REPLAY.md).
 
@@ -87,7 +89,7 @@ stable pH plateau, quantized probe flicker, slow noisy climb. The browser checke
 Core's trusted stream reference (`stream_baseline`) and the persistent checks that use it, run over a whole uploaded log
 (the greenhouse demo Space sees one reading at a time and has neither history nor a reference, so it runs neither).
 
-## Detection sketch (to implement later)
+## Detection sketch (original design, implemented above)
 
 Inputs per `(farm_id, zone_id, device_id, measurement)`:
 
@@ -134,7 +136,7 @@ Do not feed evaluator fault annotations into the detector.
 - Calibration budget / corrected readings (see [CALIBRATION_PROVENANCE.md](./CALIBRATION_PROVENANCE.md)).
 - Silent “fixing” of live values.
 
-## Implementation order
+## Implementation order (original plan, done)
 
 1. History API or in-process window feed into deterministic SQI.
 2. Stuck + flatline rules + normal controls.

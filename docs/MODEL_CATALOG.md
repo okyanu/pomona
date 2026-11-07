@@ -14,13 +14,18 @@ Try the guarded tomato reasoner without installing anything:
 
 | Family | Version | Status | Canonical artifact | Runtime role |
 |---|---:|---|---|---|
-| Agronomist assistant | Gemma4 | Published | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Broad advisory explanation |
+| Agronomist assistant | Gemma4 | Published, experimental; no published evaluation | [Okyanus/ai-pomona-agronomist-gemma4](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) | Broad advisory explanation |
 | Tomato risk | v0.1.7 | Published, experimental (learned a training shortcut; see [caveat](TOMATO_RISK_REASONER.md#evaluation-snapshot)) | [Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) | Tomato greenhouse risk labels |
 | Water / irrigation risk | v0.1.8 | Published release candidate | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | Moisture and irrigation triage |
 | Actuator command gate | v0.1 | Published research preview | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Advisory command classification; deterministic gate is final |
 | Sensor quality | v0.1.1-boundary | Unpublished local candidate | Local adapter only | Telemetry quality classification |
 | Safety triage | v0.1 | Unpublished local candidate | Local adapter only | Action safety classification |
 | Nutrient / pH-EC | v0.1.1 correction | LoRA plus guarded GGUF/MLX published | LoRA, GGUF/Ollama, MLX | pH/EC risk labels and fertigation blocking |
+
+The agronomist model has no published evaluation: no benchmark, holdout or scores
+are recorded in this repo or its registry file, so its quality is not yet measured. Only the weights are on Hugging Face; its
+training repo, `pomona-agronomist-llm`, is not yet published (see
+[REPOS.md](REPOS.md)). Treat it as experimental and advisory only.
 
 ## Model Count
 

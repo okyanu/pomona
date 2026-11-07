@@ -294,7 +294,7 @@ cannot make this service unsafe.
 
 | Deliverable | Status | Verification |
 |---|---|---|
-| Static guarded demo ([Space](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)) | ✅ live | 3 preset scenarios verified against the platform's own deterministic logic |
+| Static guarded demo ([Space](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo)) | ✅ live | 4 preset scenarios (the broken-pH preset was added 2026-10-24, after this checkpoint date). The page's rules are checked against the platform's own deterministic logic by parity tests on generated cases, not preset by preset |
 | Linked from HF Collection, README, model catalog, `llms.txt` | ✅ | — |
 | Mobile layout | ✅ | verified at 375×812; single-column, no overflow, readable |
 | Accessibility labels | ✅ | all form inputs now have `label for=` associations; preset group has `role="group"` |

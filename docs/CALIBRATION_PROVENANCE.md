@@ -1,8 +1,6 @@
-# Calibration provenance (design draft)
+# Calibration provenance
 
-**Status:** local MVP implemented in `pomona-core` (calibration events,
-corrected observations, recalibrate-next ranking). No commit/deploy
-authorization implied by this file.
+**Status:** partly implemented in `pomona-core`, software-tested only (no field use). Calibration events (`POST`/`GET /v1/sensors/calibrations`), tagged corrected observations (`POST`/`GET /v1/sensors/corrected-observations`, which reject a payload without a stored `calibration_event_id`), a deterministic recalibrate-next ranking (`GET`/`POST /v1/sensors/recalibrate-next`) and pH probe health (`GET /v1/sensors/probe-health`) exist. Still design only: the GPR / response-function modelling of the Hurst-style budget, and a dashboard list of "recalibrate next" suggestions (only the pH probe health panel is in the dashboard code). The sections headed "sketch" below are the original design; the real payloads are the Pydantic models in `services/core/app/schemas.py`.
 
 Pattern peer: Hurst et al., [arXiv:2506.09186](https://arxiv.org/abs/2506.09186)
 (“Not all those who drift are lost”) — uncertainty-aware drift correction and
@@ -49,9 +47,9 @@ calibration:
 It also reports `sensitivity_lost_pct_per_30_days` and days since the last calibration. Advisory
 only: stored readings and calibrations are never changed. Code: `services/core/app/probe_health.py`.
 
-## Proposed calibration event (sketch)
+## Calibration event (original sketch; implemented as `POST /v1/sensors/calibrations`)
 
-HTTP/MQTT sibling to modular observations (exact path TBD at implementation):
+HTTP sibling to modular observations (no MQTT path exists). Field names below are the sketch, check `schemas.py` for the real ones:
 
 ```json
 {
@@ -77,7 +75,7 @@ HTTP/MQTT sibling to modular observations (exact path TBD at implementation):
 Core stores these in SQLite with the same identity/time validation style as
 observations ([HARDWARE_EVENT_CONTRACT.md](./HARDWARE_EVENT_CONTRACT.md)).
 
-## Derived (corrected) reading (sketch)
+## Derived (corrected) reading (original sketch; implemented as `POST /v1/sensors/corrected-observations`)
 
 ```json
 {
@@ -97,7 +95,7 @@ observations ([HARDWARE_EVENT_CONTRACT.md](./HARDWARE_EVENT_CONTRACT.md)).
 Downstream reasoners that consume corrected values must record which
 calibration version they used (snapshot id), for auditability.
 
-## Calibration budget (Hurst-style, later)
+## Calibration budget (Hurst-style; deterministic ranker implemented, GPR still later)
 
 Given a fixed weekly budget `B` of calibrations:
 
