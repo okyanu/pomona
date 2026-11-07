@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     core_port: int = 8080
     mqtt_host: str = "localhost"
     mqtt_port: int = 1883
+    # Broker login. An empty username connects without credentials (a non-Docker dev broker).
+    mqtt_username: str = ""
+    mqtt_password: str = ""
     mqtt_topic_pattern: str = "pomona/+/+/sensor/+/state"
     mqtt_observation_topic_pattern: str = "pomona/+/+/sensor/+/observation"
     max_events: int = Field(default=100000, ge=1)

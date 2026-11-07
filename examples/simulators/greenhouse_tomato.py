@@ -16,6 +16,8 @@ ZONE_ID = os.getenv("SIM_ZONE_ID", "greenhouse-a")
 DEVICE_ID = os.getenv("SIM_DEVICE_ID", "sim-greenhouse-01")
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")  # empty: connect without a login
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 INTERVAL_SEC = float(os.getenv("SIM_INTERVAL_SEC", "5"))
 TOPIC = f"pomona/{FARM_ID}/{ZONE_ID}/sensor/{DEVICE_ID}/state"
 
@@ -77,8 +79,15 @@ def build_reading() -> dict:
     }
 
 
-def main() -> None:
+def build_client() -> "mqtt.Client":
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    return client
+
+
+def main() -> None:
+    client = build_client()
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
     client.loop_start()
 

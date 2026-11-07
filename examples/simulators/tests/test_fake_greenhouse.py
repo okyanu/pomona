@@ -83,7 +83,7 @@ def test_same_seed_and_scenario_is_byte_identical(tmp_path, capsys):
 
 
 def test_registry_has_all_faults_and_events():
-    sensor = {"stuck", "drift", "jump", "spike", "noisy", "dropout", "dead_clock", "plausible_offset"}
+    sensor = {"stuck", "drift", "jump", "spike", "noisy", "dropout", "dead_clock", "plausible_offset", "probe_dropout"}
     real = {"dry_zone", "heat_spike", "cold_night", "humid_night", "nutrient_over_concentration"}
     assert set(fg.REGISTRY) == sensor | real
     assert {n for n, c in fg.REGISTRY.items() if c.kind == "sensor_fault"} == sensor

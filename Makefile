@@ -45,7 +45,7 @@ SCENARIO ?= examples/simulators/scenarios/demo.json
 fake-greenhouse:
 	$(PYTHON) -m pip install -q -r examples/simulators/requirements.txt 2>/dev/null || true
 	@echo "Control page: http://127.0.0.1:8090/"
-	MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario $(SCENARIO) --control-port 8090
+	. ./scripts/mqtt-env.sh && load_mqtt_credentials .env && MQTT_HOST=$${MQTT_HOST:-localhost} MQTT_PORT=$${MQTT_PORT:-1883} $(PYTHON) examples/simulators/fake_greenhouse.py --scenario $(SCENARIO) --control-port 8090
 
 # No MQTT: events go to data/fake_greenhouse/events.jsonl, the control page runs in real time.
 fake-greenhouse-dry:

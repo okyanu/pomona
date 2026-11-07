@@ -76,8 +76,8 @@ Run **APIs on your machine**, **MQTT in Docker**. Good for debugging Python.
 cp .env.example .env
 pip3 install -r requirements-dev.txt
 
-# Start only MQTT broker in Docker
-docker compose up -d mqtt
+# Start only MQTT broker in Docker (up.sh makes sure .env has a MQTT_PASSWORD first)
+./scripts/up.sh mqtt
 
 # Run core + model-router on host (foreground)
 ./scripts/run-local.sh
@@ -104,6 +104,15 @@ cd services/model-router && PYTHONPATH=. pytest tests/ -v
 
 MQTT tests may show `mqtt_connected: false` — that's OK without a broker.
 
+### MQTT login
+
+The Docker broker requires a login (no anonymous access). `./scripts/setup.sh` or `./scripts/up.sh` writes a
+random `MQTT_PASSWORD` into `.env` when it is blank and never prints it; `MQTT_USERNAME` defaults to `pomona`.
+The broker builds its password file inside the container at start, so no password file exists on the host.
+Compose refuses to start the broker while `MQTT_PASSWORD` is empty. Clients (Core, `./scripts/sim.sh`,
+`make fake-greenhouse`) read the same two values from `.env`; for your own client use any MQTT library with
+that user name and password. Port 1883 is plain MQTT without TLS: local network only, never port-forward it.
+
 ---
 
 ## Configuration
@@ -122,6 +131,7 @@ You rarely need to edit `.env` for basic use. Defaults work out of the box.
 |----------|----------------|
 | `POMONA_LLM_BACKEND=ollama` | Using local Ollama |
 | `HF_TOKEN` | Gated HF models (advanced) |
+| `MQTT_PASSWORD` | Normally leave it: setup fills in a random one. To change it, edit `.env` and restart the broker |
 | `SIM_INTERVAL_SEC` | Faster/slower simulator |
 
 ---
@@ -145,7 +155,9 @@ You rarely need to edit `.env` for basic use. Defaults work out of the box.
 |---------|-----|
 | `Cannot connect to Docker daemon` | Start Docker Desktop |
 | `Connection refused` on :8080 | Wait 10s after `up.sh`, check `docker compose ps` |
-| Simulator no data in core | MQTT must be up; simulator uses `localhost:1883` |
+| Simulator no data in core | MQTT must be up; simulator uses `localhost:1883` and the `MQTT_USERNAME` / `MQTT_PASSWORD` from `.env` |
+| `MQTT_PASSWORD is not set` from Compose | Run `./scripts/setup.sh` (or `./scripts/up.sh`), or set `MQTT_PASSWORD` in `.env` |
+| `Connection Refused: not authorised` from a client | It is not using the broker's `MQTT_USERNAME` / `MQTT_PASSWORD` |
 | `make: command not found` | Use `./scripts/up.sh` instead |
 | Linux Ollama from container | `host.docker.internal` fixed via `extra_hosts` in compose |
 | `Permission denied` / `readonly database` after upgrading | Old root-owned volume: run `./scripts/up.sh`, or the `chown` command under *Container lockdown* |

@@ -21,7 +21,7 @@ No `make` required. Works on macOS, Linux, Windows (Docker Desktop).
 
 ```bash
 pip3 install -r requirements-dev.txt
-docker compose up -d mqtt
+./scripts/up.sh mqtt   # first run creates .env with a random MQTT_PASSWORD; the broker requires a login
 ./scripts/run-local.sh
 ```
 

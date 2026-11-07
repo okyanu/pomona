@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -52,6 +53,12 @@ LABEL_FIELDS = {
     "cold_stress": ("air_temperature_c", "substrate_temperature_c"),
 }
 ACCEPTED_STATUSES = (200, 201)
+# The probe that went silent is named by the field the simulator left out of the packet (probe_dropout). The label a
+# missing field would raise in the model-router (sensor_quality.FIELD_LABELS): evidence that Pomona saw the gap.
+MISSING_LABEL = {"ph": "missing_ph", "ec_ms_cm": "missing_ec", "air_temperature_c": "missing_temperature",
+                 "substrate_temperature_c": "missing_temperature", "humidity_pct": "missing_humidity",
+                 "soil_moisture_pct": "missing_moisture", "substrate_moisture_pct": "missing_moisture"}
+DEFAULT_DEVICE_TIMEOUT_S = 120  # Core's device_timeout_seconds: no accepted reading for longer marks the device silent
 # A real event leaves its mark after it stops (substrate EC stays high after a dry spell), and Pomona keeps a
 # changed level flagged until it is confirmed: a sensor check this long after an event is its aftermath.
 AFTERMATH_S = 3600
@@ -81,6 +88,16 @@ METRIC_DEFINITIONS = {
     "cannot_confirm_frames": "offline: sensor-fault frames with trust_verdict cannot_confirm",
     "partial_frames": "offline: sensor-fault frames with trust_verdict partial",
 }
+# Added to the report only when the truth log holds a probe_dropout (so older reports stay as they were).
+BLIND_SPOT_DEFINITIONS = {
+    "blind_spot_case": "a run of frames where one probe is silent (the simulator's probe_dropout leaves its field out of the packet) while a real event is running and the true state has crossed a label that probe decides. Core refuses a packet missing a required field (air temperature, humidity, EC, pH, soil moisture), so for those probes the whole zone goes silent, not only that probe. Real episodes the silent probe kept from ever raising are graded here (outcome blind_spot), never as missed",
+    "false_reassurance": "the worst answer: during the case Pomona showed nothing about the fault. No card for the event, no sensor card, no flagged reading for that field (offline) and no silent-device flag: the zone looked as if nothing was wrong. Counted apart from caught and missed; --fail-on-miss fails on it",
+    "cant_confirm": "a blind-spot case where Pomona showed it could not confirm: a sensor card raised or open (sensor_check, sensor_flatline), or (offline) a reading flagged for that field (vetoed, or a missing-data label), or the device marked silent (no Core-accepted reading for longer than Core's device_timeout_seconds, shown on the dashboard's Device health). `via` lists which. A pass, but silent_flag_only says when the passive device flag was the only sign (no card)",
+    "alerted": "a blind-spot case where the event's own card (its rule in rules.yaml) was already open, or raised while the probe was silent, from other evidence. A pass",
+    "too_short_to_judge": "a blind-spot case that ended before Core's device timeout could pass and before any card could be raised: not judged",
+    "no_fault_in_window": "a probe was silent during a real event, but the true state never crossed a label that probe decides, so there was no fault to confirm: not judged",
+    "no_real_event": "a probe was silent with no real event running: nothing to be falsely reassured about, not judged",
+}
 
 
 # --- Small helpers ----------------------------------------------------------------------
@@ -100,7 +117,18 @@ def core_accepted(row: Dict[str, Any]) -> bool:
     delivery = row.get("delivery")
     if delivery is not None:
         return delivery.get("status") in ACCEPTED_STATUSES
-    return row["expect"]["kind"] != "rejected_by_core"
+    expect = row["expect"]
+    return expect["kind"] != "rejected_by_core" and not expect.get("core_rejects")  # core_rejects: a required field is missing
+
+
+def device_timeout_s() -> int:
+    """Core's device_timeout_seconds (services/core/app/config.py), 120 when that file is not at hand (the Space)."""
+    try:
+        text = (ROOT / "services" / "core" / "app" / "config.py").read_text()
+        found = re.search(r"device_timeout_seconds:[^=]*=\s*Field\(default=(\d+)", text)
+        return int(found.group(1)) if found else DEFAULT_DEVICE_TIMEOUT_S
+    except OSError:
+        return DEFAULT_DEVICE_TIMEOUT_S
 
 
 @dataclass
@@ -262,10 +290,28 @@ class Grader:
                             ep["field_vetoed"] = vetoed  # None: not checkable without per-reading results (stack mode)
                         elif end.time - start.time < raise_after:
                             ep["outcome"] = "too_short_to_raise"
+                        elif self.silent_probe_blocked(run, LABEL_FIELDS.get(label, ()), raise_after):
+                            ep["outcome"] = "blind_spot"  # graded in the blind-spot cases, not a miss
                         else:
                             ep["outcome"] = "missed"
                     out.append(ep)
         return out
+
+    @staticmethod
+    def silent_on(frame: Frame, fields: Tuple[str, ...]) -> bool:
+        return any(x["name"] == "probe_dropout" and x["field"] in fields for x in frame.row["active_faults"])
+
+    def silent_probe_blocked(self, run: List[Frame], fields: Tuple[str, ...], raise_after: timedelta) -> bool:
+        """Was a probe behind the label silent for so much of the episode that its card could never have raised?
+
+        The card needs the label for `raise_after` of readings. If the probe reported for less than that while the
+        episode lasted (or for none of it), the silence is why: a blind spot. A probe that was back for longer
+        than that and still raised nothing is an ordinary miss.
+        """
+        if not any(self.silent_on(f, fields) for f in run):
+            return False
+        reporting = [f for f in run if f.accepted and not self.silent_on(f, fields)]
+        return not reporting or reporting[-1].time - reporting[0].time < raise_after
 
     def field_vetoed(self, zone: str, fields: Tuple[str, ...], start: datetime, end: datetime) -> Optional[bool]:
         """Offline: was one of `fields` vetoed on some reading in the window? None when there is no per-reading data."""
@@ -283,7 +329,7 @@ class Grader:
     def fault_episodes(self, real: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out = []
         names = sorted({f["name"] for frames in self.zones.values() for fr in frames
-                        for f in fr.row["active_faults"]})
+                        for f in fr.row["active_faults"]} - {"probe_dropout"})  # graded as blind-spot cases
         for zone, frames in self.zones.items():
             for name in names:
                 def on(frame: Frame, name=name) -> bool:
@@ -363,7 +409,9 @@ class Grader:
                           <= e["end_time"] + clear_after for e in real)
             in_fault = any(e["zone"] == hit["zone"] and e["start_time"] <= hit["time"] <= e["end_time"] + clear_after
                            for e in faults)
-            if not (in_real or in_fault or in_event):
+            in_silence = any(zone == hit["zone"] and run[0].time <= hit["time"] <= run[-1].time + clear_after
+                             for zone, _, run in self.silent_runs())  # a card while a probe is silent is about that
+            if not (in_real or in_fault or in_event or in_silence):
                 item = {"zone": hit["zone"], "rule": hit["rule"], "tick": hit["tick"], "time": hit["time"]}
                 if self.frame_info and (hit["zone"], hit["tick"]) in self.frame_info:
                     item["labels"] = self.frame_info[(hit["zone"], hit["tick"])]["labels"]
@@ -376,6 +424,110 @@ class Grader:
             self._event_windows = [(zone, run[0].time, run[-1].time) for zone, frames in self.zones.items()
                                    for run in runs(frames, lambda f: bool(f.row["active_events"]))]
         return self._event_windows
+
+    # Blind spots: a real fault runs and the probe that would show it goes silent
+
+    def silent_runs(self) -> List[Tuple[str, str, List[Frame]]]:
+        """(zone, field, frames) for each run of frames with a probe_dropout active on that field."""
+        if not hasattr(self, "_silent_runs"):
+            self._silent_runs = []
+            for zone, frames in self.zones.items():
+                fields = sorted({x["field"] for f in frames for x in f.row["active_faults"] if x["name"] == "probe_dropout"})
+                for field in fields:
+                    for run in runs(frames, lambda f, field=field: self.silent_on(f, (field,))):
+                        self._silent_runs.append((zone, field, run))
+        return self._silent_runs
+
+    def open_or_raised(self, zone: str, rule_ids: Any, start: datetime, end: datetime) -> Optional[Dict[str, Any]]:
+        """A raise of one of the rules inside [start, end], or one raised earlier and still open at `start`."""
+        ids = {rule_ids} if isinstance(rule_ids, str) else set(rule_ids)
+        hit = self.find_raise(zone, ids, start, end)
+        return hit or next((r for r in self.raises if r["zone"] == zone and r["rule"] in ids and r["time"] < start
+                            and (r["until"] is None or r["until"] >= start)), None)
+
+    def silent_since(self, zone: str, start: datetime, end: datetime) -> Optional[datetime]:
+        """When Core's device flag turned to silent inside [start, end]: the last accepted reading plus the timeout.
+
+        None when a Core-accepted reading kept arriving (never silent for longer than the timeout) in that window.
+        """
+        timeout = timedelta(seconds=device_timeout_s())
+        accepted = [f.time for f in self.zones[zone] if f.accepted]
+        for frame in self.zones[zone]:
+            if not start <= frame.time <= end:
+                continue
+            last = max((t for t in accepted if t <= frame.time), default=None)
+            if last is not None and frame.time - last > timeout:
+                return last + timeout
+        return None
+
+    def blind_spot_cases(self) -> List[Dict[str, Any]]:
+        out = []
+        for zone, field, run in self.silent_runs():
+            with_event = [f for f in run if f.row["active_events"]]
+            case: Dict[str, Any] = {
+                "type": "blind_spot", "zone": zone, "field": field, "start_tick": run[0].tick, "end_tick": run[-1].tick,
+                "start_time": run[0].time, "end_time": run[-1].time, "events": [], "labels": [], "outcome": None,
+                "via": [], "signal": None, "silent_flag_only": False,
+                "core_refused_frames": sum(1 for f in run if not f.accepted)}
+            out.append(case)
+            if not with_event:
+                case["outcome"] = "no_real_event"
+                continue
+            start, end = with_event[0], with_event[-1]
+            case["events"] = sorted({e["name"] for f in with_event for e in f.row["active_events"]})
+            case["labels"] = sorted({label for f in with_event for label in f.expect["expected_labels"]
+                                     if field in LABEL_FIELDS.get(label, ())})
+            if not case["labels"]:
+                case["outcome"] = "no_fault_in_window"
+                continue
+            crossing = next(f for f in with_event if set(case["labels"]) & set(f.expect["expected_labels"]))
+            case["crossing_tick"], case["crossing_time"] = crossing.tick, crossing.time
+            rules = {self.label_rule[label] for label in case["labels"] if label in self.label_rule}
+            signals: List[Tuple[str, datetime]] = []
+            card = self.open_or_raised(zone, rules, start.time, end.time)
+            if card:
+                case["outcome"], case["via"] = "alerted", ["event card"]
+                case["signal"] = self._signal(card["time"], start.time, crossing.time)
+                case["domain_card"] = {"rule": card["rule"], "time": card["time"], "tick": card["tick"]}
+                continue
+            check = self.find_raise(zone, self.sensor_rules, start.time, end.time)
+            old = None if check else self.open_sensor_card(zone, start.time)
+            if check or (old and self.field_vetoed(zone, (field,), start.time, end.time) is not False):
+                signals.append(("sensor card", (check or old)["time"]))
+            flagged = self.flagged_reading(zone, field, start.time, end.time)
+            if flagged:
+                signals.append(("reading flagged", flagged))
+            silent = self.silent_since(zone, run[0].time, end.time)
+            if silent:
+                signals.append(("device silent", silent))
+            if signals:
+                signals.sort(key=lambda item: item[1])
+                case["outcome"] = "cant_confirm"
+                case["via"] = [name for name, _ in signals]
+                case["signal"] = self._signal(signals[0][1], start.time, crossing.time)
+                case["silent_flag_only"] = case["via"] == ["device silent"]
+            else:
+                before = [f.time for f in self.zones[zone] if f.accepted and f.time < run[0].time]
+                waited = (end.time - max(before)).total_seconds() if before else (end.time - run[0].time).total_seconds()
+                case["outcome"] = "false_reassurance" if waited > device_timeout_s() else "too_short_to_judge"
+        return sorted(out, key=lambda c: (c["start_time"], c["zone"]))
+
+    def flagged_reading(self, zone: str, field: str, start: datetime, end: datetime) -> Optional[datetime]:
+        """Offline: the first Core-accepted reading in the window whose result flags `field` (vetoed or a missing label)."""
+        if not self.frame_info:
+            return None
+        aliases = {field, "substrate_moisture_pct"} if field == "soil_moisture_pct" else {field}
+        for f in self.zones[zone]:
+            info = self.frame_info.get((zone, f.tick))
+            if info and f.accepted and start <= f.time <= end and (
+                    aliases & set(info.get("vetoed_fields", ())) or MISSING_LABEL.get(field) in info.get("labels", ())):
+                return f.time
+        return None
+
+    @staticmethod
+    def _signal(when: datetime, silence_start: datetime, crossing: datetime) -> Dict[str, Any]:
+        return {"time": when, "delay_s": (when - silence_start).total_seconds(),
+                "after_crossing_s": (when - crossing).total_seconds()}
 
     def reading_level(self) -> Dict[str, Any]:
         """Offline only: per-frame verdicts from the real pipeline against the truth kind."""
@@ -443,19 +595,29 @@ class Grader:
             "false_alarms": len(false_alarms), "unmatched_events": len(self.unmatched),
         }
         frames = [f for fr in self.zones.values() for f in fr]
-        return {"frames": {"total": len(frames), "accepted_by_core": sum(f.accepted for f in frames),
-                           "published": sum(bool(f.row["published"]) for f in frames)},
-                "rules": {rid: {"labels": r["match_any_labels"], "raise_after_s": self.window(rid)[0].total_seconds(),
-                                "clear_after_s": self.window(rid)[1].total_seconds()} for rid, r in self.rules.items()},
-                "summary": summary, "real_episodes": real, "fault_episodes": faults, "false_alarms": false_alarms,
-                "unmatched_events": self.unmatched, "reading_level": self.reading_level() if self.frame_info else None,
-                "metric_definitions": METRIC_DEFINITIONS}
+        blind = self.blind_spot_cases()
+        if blind:  # only when a probe went silent, so reports of other runs keep their shape
+            summary["blind_spot"] = {"total": len(blind), **{outcome: count(blind, "outcome", outcome) for outcome in (
+                "false_reassurance", "cant_confirm", "alerted", "too_short_to_judge", "no_fault_in_window", "no_real_event")},
+                "cant_confirm_by_silent_flag_only": sum(1 for c in blind if c["silent_flag_only"])}
+            summary["real_episodes"]["blind_spot"] = count(real, "outcome", "blind_spot")
+        report = {"frames": {"total": len(frames), "accepted_by_core": sum(f.accepted for f in frames),
+                             "published": sum(bool(f.row["published"]) for f in frames)},
+                  "rules": {rid: {"labels": r["match_any_labels"], "raise_after_s": self.window(rid)[0].total_seconds(),
+                                  "clear_after_s": self.window(rid)[1].total_seconds()} for rid, r in self.rules.items()},
+                  "summary": summary, "real_episodes": real, "fault_episodes": faults, "false_alarms": false_alarms,
+                  "unmatched_events": self.unmatched, "reading_level": self.reading_level() if self.frame_info else None,
+                  "metric_definitions": {**METRIC_DEFINITIONS, **(BLIND_SPOT_DEFINITIONS if blind else {})}}
+        if blind:
+            report["blind_spot_cases"] = blind
+        return report
 
 
 def failures(report: Dict[str, Any]) -> int:
-    """Missed real episodes plus wrong cards (the things --fail-on-miss fails on)."""
+    """Missed real episodes, wrong cards and false reassurance (the things --fail-on-miss fails on)."""
     summary = report["summary"]
-    return summary["real_episodes"]["missed"] + summary["sensor_fault_episodes"]["trusted_wrong_card"]
+    return (summary["real_episodes"]["missed"] + summary["sensor_fault_episodes"]["trusted_wrong_card"]
+            + summary.get("blind_spot", {}).get("false_reassurance", 0))
 
 
 # --- Offline replay: the real pipeline and the real alert monitor, in-process --------------------
@@ -552,7 +714,13 @@ def jsonable(value: Any) -> Any:
 VERDICTS = {"caught": "caught", "caught_cant_confirm": "caught as can't-confirm (safe)", "missed": "MISSED", "caught_at_recovery": "MISSED (noticed only when it ended)", "too_short_to_raise": "too short to raise",
             "no_card_rule": "no card rule", "wrong_card": "WRONG CARD", "undetectable": "undetectable",
             "rejected_by_core": "rejected by Core", "accepted_by_core": "ACCEPTED BY CORE",
-            "not_published": "no data (not scored)"}
+            "not_published": "no data (not scored)", "blind_spot": "silent probe (graded under Blind spots)"}
+BLIND_VERDICTS = {"false_reassurance": "FALSE REASSURANCE", "cant_confirm": "can't confirm (pass)",
+                  "alerted": "alerted by the event's own card (pass)", "too_short_to_judge": "too short to judge",
+                  "no_fault_in_window": "no fault in window (not judged)", "no_real_event": "no real event (not judged)"}
+VIA_TEXT = {"event card": "the event's own card", "sensor card": "a sensor_check card",
+            "reading flagged": "the field's readings flagged (can't confirm)",
+            "device silent": "the device marked silent (dashboard Device health, no card)"}
 
 
 def describe(ep: Dict[str, Any]) -> Tuple[str, str]:
@@ -586,6 +754,26 @@ def raised_text(ep: Dict[str, Any]) -> str:
     return "; ".join(parts) or "nothing"
 
 
+def blind_spot_lines(cases: List[Dict[str, Any]]) -> List[str]:
+    """The Blind spots table: one row per probe that went silent while a real event ran."""
+    lines = ["", "## Blind spots", "",
+             "A real fault is running and the probe that would show it goes silent. The right answer is \"can't confirm, "
+             "check by hand\", never a calm zone. Pass: the event's card was up, or a sensor card, a flagged reading for "
+             "that field (offline) or the device-silent flag showed. FALSE REASSURANCE: none of them while the fault ran.", "",
+             "| Zone | Silent from | To | Silent probe | Real event running | Core refused | First sign | Via | Verdict |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for c in cases:
+        sig = c.get("signal")
+        sign = (f"{clock(sig['time'])} (+{sig['delay_s']:.0f} s after silence, {sig['after_crossing_s']:+.0f} s vs the true "
+                f"crossing)" if sig else "nothing")
+        via = ", ".join(VIA_TEXT[v] for v in c["via"]) or "nothing"
+        lines.append(f"| {c['zone']} | {clock(c['start_time'])} | {clock(c['end_time'])} | {c['field']} | "
+                     f"{', '.join(c['events']) or 'none'}{' (crossed ' + ', '.join(c['labels']) + ')' if c['labels'] else ''} | "
+                     f"{c['core_refused_frames']} of its packets | {sign} | {via}"
+                     f"{' (passive flag only)' if c['silent_flag_only'] else ''} | {BLIND_VERDICTS[c['outcome']]} |")
+    return lines
+
+
 def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
     s = report["summary"]
     episodes = sorted(report["real_episodes"] + report["fault_episodes"], key=lambda e: (e["start_time"], e["zone"]))
@@ -602,6 +790,8 @@ def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
         extra = f" (labels: {', '.join(fa['labels'])})" if fa.get("labels") else ""
         lines.append(f"| {fa['zone']} | {clock(fa['time'])} | | normal operation | no card | {fa['rule']} at "
                      f"{clock(fa['time'])}{extra} | FALSE ALARM |")
+    if report.get("blind_spot_cases"):
+        lines += blind_spot_lines(report["blind_spot_cases"])
     real, sensor = s["real_episodes"], s["sensor_fault_episodes"]
     lines += ["", "## Summary", "",
               f"- Real episodes: {real['total']}; caught {real['caught']}, caught as can't-confirm (safe) "
@@ -617,6 +807,13 @@ def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
               f"- Dead clock: {s['dead_clock']['total']}; rejected by Core {s['dead_clock']['rejected_by_core']}, "
               f"accepted {s['dead_clock']['accepted_by_core']}. Dropout episodes: {s['dropout']['total']}.",
               f"- False alarms in normal operation: {s['false_alarms']}. Alerts not in this truth log: {s['unmatched_events']}."]
+    if s.get("blind_spot"):
+        b = s["blind_spot"]
+        lines.append(f"- Blind spots (a probe silent while a real event runs): {b['total']}; FALSE REASSURANCE "
+                     f"{b['false_reassurance']}, can't confirm {b['cant_confirm']} ({b['cant_confirm_by_silent_flag_only']} "
+                     f"by the passive device-silent flag only, no card), alerted by the event's card {b['alerted']}, too short "
+                     f"to judge {b['too_short_to_judge']}, no fault in window {b['no_fault_in_window']}, no real event "
+                     f"{b['no_real_event']}. Real episodes left to this table instead of missed: {real['blind_spot']}.")
     rl = report.get("reading_level")
     if rl:
         lines.append(f"- Reading level (offline): {rl['normal_frames']} normal frames, {rl['normal_with_card']} with a card "
@@ -646,6 +843,11 @@ def print_summary(report: Dict[str, Any], mode: str) -> None:
              if sensor["missed_noticed_only_at_recovery"] else ""))
     print(f"[{mode}] undetectable {s['undetectable']['total']}, dead clock rejected "
           f"{s['dead_clock']['rejected_by_core']}/{s['dead_clock']['total']}, false alarms {s['false_alarms']}")
+    if s.get("blind_spot"):
+        b = s["blind_spot"]
+        print(f"[{mode}] blind spots {b['total']}: FALSE REASSURANCE {b['false_reassurance']}, can't confirm "
+              f"{b['cant_confirm']} ({b['cant_confirm_by_silent_flag_only']} by the device-silent flag only), alerted "
+              f"{b['alerted']}, too short {b['too_short_to_judge']}, no fault in window {b['no_fault_in_window']}")
     rl = report.get("reading_level")
     if rl:
         print(f"[{mode}] normal frames {rl['normal_frames']}: with card {rl['normal_with_card']}, sensor check outside "

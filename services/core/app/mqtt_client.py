@@ -21,6 +21,8 @@ class MqttIngestClient:
         self._client: Any = None
         if mqtt is not None:
             self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            if settings.mqtt_username:
+                self._client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
             self._client.on_connect = self._on_connect
             self._client.on_message = self._on_message
         self.connected = False

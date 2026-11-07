@@ -47,6 +47,38 @@ against the running stack and offline (an in-process replay of the same readings
 pipeline and alert monitor). Outputs land in `data/fake_greenhouse/` (gitignored): `truth.jsonl`
 (the answer key), `report_stack.md`, `report_offline.md` and the matching `score_*.json`.
 
+## Blind spots: a real fault and a silent probe
+
+The worst failure for an advisory system is a calm screen while something is really wrong, because the one probe
+that would show it has dropped out. `scenarios/blind_spot.json` runs real events (dry zone, heat spike, nutrient
+over-concentration, humid night) and, 3 minutes after each starts, silences the probe that decides it
+(`probe_dropout`: the field is missing from every packet). There is also a control where an optional probe
+goes silent but another probe still shows the fault.
+
+```bash
+python3 examples/simulators/fake_greenhouse.py --dry-run --out /tmp/e.jsonl --truth-log /tmp/t.jsonl \
+  --scenario examples/simulators/scenarios/blind_spot.json
+services/model-router/.venv/bin/python scripts/score_fake_greenhouse.py --truth /tmp/t.jsonl --offline \
+  --report /tmp/r.md --fail-on-miss
+```
+
+The scorer adds a **Blind spots** table (only when the truth log has a `probe_dropout`). A case is a silent probe
+while a real event runs and the true state has crossed a label that probe decides. Its verdict, from what Pomona
+actually emits:
+
+| Verdict | Meaning |
+|---------|---------|
+| FALSE REASSURANCE | While the probe was silent and the fault ran: no card for the event, no sensor card, (offline) no reading of that field flagged (vetoed or a missing-data label) and no silent-device flag. The zone looked fine. Counted apart from caught and missed; `--fail-on-miss` fails on it |
+| can't confirm (pass) | At least one of: a sensor card (`sensor_check`, `sensor_flatline`) raised or open; (offline) a reading flagged for that field; the device marked silent, meaning no Core-accepted reading for longer than Core's `device_timeout_seconds` (120 s), which the dashboard shows under Device health. The row says which (`Via`), and "passive flag only" when the device flag was the only sign |
+| alerted (pass) | The event's own card was open or raised while the probe was silent, from other evidence |
+| too short to judge / no fault in window / no real event | Not judged |
+
+Real episodes that a silent probe kept from ever raising are listed here and not counted as missed. A packet
+missing a required field never reaches the pipeline, because Core refuses it whole: the zone goes silent, not only
+the probe, and the only sign Pomona gives is the passive device flag (the dashboard's main panels keep showing the
+last stored reading). The router itself would flag the missing field within three readings; it is Core's refusal
+that hides it.
+
 ## Reading the report
 
 `report_*.md` has one row per episode: where, when, what really happened, the expected answer, and
@@ -64,6 +96,7 @@ what Pomona raised, with a verdict.
 | undetectable | `plausible_offset`: an in-range constant offset nobody can see from one reading |
 | rejected by Core | A dead-clock reading refused at ingest, as intended |
 | FALSE ALARM | A card raised in normal operation, outside every episode's clear window |
+| silent probe | A real episode that a silent probe (`probe_dropout`) kept from raising; graded in the Blind spots table, not as missed |
 
 The stack and offline reports should agree on which rules raised. The offline report adds
 reading-level counts (normal frames with a card or a sensor check, trusted-wrong-card frames).

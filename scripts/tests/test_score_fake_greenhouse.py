@@ -558,3 +558,44 @@ def test_sensor_flatline_is_a_sensor_card_not_a_domain_card():
     # During a real event it is the safe can't-confirm, like sensor_check.
     ep = grade(real_rows(zone=A), [raised(A, "sensor_flatline", 14)])["real_episodes"][0]
     assert ep["outcome"] == "caught_cant_confirm"
+
+
+# --- Blind spots: a real event runs and the probe that would show it goes silent ---------------
+
+BLIND_SPOT_SCENARIO = ROOT / "examples" / "simulators" / "scenarios" / "blind_spot.json"
+
+
+def test_offline_blind_spot_scenario_has_no_false_reassurance(tmp_path):
+    truth, out, md = tmp_path / "truth.jsonl", tmp_path / "out.json", tmp_path / "report.md"
+    assert fg.main(["--dry-run", "--out", str(tmp_path / "e.jsonl"), "--truth-log", str(truth),
+                    "--scenario", str(BLIND_SPOT_SCENARIO)], clock=fake_clock()) == 0
+    assert score.main(["--truth", str(truth), "--offline", "--json", str(out), "--report", str(md), "--fail-on-miss"]) == 0
+    report = json.loads(out.read_text())
+    b = report["summary"]["blind_spot"]
+    assert (b["total"], b["false_reassurance"], b["cant_confirm"], b["alerted"]) == (7, 0, 6, 1)
+    assert b["too_short_to_judge"] == b["no_fault_in_window"] == b["no_real_event"] == 0
+    cases = {(c["zone"], c["field"]): c for c in report["blind_spot_cases"]}
+    # the six probes Core needs: the whole zone goes silent and the device flag is the only sign
+    for key in (("greenhouse-a", "soil_moisture_pct"), ("greenhouse-a", "air_temperature_c"), ("greenhouse-a", "ec_ms_cm"),
+                ("greenhouse-b", "ec_ms_cm"), ("greenhouse-b", "humidity_pct"), ("greenhouse-b", "air_temperature_c")):
+        assert cases[key]["outcome"] == "cant_confirm" and cases[key]["silent_flag_only"] and cases[key]["core_refused_frames"] > 0
+    # the control: an optional probe goes silent, Core keeps storing, the air probe still shows the heat
+    control = cases[("greenhouse-a", "substrate_temperature_c")]
+    assert control["outcome"] == "alerted" and control["domain_card"]["rule"] == "heat_stress_check"
+    assert report["summary"]["real_episodes"]["missed"] == 0 and report["summary"]["false_alarms"] == 0
+    assert "## Blind spots" in md.read_text()
+
+
+def test_the_pipeline_alone_would_say_cant_confirm_for_a_probe_that_is_missing():
+    """Evidence for the gap: the router flags a missing probe within 3 readings; it is Core's refusal that hides it."""
+    sim = fg.Simulation(seed=7, clock=fake_clock())
+    events = [r.event for _ in range(14) for r in sim.step() if r.truth["zone_id"] == B]
+    with score.InProcessPomona(RULES, DEFAULTS) as engine:
+        for event in events[:10]:
+            assert engine.observe(event)["sensor_check_labels"] == []
+        raised_events = []
+        for event in events[10:]:
+            got = engine.observe({k: v for k, v in event.items() if k != "ec_ms_cm"})
+            assert "missing_ec" in got["labels"] and got["trust"] != "trusted"
+            raised_events += got["alert_events"]
+        assert [(e["rule_id"], e["event"]) for e in raised_events] == [("sensor_check", "raised")]

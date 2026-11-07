@@ -46,7 +46,7 @@ python3 examples/tomato_risk_quickstart.py   # real sensor JSON -> risk labels
 |---------|-----|
 | Core API | http://localhost:8080 |
 | Model router | http://localhost:8081 |
-| MQTT | localhost:1883 |
+| MQTT | localhost:1883 (login from `.env`, see [SECURITY.md](SECURITY.md)) |
 
 Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 **Target:** one-command full stack (UI + DB in Docker) — [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md)

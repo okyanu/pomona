@@ -17,10 +17,19 @@ services:
     cpus: ${MQTT_CPUS:-0.5}
     ports:
       - "1883:1883"
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-pomona}
+      MQTT_PASSWORD: "${MQTT_PASSWORD:?MQTT_PASSWORD is not set: run scripts/setup.sh or set it in .env}"
+    # The login file is built here, at start, from the two variables above: it lives only in this container's
+    # tmpfs /tmp (owned by the mosquitto user, mode 0600), never on the host. No `set -x`, nothing is logged.
+    command:
+      - sh
+      - -c
+      - mosquitto_passwd -c -b /tmp/mosquitto.passwd "$$MQTT_USERNAME" "$$MQTT_PASSWORD" && exec mosquitto -c /mosquitto/config/mosquitto.conf
     volumes:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/version' -C 1 -W 3 || exit 1"]
+      test: ["CMD-SHELL", "mosquitto_sub -u \"$$MQTT_USERNAME\" -P \"$$MQTT_PASSWORD\" -t '$$SYS/broker/version' -C 1 -W 3 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -37,6 +46,8 @@ services:
       CORE_PORT: ${CORE_PORT:-8080}
       MQTT_HOST: ${MQTT_HOST:-mqtt}
       MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-pomona}
+      MQTT_PASSWORD: "${MQTT_PASSWORD:?MQTT_PASSWORD is not set: run scripts/setup.sh or set it in .env}"
       MQTT_TOPIC_PATTERN: ${MQTT_TOPIC_PATTERN:-pomona/+/+/sensor/+/state}
       DB_PATH: ${DB_PATH:-/app/data/pomona.db}
       MAX_EVENTS: ${MAX_EVENTS:-100000}

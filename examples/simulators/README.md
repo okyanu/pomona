@@ -29,6 +29,8 @@ Environment variables (see `.env.example`):
 |----------|---------|
 | `MQTT_HOST` | `localhost` |
 | `MQTT_PORT` | `1883` |
+| `MQTT_USERNAME` | empty (no login). `./scripts/sim.sh` and `make fake-greenhouse` read it from `.env` |
+| `MQTT_PASSWORD` | empty. The Docker broker requires a login, so these two must match `.env` |
 | `SIM_FARM_ID` | `demo-farm` |
 | `SIM_ZONE_ID` | `greenhouse-a` |
 | `SIM_DEVICE_ID` | `sim-greenhouse-01` |
@@ -165,6 +167,12 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   (400 %/h) that stays dry long enough for the 10 minute water-level debounce. Quick, but less
   realistic than the demo (a real EC ramp is too slow for a quick run: a fast one trips Pomona's
   baseline-drift veto).
+- `scenarios/blind_spot.json`: 620 ticks (about 5.2 hours): the false-reassurance cases. A real event runs
+  and, 3 minutes after it starts, the probe that would show it goes silent (`probe_dropout`): dry zone +
+  moisture probe, heat spike + air temperature probe (both zones), nutrient over-concentration + EC probe
+  (both zones), humid night + humidity probe, and one control (heat spike + the optional substrate
+  temperature probe, while the air probe still shows the heat). The scorer grades each under "Blind spots"
+  (see [FAKE_GREENHOUSE.md](../../docs/FAKE_GREENHOUSE.md#blind-spots-a-real-fault-and-a-silent-probe)).
 - `scenarios/validation.json`: 15 ticks at `--interval 1`, used by `make local-validation`.
 - `scenarios/smoke.json`: 12 ticks, used by the tests.
 
@@ -180,6 +188,7 @@ JSON, scheduled by tick (not wall time) so replays are exact:
 | `dropout` | No packet is published for the zone while active |
 | `dead_clock` | Timestamp `1970-01-01T00:00:00Z`; Core rejects it (`rejected_by_core`) |
 | `plausible_offset` | Constant in-range EC +3.0 (`offset`); undetectable by Pomona today (`detectable: false`) |
+| `probe_dropout` | One probe goes silent: its field is absent from every packet (the key is missing, not null; soil moisture drops both of its names). Nothing wrong is sent, so there is no recovery tail. Core refuses a packet missing a required field (air temperature, humidity, EC, pH, soil moisture), so the whole zone goes silent; a missing `substrate_temperature_c` is accepted. The truth log's `expect` then has `silent_fields`, and `core_rejects: true` when Core refuses the packet. Not picked by "Hidden random" |
 
 ### Real events (the truth changes, the reading is correct)
 

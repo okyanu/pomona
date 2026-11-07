@@ -28,6 +28,9 @@ DEVICE_ID="hardware-validation-$(date +%s)"
 export DEVICE_ID
 export MQTT_HOST="${MQTT_HOST:-127.0.0.1}"
 export MQTT_PORT="${MQTT_PORT:-1883}"
+# shellcheck disable=SC1091
+. "${ROOT_DIR}/scripts/mqtt-env.sh"
+load_mqtt_credentials "${ROOT_DIR}/.env"  # broker login from .env (an empty username means no login)
 
 "${PYTHON}" - <<'PY'
 import json
@@ -40,6 +43,8 @@ import paho.mqtt.client as mqtt
 device_id = os.environ["DEVICE_ID"]
 topic = f"pomona/demo-farm/greenhouse-a/sensor/{device_id}/state"
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+if os.environ.get("MQTT_USERNAME"):
+    client.username_pw_set(os.environ["MQTT_USERNAME"], os.environ.get("MQTT_PASSWORD", ""))
 client.connect(os.environ["MQTT_HOST"], int(os.environ["MQTT_PORT"]), keepalive=30)
 client.loop_start()
 timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

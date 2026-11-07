@@ -78,6 +78,9 @@ FIELD_ALIASES = {"substrate_moisture_pct": "soil_moisture_pct"}
 # meter confirmed the probe, which accepts a new level after a flagged step. Substrate temperature has none.
 CALIBRATABLE = ("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct")
 CALIBRATION_METHOD = "fake_greenhouse_confirm"
+# SensorEvent fields without a default (services/core/app/schemas.py): a packet that lacks one is refused by
+# Core (422 over REST, a logged validation error over MQTT), so it is never stored or judged.
+CORE_REQUIRED = ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct")
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,7 @@ class Injection:
     default_params: Dict[str, float] = {}
     extra_params: Tuple[str, ...] = ()  # accepted params that have no fixed default
     source = "scenario"                 # who started it: scenario, manual or hidden
+    hideable = True                     # may "Hidden random" pick it
     hidden_id: Optional[int] = None
 
     def __init__(self, zone: "Zone", field: Optional[str], params: Dict[str, Any], tick: int, now: str):
@@ -195,6 +199,10 @@ class Fault(Injection):
         if not self.field:
             return []
         return ["soil_moisture_pct", "substrate_moisture_pct"] if self.field == "soil_moisture_pct" else [self.field]
+
+    def omitted_fields(self) -> List[str]:
+        """Fields left out of the packet (the key is absent, not null)."""
+        return []
 
 
 class Stuck(Fault):
@@ -274,6 +282,26 @@ class Noisy(Fault):
 class Dropout(Fault):
     name, drops = "dropout", True
     description = "No packets are published for the zone."
+
+
+class ProbeDropout(Fault):
+    """One probe goes silent: its field is absent from every packet while the other probes keep reporting.
+
+    Nothing wrong is sent, so no reading lies and no recovery tail follows. A packet missing one of CORE_REQUIRED is
+    refused by Core as a whole (the zone goes silent, not just the probe); a missing optional field
+    (substrate_temperature_c) is accepted. Pair it with a real event to ask whether Pomona says "can't confirm"
+    or looks fine while the fault runs (scenarios/blind_spot.json).
+    """
+
+    name, needs_field = "probe_dropout", True
+    description = "One probe stops reporting: its field is missing from every packet (the others keep reporting)."
+    hideable = False  # keeps "Hidden random" and the Space's trick list as they were
+
+    def omitted_fields(self) -> List[str]:
+        return ["soil_moisture_pct", "substrate_moisture_pct"] if self.field == "soil_moisture_pct" else [self.field]
+
+    def wrong_fields(self) -> List[str]:
+        return []
 
 
 class DeadClock(Fault):
@@ -396,7 +424,7 @@ class DryZone(Event):
 
 
 REGISTRY: Dict[str, type] = {cls.name: cls for cls in (
-    Stuck, Drift, Jump, Spike, Noisy, Dropout, DeadClock, PlausibleOffset,
+    Stuck, Drift, Jump, Spike, Noisy, Dropout, DeadClock, PlausibleOffset, ProbeDropout,
     DryZone, HeatSpike, ColdNight, HumidNight, NutrientOverConcentration)}
 
 
@@ -549,7 +577,14 @@ class Zone:
             event["soil_moisture_pct"] = PLACEHOLDER_MOISTURE_PCT
         event.update(timestamp=timestamp, source="fake_greenhouse", schema_version="1.0",
                      sequence=self.sequence, boot_id=self.boot_id)
+        for fault in self.faults:
+            for field in fault.omitted_fields():
+                event.pop(field, None)
         return event
+
+    def silent_fields(self) -> List[str]:
+        """Probes whose field is absent from the packet right now."""
+        return sorted({f for fault in self.faults for f in fault.omitted_fields()})
 
     @property
     def placeholder_fields(self) -> List[str]:
@@ -793,8 +828,8 @@ class Simulation:
             taken = {(i.name, i.zone_id) for z in self.zones.values() for i in z.faults + z.events
                      if i.source == "hidden"}
             taken |= {(c["name"], c["zone"]) for c in self.pending if c["op"] == "start" and c["source"] == "hidden"}
-            candidates = [(name, zone_id) for name in REGISTRY for zone_id in self.applicable_zones(name)
-                          if (name, zone_id) not in taken]
+            candidates = [(name, zone_id) for name in REGISTRY if REGISTRY[name].hideable
+                          for zone_id in self.applicable_zones(name) if (name, zone_id) not in taken]
             if not candidates:
                 raise ValueError("every applicable injection is already running hidden")
             name, zone_id = self.hidden_rng.choice(candidates)
@@ -931,11 +966,13 @@ class Simulation:
         dropout = any(f.drops for f in zone.faults)
         dead = any(f.dead_clock for f in zone.faults)
         event = None
+        silent = [] if dropout else zone.silent_fields()
+        incomplete = any(field in CORE_REQUIRED for field in silent)  # Core refuses a packet missing a required field
         if not dropout:
             event = zone.build_event(sent, self.farm_id, DEAD_CLOCK_TIMESTAMP if dead else self.now)
             zone.sequence += 1
             zone.last_sent.update(sent)
-            if not dead:  # Core keeps only accepted samples in the history
+            if not (dead or incomplete):  # Core keeps only accepted samples in the history
                 for entry in zone.recovery:
                     entry[1] -= 1
                 zone.recovery = [e for e in zone.recovery if e[1] > 0]
@@ -985,6 +1022,10 @@ class Simulation:
                 "recovering_from": recovering,
             },
         }
+        if silent:  # only while a probe is silent, so other truth lines stay as they were
+            truth["expect"]["silent_fields"] = [f for f in silent if f != "substrate_moisture_pct"]
+            if incomplete:
+                truth["expect"]["core_rejects"] = True
         if calibrations:  # only on the tick a calibration happened, so other truth lines stay as they were
             truth["calibrations"] = [{"field": c["field"], "at": c["at"], "source": c["source"]} for c in calibrations]
         topic = f"pomona/{self.farm_id}/{cfg.zone_id}/sensor/{cfg.device_id}/state"
@@ -1138,10 +1179,12 @@ class CorePublisher:
 
 
 class MqttPublisher:
-    def __init__(self, host: str, port: int):
+    def __init__(self, host: str, port: int, username: str = "", password: str = ""):
         import paho.mqtt.client as mqtt  # lazy: the model and its tests do not need paho
 
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        if username:  # empty username: connect without a login
+            self.client.username_pw_set(username, password)
         self.client.connect(host, port, keepalive=60)
         self.client.loop_start()
 
@@ -1177,8 +1220,8 @@ def summary_line(reading: Reading) -> str:
     if event is None:
         return f"tick {truth['tick']} {truth['zone_id']} not published ({truth['reason']}){suffix}"
     return (f"tick {truth['tick']} {truth['zone_id']} seq={event['sequence']} "
-            f"temp={event['air_temperature_c']} rh={event['humidity_pct']} ec={event['ec_ms_cm']} "
-            f"ph={event['ph']} moisture={event['soil_moisture_pct']}{suffix}")
+            f"temp={event.get('air_temperature_c')} rh={event.get('humidity_pct')} ec={event.get('ec_ms_cm')} "
+            f"ph={event.get('ph')} moisture={event.get('soil_moisture_pct')}{suffix}")
 
 
 def run(sim: Simulation, publisher: Any, truth_handle: Any, ticks: Optional[int],
@@ -1258,7 +1301,8 @@ def main(argv: Optional[List[str]] = None, clock: Callable[[], datetime] = utc_n
         publisher = CorePublisher(args.core_url, os.getenv("POMONA_API_KEY") or os.getenv("API_KEY", ""))
         print(f"Posting to {publisher.url} every {args.interval}s (Ctrl+C to stop)")
     else:
-        publisher = MqttPublisher(os.getenv("MQTT_HOST", "localhost"), int(os.getenv("MQTT_PORT", "1883")))
+        publisher = MqttPublisher(os.getenv("MQTT_HOST", "localhost"), int(os.getenv("MQTT_PORT", "1883")),
+                                  os.getenv("MQTT_USERNAME", ""), os.getenv("MQTT_PASSWORD", ""))
         print(f"Publishing to pomona/{args.farm_id}/+/sensor/+/state every {args.interval}s (Ctrl+C to stop)")
     try:
         with open(args.truth_log, "w") as truth_handle:

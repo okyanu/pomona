@@ -584,6 +584,8 @@ def info() -> Dict[str, Any]:
               "calibratable": z["calibratable"]} for z in catalog["zones"]]
     tricks = []
     for item in catalog["injections"]:
+        if item["name"] not in TRICKS:  # a simulator injection the game does not offer (the blind-spot scenario's probe_dropout)
+            continue
         meta = TRICKS[item["name"]]
         tricks.append({"name": item["name"], "title": meta["title"], "blurb": meta["blurb"], "group": meta["group"],
                        "takes_field": item["takes_field"], "needs_field": item["needs_field"],

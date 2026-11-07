@@ -8,6 +8,10 @@ PYTHON="${PYTHON:-python3}"
 MQTT_HOST="${MQTT_HOST:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 
+# shellcheck disable=SC1091
+. "$ROOT/scripts/mqtt-env.sh"
+load_mqtt_credentials .env  # broker login from .env (an empty username means no login)
+
 "$PYTHON" -m pip install -q -r examples/simulators/requirements.txt 2>/dev/null || true
 
 echo "Publishing to MQTT at ${MQTT_HOST}:${MQTT_PORT} (Ctrl+C to stop)"

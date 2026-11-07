@@ -8,6 +8,9 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env from .env.example"
 fi
+# shellcheck disable=SC1091
+. "$ROOT/scripts/mqtt-env.sh"
+ensure_mqtt_password .env  # the broker requires a login; a blank MQTT_PASSWORD gets a random one
 
 if docker compose version >/dev/null 2>&1; then
   COMPOSE=(docker compose)
@@ -32,7 +35,7 @@ echo ""
 echo "Pomona is starting."
 echo "  Core API:     http://localhost:8080/health"
 echo "  Model router: http://localhost:8081/health"
-echo "  MQTT:         localhost:1883"
+echo "  MQTT:         localhost:1883 (login required: MQTT_USERNAME / MQTT_PASSWORD in .env)"
 echo ""
 echo "Next (new terminal):"
 echo "  ./scripts/sim.sh"

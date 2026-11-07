@@ -11,6 +11,9 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env"
 fi
+# shellcheck disable=SC1091
+. "$ROOT/scripts/mqtt-env.sh"
+ensure_mqtt_password .env
 
 PYTHON="${PYTHON:-python3}"
 if command -v "$PYTHON" >/dev/null 2>&1; then
