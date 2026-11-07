@@ -48,6 +48,8 @@ SENSOR_ACTION = "check_sensor"  # every rule with this action is a sensor card (
 CORE_OPTIONAL = ("substrate_temperature_c", "substrate_moisture_pct", "weather", "zone_area_m2", "crop_kc",
                  "npk_target")
 # Core's default `min_sample_time` (services/core/app/config.py): earlier sample times are a dead clock.
+# Core's `max_future_sample_s` (a sample time ahead of Core's wall clock) is not mirrored: a replay runs on virtual
+# sample time, with no wall clock to be ahead of.
 MIN_SAMPLE_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 HISTORY_PACKETS = 11  # the model-router's temporal checks see this many earlier packets per zone
 

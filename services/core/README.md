@@ -50,8 +50,10 @@ Central API and sensor ingest for Pomona.
 
 `timestamp` is required on every full packet; Core never substitutes its receipt time. Sample
 times before `MIN_SAMPLE_TIME` (default `2020-01-01T00:00:00Z`) are rejected for packets,
-observations and corrected observations (a device clock that was never set). Stored rows are
-not re-checked.
+observations and corrected observations (a device clock that was never set), and so are times more
+than `MAX_FUTURE_SAMPLE_S` (default 300 s, 0 disables) ahead of Core's clock (local time labelled `Z`).
+Stored rows are not re-checked. Everything is stored in UTC; `FARM_TIMEZONE` (an IANA name, default
+`UTC`) is display only and appears in `GET /health` under `time`, with the next clock change.
 
 ## Outcome feed
 

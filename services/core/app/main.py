@@ -9,6 +9,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.auth import require_api_key
+from app.config import settings
+from app.farm_time import farm_time_info
 from app.mqtt_client import mqtt_client
 from app.outcome_feed import outcome_feed
 from app.schemas import (
@@ -61,6 +63,7 @@ def health() -> HealthResponse:
         mqtt_connected=mqtt_client.connected,
         events_stored=event_store.count(),
         outcome_feed_dropped=outcome_feed.dropped,
+        time=farm_time_info(settings.farm_timezone),
     )
 
 

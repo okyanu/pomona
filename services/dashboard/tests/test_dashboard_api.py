@@ -683,3 +683,30 @@ def test_digital_twin_scenario_bounds_are_enforced():
     response = client.post("/api/digital-twin", json={"irrigation_duration_min": 241})
 
     assert response.status_code == 422
+
+
+def test_farm_time_comes_from_core_health_and_falls_back_to_utc(monkeypatch):
+    health = {"status": "ok", "time": {"farm_timezone": "Europe/Berlin", "utc_offset_now": "+01:00",
+              "next_offset_change": "2027-03-28T01:00:00+00:00", "offset_after_change": "+02:00", "tzdata_version": None}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path):
+            assert path == "/health"
+            if health is None:
+                raise dashboard_main.httpx.ConnectError("Core is down")
+            return dashboard_main.httpx.Response(200, json=health, request=dashboard_main.httpx.Request("GET", "http://core" + path))
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    body = client.get("/api/farm-time").json()
+    assert body["available"] and body["farm_timezone"] == "Europe/Berlin" and body["utc_offset_now"] == "+01:00"
+    assert body["next_offset_change"] == "2027-03-28T01:00:00+00:00" and body["offset_after_change"] == "+02:00"
+    unreported = {"available": False, "farm_timezone": "UTC", "utc_offset_now": "+00:00", "next_offset_change": None,
+                  "offset_after_change": None, "tzdata_version": None}
+    health = {"status": "ok"}  # an older Core without the field
+    assert client.get("/api/farm-time").json() == unreported
+    health = {"status": "ok", "time": {"farm_timezone": 7}}
+    assert client.get("/api/farm-time").json() == unreported
+    health = None  # Core unreachable
+    assert client.get("/api/farm-time").json() == unreported

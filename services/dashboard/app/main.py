@@ -36,6 +36,16 @@ class HealthResponse(BaseModel):
     core_url: str
 
 
+class FarmTimeResponse(BaseModel):
+    """The farm time zone Core reports on /health; UTC with available=False when Core does not say."""
+    available: bool
+    farm_timezone: str = "UTC"
+    utc_offset_now: str = "+00:00"
+    next_offset_change: Optional[str] = None
+    offset_after_change: Optional[str] = None
+    tzdata_version: Optional[str] = None
+
+
 class OverviewResponse(BaseModel):
     core_available: bool
     latest_event: Optional[Dict[str, Any]] = None
@@ -151,6 +161,26 @@ async def scoped_request(request: Request, call_next):
         return await call_next(request)
     finally:
         request_scope.reset(token)
+
+
+@app.get("/api/farm-time", response_model=FarmTimeResponse)
+async def farm_time() -> FarmTimeResponse:
+    """Display zone only: Core stores UTC. Unreachable Core or an older Core without the field keeps UTC."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.core_url, timeout=3.0) as client:
+            response = await client.get("/health")
+            response.raise_for_status()
+        info = response.json().get("time") or {}
+        if not isinstance(info.get("farm_timezone"), str):
+            return FarmTimeResponse(available=False)
+        text = lambda key: info[key] if isinstance(info.get(key), str) else None  # noqa: E731
+        return FarmTimeResponse(available=True, farm_timezone=info["farm_timezone"],
+                                utc_offset_now=text("utc_offset_now") or "+00:00",
+                                next_offset_change=text("next_offset_change"),
+                                offset_after_change=text("offset_after_change"),
+                                tzdata_version=text("tzdata_version"))
+    except Exception:
+        return FarmTimeResponse(available=False)
 
 
 @app.get("/api/devices")
@@ -726,6 +756,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <button type="submit">Open zone</button>
   </form>
   <p id="scope-status" class="status">Select a farm and zone to monitor.</p>
+  <p id="farm-time" class="status">Farm time: UTC (checking Core)</p>
   <section><h2>pH probe health</h2><div id="probe-health">Select a zone.</div><p>Sensitivity (mV per pH) is fitted from each stored buffer calibration and compared with the first one. Advisory: it never changes readings or calibrations.</p></section>
   <section><h2>Device health</h2><div id="devices">Select a zone.</div><p>Recent/silent is inferred from last receipt, not proof of connectivity. Quality is sender-reported.</p></section>
   <section><h2>Sensor history</h2><a id="history-download">Download this page as CSV</a><div id="history">Select a zone.</div><p>100 records per page; increase offset by 100 for older records. Pages can shift during ingestion. Modular observations do not feed reasoners.</p></section>
@@ -805,6 +836,51 @@ const trustLine = (verdict, fields) => {
   const text = verdict === 'trusted' ? 'All readings passed the sensor check' : `Can't confirm: ${names || 'some readings'} not used`;
   return `${badge(String(verdict).replace(/_/g, ' '), trustTone.get(verdict) || 'neutral')} ${escapeHtml(text)}`;
 };
+// Farm time: Core stores UTC; the farm zone comes from Core's /health (via /api/farm-time) and is display only.
+// timeCell returns escaped HTML: the time in the farm zone with its UTC offset, the original string in a title.
+// Anything that is not an ISO time with a UTC offset (or no farm zone from Core) is shown exactly as before.
+let farmTime = {available: false, farm_timezone: 'UTC'};
+const isoWithOffset = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)$/i;
+const formatters = new Map();
+const farmFormatter = (zone) => {
+  if (!formatters.has(zone)) formatters.set(zone, new Intl.DateTimeFormat('en-US', {timeZone: zone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'longOffset'}));
+  return formatters.get(zone);
+};
+const farmParts = (date, zone) => {
+  const parts = Object.fromEntries(farmFormatter(zone).formatToParts(date).map(part => [part.type, part.value]));
+  const offset = (parts.timeZoneName || 'GMT').replace('GMT', '').replace(/^$/, '+00:00').replace(/^([+-]\d{2}):00$/, '$1');
+  return {day: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}`,
+    offset: zone === 'UTC' || zone === 'Etc/UTC' ? 'UTC' : offset};
+};
+const farmTimeText = (raw) => {
+  if (!farmTime.available || typeof raw !== 'string' || !isoWithOffset.test(raw.trim())) return null;
+  const date = new Date(raw.trim().replace(' ', 'T'));
+  if (Number.isNaN(date.getTime())) return null;
+  try { const p = farmParts(date, farmTime.farm_timezone); return `${p.day} ${p.time} ${p.offset}`; } catch (error) { return null; }
+};
+const timeCell = (raw) => {
+  const text = farmTimeText(raw);
+  return text === null ? escapeHtml(raw) : `<span title="${escapeHtml(raw)}">${escapeHtml(text)}</span>`;
+};
+const farmTimeLine = () => {
+  if (!farmTime.available) return 'Farm time: UTC (Core did not report a farm time zone) · times below are UTC as stored';
+  let change = 'no clock change in the next year';
+  if (farmTime.next_offset_change) {
+    const when = new Date(farmTime.next_offset_change);
+    try { change = `clock changes to UTC${farmTime.offset_after_change || '?'} on ${farmParts(when, farmTime.farm_timezone).day}`; }
+    catch (error) { change = 'clock change coming'; }
+  }
+  return `Farm time: ${farmTime.farm_timezone} (UTC${farmTime.utc_offset_now}, ${change}) · times below are farm time (hover for the stored UTC time)`;
+};
+async function loadFarmTime() {
+  try {
+    const info = await (await scopedFetch('/api/farm-time')).json();
+    farmTime = info && info.available && typeof info.farm_timezone === 'string' ? info : {available: false, farm_timezone: 'UTC'};
+    if (farmTime.available) farmFormatter(farmTime.farm_timezone);  // an unknown zone name throws here: show UTC as before
+  } catch (error) { farmTime = {available: false, farm_timezone: 'UTC'}; }
+  $('farm-time').textContent = farmTimeLine();
+}
 const listSeverity = (list) => (list && list.length ? 'warning' : 'success');
 const boolSeverity = (flag) => (flag ? 'warning' : 'success');
 const sparkline = (values, color) => {
@@ -843,7 +919,7 @@ $('scope-status').textContent = hasScope ? `Farm: ${selectedFarm} · Zone: ${sel
 if (hasScope) $('history-download').href = scopedUrl(`/api/history/export.csv?kind=${historyKind}&offset=${historyOffset}`);
 async function renderHistory() {
   const devices = await (await scopedFetch('/api/devices')).json();
-  $('devices').innerHTML = devices.available ? `<table><thead><tr><th scope="col">Device</th><th scope="col">Last seen</th><th scope="col">Availability</th><th scope="col">Sample stale</th><th scope="col">Reported quality</th></tr></thead><tbody>${(devices.result.devices || []).map(d => `<tr><td>${escapeHtml(d.device_id)}</td><td>${escapeHtml(d.last_seen)}</td><td>${escapeHtml(d.availability)}</td><td>${d.sample_stale ? 'yes' : 'no'}</td><td>${escapeHtml(d.quality || 'not reported')}</td></tr>`).join('')}</tbody></table>` : escapeHtml(devices.error || 'Device status unavailable');
+  $('devices').innerHTML = devices.available ? `<table><thead><tr><th scope="col">Device</th><th scope="col">Last seen</th><th scope="col">Availability</th><th scope="col">Sample stale</th><th scope="col">Reported quality</th></tr></thead><tbody>${(devices.result.devices || []).map(d => `<tr><td>${escapeHtml(d.device_id)}</td><td>${timeCell(d.last_seen)}</td><td>${escapeHtml(d.availability)}</td><td>${d.sample_stale ? 'yes' : 'no'}</td><td>${escapeHtml(d.quality || 'not reported')}</td></tr>`).join('')}</tbody></table>` : escapeHtml(devices.error || 'Device status unavailable');
   const probes = await (await scopedFetch('/api/probe-health')).json();
   const probeTone = { ok: 'success', baseline_only: 'neutral', weakening: 'warning', worn: 'danger', suspect: 'danger', no_data: 'neutral' };
   $('probe-health').innerHTML = !probes.available ? escapeHtml(probes.error || 'Probe health unavailable')
@@ -852,7 +928,7 @@ async function renderHistory() {
   const history = await (await scopedFetch(`/api/history?kind=${historyKind}&offset=${historyOffset}`)).json();
   if (!history.available) { $('history').textContent = history.error || 'History unavailable'; return; }
   const rows = history.result[historyKind] || [];
-  $('history').innerHTML = rows.length ? `<table><thead><tr><th scope="col">Sample time</th><th scope="col">Device</th><th scope="col">Reading</th><th scope="col">Quality</th></tr></thead><tbody>${rows.map(r => `<tr><td>${escapeHtml(r.timestamp)}</td><td>${escapeHtml(r.device_id)}</td><td>${escapeHtml(historyKind === 'observations' ? `${r.measurement}: ${r.value ?? 'missing'} ${r.unit}` : `Temperature ${r.air_temperature_c} °C · pH ${r.ph} · EC ${r.ec_ms_cm}`)}</td><td>${escapeHtml(r.quality || 'full packet — see sensor-quality assessment')}</td></tr>`).join('')}</tbody></table>` : 'No records on this page.';
+  $('history').innerHTML = rows.length ? `<table><thead><tr><th scope="col">Sample time</th><th scope="col">Device</th><th scope="col">Reading</th><th scope="col">Quality</th></tr></thead><tbody>${rows.map(r => `<tr><td>${timeCell(r.timestamp)}</td><td>${escapeHtml(r.device_id)}</td><td>${escapeHtml(historyKind === 'observations' ? `${r.measurement}: ${r.value ?? 'missing'} ${r.unit}` : `Temperature ${r.air_temperature_c} °C · pH ${r.ph} · EC ${r.ec_ms_cm}`)}</td><td>${escapeHtml(r.quality || 'full packet — see sensor-quality assessment')}</td></tr>`).join('')}</tbody></table>` : 'No records on this page.';
 }
 let automationBusy = false;
 let telemetryUnavailable = true;
@@ -884,10 +960,10 @@ async function renderAlerts() {
   const tone = { active: 'danger', pending: 'warning', recovering: 'neutral' };
   const label = { active: 'active', pending: 'waiting', recovering: 'recovering' };
   const table = items.length
-    ? `<table><thead><tr><th scope="col">State</th><th scope="col">Rule</th><th scope="col">Message</th><th scope="col">First seen</th><th scope="col">Raised</th><th scope="col">Clear since</th></tr></thead><tbody>${items.map(a => `<tr><td>${badge(label[a.state] || a.state, tone[a.state] || 'neutral')}</td><td>${escapeHtml(a.rule_id)}</td><td>${escapeHtml(a.message || '')}</td><td>${escapeHtml(a.since)}</td><td>${escapeHtml(a.raised_at || '--')}</td><td>${escapeHtml(a.recovering_since || '--')}</td></tr>`).join('')}</tbody></table>`
+    ? `<table><thead><tr><th scope="col">State</th><th scope="col">Rule</th><th scope="col">Message</th><th scope="col">First seen</th><th scope="col">Raised</th><th scope="col">Clear since</th></tr></thead><tbody>${items.map(a => `<tr><td>${badge(label[a.state] || a.state, tone[a.state] || 'neutral')}</td><td>${escapeHtml(a.rule_id)}</td><td>${escapeHtml(a.message || '')}</td><td>${timeCell(a.since)}</td><td>${timeCell(a.raised_at || '--')}</td><td>${timeCell(a.recovering_since || '--')}</td></tr>`).join('')}</tbody></table>`
     : '<p class="status">No open alerts.</p>';
   const history = recent.length
-    ? `<p class="status">Recent: ${recent.map(e => `${escapeHtml(e.rule_id)} ${escapeHtml(e.event)} at ${escapeHtml(e.sample_time)}`).join(' · ')}</p>`
+    ? `<p class="status">Recent: ${recent.map(e => `${escapeHtml(e.rule_id)} ${escapeHtml(e.event)} at ${timeCell(e.sample_time)}`).join(' · ')}</p>`
     : '';
   $('alerts').innerHTML = table + history;
 }
@@ -903,7 +979,7 @@ async function renderAutomation() {
     $('automation').innerHTML = `<p class="status">No suggestions yet. Click "Evaluate current risk" to check the latest reading against automation rules.</p>`;
     return;
   }
-  $('automation').innerHTML = `<table><thead><tr><th scope="col">Rule</th><th scope="col">Action</th><th scope="col">Message</th><th scope="col">Status</th><th scope="col">Outcome</th><th scope="col">Decision time</th><th scope="col">Reviewer (unverified)</th><th scope="col"></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${escapeHtml(s.rule_id)}</td><td>${escapeHtml(s.action)}</td><td>${escapeHtml(s.message)}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${outcomeBadge(s.outcome_status)}</td><td>${escapeHtml(s.decided_at || '--')}</td><td>${escapeHtml(s.reviewer || '--')}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${escapeHtml(s.id)}">Approve</button> <button type="button" class="automation-reject" data-id="${escapeHtml(s.id)}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
+  $('automation').innerHTML = `<table><thead><tr><th scope="col">Rule</th><th scope="col">Action</th><th scope="col">Message</th><th scope="col">Status</th><th scope="col">Outcome</th><th scope="col">Decision time</th><th scope="col">Reviewer (unverified)</th><th scope="col"></th></tr></thead><tbody>${suggestions.map(s => `<tr><td>${escapeHtml(s.rule_id)}</td><td>${escapeHtml(s.action)}</td><td>${escapeHtml(s.message)}</td><td>${badge(s.status, s.status === 'pending' ? 'warning' : (s.status === 'approved' ? 'success' : 'neutral'))}</td><td>${outcomeBadge(s.outcome_status)}</td><td>${timeCell(s.decided_at || '--')}</td><td>${escapeHtml(s.reviewer || '--')}</td><td>${s.status === 'pending' ? `<button type="button" class="automation-approve" data-id="${escapeHtml(s.id)}">Approve</button> <button type="button" class="automation-reject" data-id="${escapeHtml(s.id)}">Reject</button>` : ''}</td></tr>`).join('')}</tbody></table><p class="status">A person decides every suggestion; nothing here executes an actuator.</p>`;
   setAutomationBusy(automationBusy);
   await renderAdviceCards();
 }
@@ -925,12 +1001,12 @@ async function renderAdviceCards() {
       <p class="status">${escapeHtml(card.summary || '')}</p>
       <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields)}</p>
       <p class="status">Checks: ${escapeHtml((card.safe_next_checks || []).join('; ') || 'none')}</p>
-      <p class="status">Sample: ${escapeHtml((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
+      <p class="status">Sample: ${timeCell((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
       <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
       <details><summary>Recorded evidence</summary><pre>${escapeHtml(JSON.stringify(card.evidence || {}, null, 2))}</pre></details>
       <p class="status">Blocked: ${badge((card.blocked_actions || []).join(', ') || 'none', (card.blocked_actions || []).length ? 'danger' : 'success')}</p>
       <p class="status">Status: ${badge(card.status || 'pending', card.status === 'pending' ? 'warning' : 'neutral')}</p>
-      ${card.outcome ? `<p class="status">Outcome: ${outcomeBadge(card.outcome.status)} · clean readings ${escapeHtml(card.outcome.clean_streak ?? 0)}/${escapeHtml(card.outcome.required_clean_readings ?? '--')} · until ${escapeHtml(card.outcome.deadline || '--')}</p>` : ''}
+      ${card.outcome ? `<p class="status">Outcome: ${outcomeBadge(card.outcome.status)} · clean readings ${escapeHtml(card.outcome.clean_streak ?? 0)}/${escapeHtml(card.outcome.required_clean_readings ?? '--')} · until ${timeCell(card.outcome.deadline || '--')}</p>` : ''}
     </article>`).join('')}</div>`;
 }
 document.body.addEventListener('click', async (event) => {
@@ -957,6 +1033,7 @@ document.body.addEventListener('click', async (event) => {
   }
 });
 async function refresh() {
+  await loadFarmTime();
   if (!hasScope) { markUnavailable('Select a farm and zone'); return; }
   if (refresh.running) return;
   refresh.running = true;
@@ -1033,7 +1110,7 @@ async function refreshData() {
   } else if (!(audit.result.events || []).length) {
     $('audit').textContent = 'No pipeline evaluations recorded yet.';
   } else {
-    $('audit').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Scenario</th><th scope="col">Risk</th><th scope="col">Review</th><th scope="col">Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${escapeHtml(e.evaluated_at || '--')}</td><td>${escapeHtml(e.scenario_id || '--')}</td><td>${badge(e.risk_level || '--', riskSeverity(e.risk_level))}</td><td>${badge(e.human_review_required ? 'required' : 'not required', boolSeverity(e.human_review_required))}</td><td>${badge((e.blocked_actions || []).join(', ') || 'none', (e.blocked_actions || []).length ? 'danger' : 'success')}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
+    $('audit').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Scenario</th><th scope="col">Risk</th><th scope="col">Review</th><th scope="col">Blocked actions</th></tr></thead><tbody>${audit.result.events.map(e => `<tr><td>${timeCell(e.evaluated_at || '--')}</td><td>${escapeHtml(e.scenario_id || '--')}</td><td>${badge(e.risk_level || '--', riskSeverity(e.risk_level))}</td><td>${badge(e.human_review_required ? 'required' : 'not required', boolSeverity(e.human_review_required))}</td><td>${badge((e.blocked_actions || []).join(', ') || 'none', (e.blocked_actions || []).length ? 'danger' : 'success')}</td></tr>`).join('')}</tbody></table><p class="status">Audit view contains summaries only; sensor payloads are excluded.</p>`;
   }
   const riskResponse = await scopedFetch('/api/risk');
   const risk = await riskResponse.json();
@@ -1060,7 +1137,7 @@ async function refreshData() {
   await renderAlerts();
   await renderAutomation();
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
-  $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${escapeHtml(e.timestamp)}</td><td>${escapeHtml(e.farm_id)}</td><td>${escapeHtml(e.zone_id)}</td><td>${escapeHtml(e.crop)}</td><td>${escapeHtml(value(e.air_temperature_c, ' °C'))}</td><td>${escapeHtml(value(e.humidity_pct, ' %'))}</td></tr>`).join('')}</tbody></table>`;
+  $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${timeCell(e.timestamp)}</td><td>${escapeHtml(e.farm_id)}</td><td>${escapeHtml(e.zone_id)}</td><td>${escapeHtml(e.crop)}</td><td>${escapeHtml(value(e.air_temperature_c, ' °C'))}</td><td>${escapeHtml(value(e.humidity_pct, ' %'))}</td></tr>`).join('')}</tbody></table>`;
   const services = await (await scopedFetch('/api/services')).json();
   $('services').innerHTML = `<table><thead><tr><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${escapeHtml(name)}</td><td>${badge(item.available ? 'online' : 'offline', item.available ? 'success' : 'danger')}</td><td>${escapeHtml(item.available ? (item.health.service || '') : (item.error || ''))}</td></tr>`).join('')}</tbody></table>`;
   const runtimes = await (await scopedFetch('/api/runtimes')).json();

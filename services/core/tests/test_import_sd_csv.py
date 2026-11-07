@@ -93,3 +93,15 @@ def test_dry_run_posts_nothing(tmp_path):
     summary = _run(tmp_path, SD_CSV, None)
     assert summary["accepted"] == 4  # wrong unit is only caught by Core
     assert event_store.list_observations(50, None, None) == []
+
+
+def test_future_row_is_rejected_with_the_reason(tmp_path, post):
+    # A logger that writes local time (Dubai, +04:00) but labels it Z lands 4 h ahead of Core's clock.
+    from datetime import datetime, timedelta, timezone
+    ahead = (datetime.now(timezone.utc) + timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    text = f"timestamp_utc,zone_id,measurement,value\n{ahead},cress-hydro-a,ph,6.9\n"
+    summary = _run(tmp_path, text, post, {"farm_id": "home-pilot"})
+    assert summary["accepted"] == 0
+    reason = summary["rejected"][0]["reason"]
+    assert reason.startswith("HTTP 422") and "ahead of Core's clock" in reason and "time-zone offset" in reason
+    assert event_store.list_observations(50, "home-pilot", None) == []

@@ -36,14 +36,34 @@ def check_schema_version(value: str) -> str:
     return value
 
 
-def check_sample_floor(value: datetime, info: ValidationInfo) -> datetime:
-    """Reject sample times from a device clock that was never set. Stored rows are read back unchecked."""
+def _hours_text(seconds: float) -> str:
+    return f"{seconds / 3600:.1f} h" if seconds >= 3600 else f"{seconds / 60:.0f} min"
+
+
+def _future_message(value: datetime, ahead_s: float) -> str:
+    stamp = value.astimezone(timezone.utc).isoformat()
+    steps = round(ahead_s / 900)  # time-zone offsets are whole multiples of 15 minutes
+    if 1 <= steps <= 56 and abs(ahead_s - steps * 900) <= 120:  # up to +14:00, the largest UTC offset
+        offset = f"+{steps * 15 // 60:02d}:{steps * 15 % 60:02d}"
+        return (f"timestamp {stamp} is {_hours_text(ahead_s)} ahead of Core's clock; this looks like a time-zone offset: "
+                f"if the device or file uses local time, stamp it with its UTC offset (e.g. {offset}) or convert to UTC")
+    return (f"timestamp {stamp} is {_hours_text(ahead_s)} ahead of Core's clock; "
+            "check the device clock and NTP sync (Core compares UTC)")
+
+
+def check_sample_time(value: datetime, info: ValidationInfo) -> datetime:
+    """Reject sample times from a clock that is unset (before the floor) or ahead of Core's. Stored rows are read back unchecked."""
     floor = settings.min_sample_time
     stored = bool(info.context and info.context.get("stored"))
-    if value.tzinfo is not None and not stored and value < floor:
+    if value.tzinfo is None or stored:
+        return value
+    if value < floor:
         raise ValueError(
             f"timestamp {value.isoformat()} is before the minimum accepted sample time {floor.isoformat()}; "
             "check the device clock, NTP sync or RTC battery")
+    ahead_s = (value - utc_now()).total_seconds()
+    if settings.max_future_sample_s and ahead_s > settings.max_future_sample_s:
+        raise ValueError(_future_message(value, ahead_s))
     return value
 
 
@@ -109,7 +129,7 @@ class SensorEvent(NumericReadings):
     def timezone_required(cls, value, info: ValidationInfo):
         if value.tzinfo is None:
             raise ValueError("timestamp must include a timezone")
-        return check_sample_floor(value.astimezone(timezone.utc), info)
+        return check_sample_time(value.astimezone(timezone.utc), info)
 
 
 class SensorObservation(NumericReadings):
@@ -140,7 +160,7 @@ class SensorObservation(NumericReadings):
     @field_validator("timestamp")
     @classmethod
     def sample_time_floor(cls, value, info: ValidationInfo):
-        return check_sample_floor(value, info)
+        return check_sample_time(value, info)
 
     @model_validator(mode="after")
     def check_measurement(self):
@@ -162,12 +182,22 @@ class SensorObservation(NumericReadings):
         return self
 
 
+class FarmTimeInfo(BaseModel):
+    """The farm's time zone, for display. Core stores and compares UTC only."""
+    farm_timezone: str
+    utc_offset_now: str  # e.g. "+04:00"
+    next_offset_change: Optional[str] = None  # ISO UTC instant of the next UTC-offset change within 400 days
+    offset_after_change: Optional[str] = None
+    tzdata_version: Optional[str] = None  # the tzdata package, when installed; else the system zoneinfo is used
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str
     mqtt_connected: bool
     events_stored: int
     outcome_feed_dropped: int = 0
+    time: Optional[FarmTimeInfo] = None
 
 
 class CalibrationPoint(NumericReadings):
@@ -229,7 +259,7 @@ class CorrectedObservation(NumericReadings):
     def timezone_required_corrected(cls, value, info: ValidationInfo):
         if value.tzinfo is None:
             raise ValueError("timestamp must include a timezone")
-        return check_sample_floor(value.astimezone(timezone.utc), info)
+        return check_sample_time(value.astimezone(timezone.utc), info)
 
 
 class SensorEventListResponse(BaseModel):

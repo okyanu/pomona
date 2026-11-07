@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from pydantic import Field, field_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,11 @@ class Settings(BaseSettings):
     api_key: str = ""
     # Sample times before this are a dead clock (ESP32 without NTP stamps 1970, a dead RTC battery 2000).
     min_sample_time: datetime = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    # Sample times more than this many seconds ahead of Core's clock are rejected: a device or spreadsheet that
+    # writes local time but labels it Z lands hours in the future in UTC+ zones. 0 disables the check.
+    max_future_sample_s: int = Field(default=300, ge=0)
+    # The farm's IANA time zone, shown on /health and the dashboard. Display only: Core stores and compares UTC.
+    farm_timezone: str = "UTC"
     # Advisory outcome feed to model-router (rules_only) and automation-engine; empty URL = disabled.
     model_router_url: str = ""
     automation_engine_url: str = ""
@@ -41,6 +47,17 @@ class Settings(BaseSettings):
     def floor_timezone_required(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
             raise ValueError("MIN_SAMPLE_TIME must include a timezone")
+        return value
+
+    @field_validator("farm_timezone")
+    @classmethod
+    def farm_timezone_known(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (KeyError, ValueError, OSError):  # ZoneInfoNotFoundError is a KeyError
+            raise ValueError(
+                f"FARM_TIMEZONE {value!r} is not a known time zone name; use an IANA name such as "
+                "Asia/Dubai or Europe/Berlin (check the spelling)") from None
         return value
 
 

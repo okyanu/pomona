@@ -82,7 +82,7 @@ def test_late_and_future_packets_do_not_replace_latest(client):
     now = datetime.now(timezone.utc)
     fresh = {**_sensor_payload(), "timestamp": now.isoformat()}
     for sample in (fresh, {**fresh, "timestamp": (now - timedelta(hours=2)).isoformat()},
-                   {**fresh, "timestamp": (now + timedelta(days=1)).isoformat()}):
+                   {**fresh, "timestamp": (now + timedelta(minutes=2)).isoformat()}):  # accepted (under the future limit), not current
         assert client.post("/v1/sensors/events", json=sample).status_code == 201
     assert event_store.latest_event().timestamp == now
     result = client.get("/v1/sensors/events/latest").json()

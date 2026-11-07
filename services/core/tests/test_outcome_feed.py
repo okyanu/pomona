@@ -148,7 +148,7 @@ def test_retained_mqtt_message_does_not_feed_even_when_promoted(client, calls):
 
 
 def test_future_clock_and_stale_sequence_do_not_feed(client, calls):
-    assert client.post("/v1/sensors/events", json=payload(-86400)).status_code == 201
+    assert client.post("/v1/sensors/events", json=payload(-120)).status_code == 201  # 2 min ahead: stored, never current
     assert client.post("/v1/sensors/events", json=payload(boot_id="b", sequence=10)).status_code == 201
     assert wait_for(lambda: len(calls) >= 2)
     assert client.post("/v1/sensors/events", json=payload(-5, boot_id="b", sequence=9)).status_code == 201

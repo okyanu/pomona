@@ -10,10 +10,14 @@ const event = Object.fromEntries([
 ].map(key => [key, attack]));
 const decision = {risk_level: attack, blocked_actions: [attack], trust_verdict: attack, vetoed_fields: [attack]};
 const specialist = {source: attack, data_quality_labels: [attack]};
+const dubai = {available: true, farm_timezone: 'Asia/Dubai', utc_offset_now: '+04:00', next_offset_change: null,
+  offset_after_change: null, tzdata_version: null};
+const goodEvent = {...event, timestamp: '2026-11-07T08:00:00+00:00'};
 const replies = {
+  '/api/farm-time': dubai,
   '/api/devices': {available: true, result: {devices: [{device_id: attack, last_seen: attack, quality: attack}]}},
-  '/api/history': {available: true, result: {events: [event]}},
-  '/api/overview': {core_available: true, latest_event: event, recent_events: [event]},
+  '/api/history': {available: true, result: {events: [event, goodEvent]}},
+  '/api/overview': {core_available: true, latest_event: event, recent_events: [event, goodEvent]},
   '/api/pipeline': {available: true, result: {pipeline_id: attack, final_decision: decision,
     sensor_quality: specialist, agronomy_calc: {irrigation: {reference_et_mm_day: attack},
       fertilizer: {urea_g: attack}}}},
@@ -154,4 +158,43 @@ const context = vm.createContext({
   assert.ok(element('devices').innerHTML.includes(escaped));
   assert.ok(element('history').innerHTML.includes(escaped));
   assert.ok(element('history-download').href.includes('farm_id=farm-a'));
+  // Farm time: Core stores UTC; the page shows the farm zone with its offset and keeps the stored string in a title.
+  const farmCell = '<span title="2026-11-07T08:00:00+00:00">2026-11-07 12:00 +04</span>';
+  assert.equal(element('farm-time').textContent,
+    'Farm time: Asia/Dubai (UTC+04:00, no clock change in the next year) · times below are farm time (hover for the stored UTC time)');
+  assert.ok(element('history').innerHTML.includes(`<td>${farmCell}</td>`), 'history shows farm time');
+  assert.ok(element('events').innerHTML.includes(`<td>${farmCell}</td>`), 'recent events show farm time');
+  assert.ok(element('history').innerHTML.includes(`<td>${escaped}</td>`), 'an unparseable time is still shown escaped');
+  const cell = raw => vm.runInContext(`timeCell(${JSON.stringify(raw)})`, context);
+  assert.equal(cell('2026-11-07T08:00:00Z'), '<span title="2026-11-07T08:00:00Z">2026-11-07 12:00 +04</span>');
+  assert.equal(cell('2026-11-07 23:30:15.123456+00:00'), '<span title="2026-11-07 23:30:15.123456+00:00">2026-11-08 03:30 +04</span>');
+  assert.equal(cell('2026-11-07T12:00:00+04:00'), '<span title="2026-11-07T12:00:00+04:00">2026-11-07 12:00 +04</span>');
+  assert.equal(cell('2026-11-07T12:00:00'), '2026-11-07T12:00:00', 'no UTC offset: shown as sent, never guessed');
+  assert.equal(cell('--'), '--');
+  assert.equal(cell(undefined), '');
+  assert.equal(cell('2026-13-45T25:00:00Z'), '2026-13-45T25:00:00Z');
+  assert.equal(cell(attack), escaped);
+  assert.ok(cell(`2026-11-07T08:00:00Z"><img src=x>`).startsWith('2026-11-07T08:00:00Z&quot;&gt;'), 'not a time: escaped, no markup');
+  // A zone with a clock change names the date; a half-hour zone shows minutes; UTC is labelled UTC.
+  replies['/api/farm-time'] = {available: true, farm_timezone: 'Europe/Berlin', utc_offset_now: '+01:00',
+    next_offset_change: '2027-03-28T01:00:00+00:00', offset_after_change: '+02:00', tzdata_version: '2026.1'};
+  await vm.runInContext('refresh()', context);
+  assert.equal(element('farm-time').textContent,
+    'Farm time: Europe/Berlin (UTC+01:00, clock changes to UTC+02:00 on 2027-03-28) · times below are farm time (hover for the stored UTC time)');
+  assert.equal(cell('2026-11-07T08:00:00Z'), '<span title="2026-11-07T08:00:00Z">2026-11-07 09:00 +01</span>');
+  assert.equal(cell('2027-06-01T08:00:00Z'), '<span title="2027-06-01T08:00:00Z">2027-06-01 10:00 +02</span>');
+  replies['/api/farm-time'] = {...dubai, farm_timezone: 'Asia/Kolkata', utc_offset_now: '+05:30'};
+  await vm.runInContext('refresh()', context);
+  assert.equal(cell('2026-11-07T08:00:00Z'), '<span title="2026-11-07T08:00:00Z">2026-11-07 13:30 +05:30</span>');
+  replies['/api/farm-time'] = {...dubai, farm_timezone: 'UTC', utc_offset_now: '+00:00'};
+  await vm.runInContext('refresh()', context);
+  assert.equal(cell('2026-11-07T08:00:00+04:00'), '<span title="2026-11-07T08:00:00+04:00">2026-11-07 04:00 UTC</span>');
+  // Core unreachable, an unknown zone name or an older Core: UTC as before, times shown exactly as stored.
+  for (const reply of [{available: false, farm_timezone: 'UTC'}, {...dubai, farm_timezone: 'Asia/Dubay'}]) {
+    replies['/api/farm-time'] = reply;
+    await vm.runInContext('refresh()', context);
+    assert.ok(element('farm-time').textContent.startsWith('Farm time: UTC (Core did not report'));
+    assert.equal(cell('2026-11-07T08:00:00Z'), '2026-11-07T08:00:00Z');
+    assert.ok(element('history').innerHTML.includes('<td>2026-11-07T08:00:00+00:00</td>'));
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

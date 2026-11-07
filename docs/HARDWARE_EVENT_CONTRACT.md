@@ -62,8 +62,13 @@ contract is shared, but each profile needs its own expected fields and rules.
 packet with its own receipt time. Sample times before `MIN_SAMPLE_TIME` (default
 `2020-01-01T00:00:00Z`) are rejected for full packets, observations and corrected
 observations, because an ESP32 without NTP reports 1970 and a dead RTC battery
-often 2000; check the device clock, NTP sync or RTC battery. Stored rows are not
-re-checked.
+often 2000; check the device clock, NTP sync or RTC battery. Sample times more
+than `MAX_FUTURE_SAMPLE_S` (default 300 s, 0 disables) ahead of Core's clock are
+rejected too: a device or spreadsheet that writes local time but labels it `Z`
+lands hours ahead in UTC+ zones, so stamp local time with its UTC offset
+(`+04:00`) or convert to UTC. Core stores and compares UTC only; `FARM_TIMEZONE`
+(shown on `GET /health` and the dashboard) is display only and converts no data.
+Stored rows are not re-checked.
 
 Core rejects malformed packets and values outside these transport ranges. A
 value inside the transport range can still be agronomically suspicious; the
