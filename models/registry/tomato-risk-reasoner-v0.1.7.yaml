@@ -91,7 +91,18 @@ evaluation:
   hybrid_guarded:
     golden_risk_f1: 1.0
     staged_risk_f1: 1.0
-  notes: Hybrid scores are from rule-derived evaluation data and validate guardrail integration.
+  notes: >-
+    Hybrid scores are from rule-derived evaluation data and validate guardrail integration.
+    The staged test shares the training templates (fixed background values in every positive row),
+    so staged_risk_f1 measures template recall, not threshold knowledge (finding 2026-11-07).
+  independent_threshold_benchmark:
+    date: "2026-11-07"
+    cases: 153
+    empty_answers: 146
+    expected_labels: 150
+    labels_found: 6
+    wrong_labels: 4
+    runtime: gguf_ollama_card_eval_prompt
 
 integration:
   pomona_flow: |

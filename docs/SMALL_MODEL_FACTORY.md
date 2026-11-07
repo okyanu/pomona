@@ -87,6 +87,10 @@ v0.1.7 staged risk F1: 0.924 on its original staged test
 v0.1.7 golden risk F1: 0.667
 ```
 
+Later finding (2026-11-07): the staged test shares the training templates, so
+0.924 measures template recall. On 153 varied, realistic cases the adapter
+answered `[]` for 146; see [TOMATO_RISK_REASONER.md](TOMATO_RISK_REASONER.md#evaluation-snapshot).
+
 Hybrid guarded scores from `evaluate_hybrid_tomato_reasoner.py`:
 
 ```text

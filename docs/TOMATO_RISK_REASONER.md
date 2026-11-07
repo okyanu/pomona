@@ -133,10 +133,25 @@ guarded platform route above, since that route is deterministic rules today.
 
 Hybrid scores are measured on rule-derived evaluation data. They show the
 guardrail integration works — not that the model is a complete agronomist.
+
+**What the staged score measures (2026-11-07).** The staged test split is built
+from the same templates as the training data: every positive row in both uses
+the same fixed background values (for example CO₂ 600, light 350, water
+temperature 21.0), and only the risky reading changes. The adapter learned that
+shortcut, not the thresholds. On a separate 153-case threshold benchmark with
+varied, realistic readings it answered `[]` for 146 cases and found 6 of 150
+expected labels (GGUF under Ollama, card evaluation prompt). The deterministic
+rules make the decision, so the guarded route is unaffected. Details are on the
+[model card](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora).
+
 Full metadata: [models/registry/tomato-risk-reasoner-v0.1.7.yaml](https://github.com/okyanu/pomona/blob/main/models/registry/tomato-risk-reasoner-v0.1.7.yaml).
 
 ## Limitations
 
+- Learned a training-template shortcut, not the thresholds: on realistic,
+  varied readings it almost always answers `[]` (146 of 153 benchmark cases).
+  A retrain needs varied background readings for risk and normal examples
+  alike, and the same prompt format the runtime sends.
 - Local Ollama inference is wired but off by default; `model_only` mode
   (evaluation only) currently scores 0.60 label F1 on the 15-case golden
   smoke suite, so `hybrid_guarded` still discards model output in favor of
