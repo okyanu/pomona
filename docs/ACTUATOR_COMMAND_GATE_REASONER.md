@@ -83,6 +83,22 @@ POST /v1/reasoners/actuator-command-gate
 }
 ```
 
+## Default Deny
+
+The rule baseline (`services/safety-checker/app/actuator_gate_rules.py`) is default deny. Only the listed
+observation action types (`log_observation`, `send_alert`, `manual_check`, `dashboard_note`,
+`continue_monitoring`) can be `allowed`, and only when their text carries no equipment, chemical or
+fertigation word. Action types are normalised first (`OPEN_VENT`, `open-vent` and `Open Vent` are `open_vent`).
+An unknown action type, free text, or a command with text but no type gets `out_of_policy_request` and
+`needs_human_approval`. In those commands, actuator words (valve, pump, vent, fan, heater, irrigation, ...),
+chemical words (pesticide, spray, acid, sulfur, ...) and fertigation words (dose acid, recipe, EC/pH changes)
+are classified and `blocked`. Equipment action types (`open_vent`, `dose_acid`, `apply_pesticide`, ...) stay
+blocked. An observation type never executes anything, so text in it that only mentions equipment, a chemical or
+a recipe gets the family label and `needs_human_approval` (nothing blocked); the old exact phrases ("open vent",
+"set valve", "dose acid", "pesticide", ...) still block inside an observation. Plain adjectives such as "acidic"
+are not matched. Nothing proposed (no type, no text) stays `allowed`, which is what the callers'
+`continue_monitoring` default relies on.
+
 ## Allowed Decisions
 
 ```json

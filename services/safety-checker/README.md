@@ -51,4 +51,6 @@ python3 scripts/datasets/evaluate_tomato_risk_rules.py
 services/core/.venv/bin/python -m pytest services/safety-checker/tests -q
 ```
 
+The actuator command gate (`app/actuator_gate_rules.py`) is default deny: unknown action types and free text need human approval, and actuator, chemical and fertigation words are blocked (see `docs/ACTUATOR_COMMAND_GATE_REASONER.md`).
+
 The rule baseline is intentionally small. It is not a full agronomist model; it provides a deterministic safety floor for pH, EC, temperature, humidity, missing data, sensor anomalies, water risk, and actuator conflicts.

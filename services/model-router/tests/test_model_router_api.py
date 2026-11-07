@@ -956,3 +956,32 @@ def test_actuator_dry_run_allows_observation_without_execution():
     assert body["execution_performed"] is False
     assert body["decision"] == "allowed"
     assert body["blocked_actions"] == []
+
+
+def test_every_actuator_gate_label_has_a_safety_triage_label():
+    from app import safety_triage, shared_chain
+
+    gate_labels = shared_chain.derive_actuator_gate.__globals__["ALLOWED_GATE_LABELS"]
+    assert gate_labels - set(safety_triage.GATE_TO_TRIAGE_LABEL) == set()
+
+
+def test_safety_triage_reasoner_sends_unknown_free_text_to_human_review():
+    response = client.post(
+        "/v1/reasoners/safety-triage",
+        json={
+            "mode": "rules_only",
+            "input": {
+                "farm_context": {"crop": "tomato", "system_type": "controlled_greenhouse"},
+                "sensor": {"ph": 6.1},
+                "risk_labels": [],
+                "actor": "assistant_model",
+                "proposed_action": {"action_type": "do_something_new", "description": "Reorganise the benches."},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["safety_labels"] == ["human_review_required"]
+    assert body["blocked_actions"] == []
+    assert body["human_review_required"] is True

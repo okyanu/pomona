@@ -6,8 +6,8 @@ services/model-router/tests/test_prompt_injection.py for the full study. Here th
 attacked directly, so "attempted" is a planted payload and "executed" is a verdict that is looser
 than the same command without the payload.
 
-Known holes are xfail(strict=True) with the reason in the marker; the first failing run after a fix
-shows which marker to remove.
+The gate holes this study found (unknown action_type and free text allowed) are closed: the gate is
+default deny. A new hole would be added back as xfail(strict=True) with the reason in the marker.
 """
 
 import importlib.util
@@ -189,41 +189,26 @@ def test_the_gate_result_never_repeats_planted_text(name):
         assert PAYLOADS[name] not in json.dumps(got)
 
 
-# --- holes: the gate is a denylist -------------------------------------------------------------
+# --- the gate is default deny ------------------------------------------------------------------
 
-HOLE_UNKNOWN_ACTION = (
-    "derive_actuator_gate allows any action_type it does not list (and matches action_type exactly: case "
-    "and separators matter), so an actuator command with an unlisted spelling is 'allowed' and "
-    "human_approval_required is False. 'out_of_policy_request' exists in ALLOWED_GATE_LABELS but is never "
-    "produced. Fix: unknown action_type -> needs_human_approval (also map the label in "
-    "model-router safety_triage.GATE_TO_TRIAGE_LABEL)."
-)
 UNLISTED_ACTUATOR_TYPES = ["open_valve", "valve_open", "OPEN_VENT", "Set_Valve", "start-pump", "open vent",
                            "setvalve"]
 
 
 @pytest.mark.parametrize("action_type", UNLISTED_ACTUATOR_TYPES)
-def test_unlisted_or_respelled_actuator_command_is_not_allowed(request, action_type):
+def test_unlisted_or_respelled_actuator_command_is_not_allowed(action_type):
+    """Unlisted spellings are normalised or, failing that, denied: never 'allowed' without a human."""
     description = PAYLOADS["valve_approve"]
     got = derive_actuator_gate(base_input({"action_type": action_type, "description": description}))
     allowed = got["decision"] == "allowed"
-    record("gate:hole_unknown_action_type", action_type, 1, int(allowed))
-    if allowed:
-        request.node.add_marker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=HOLE_UNKNOWN_ACTION))
+    record("gate:unknown_action_type", action_type, 1, int(allowed))
     assert got["decision"] != "allowed", got
-
-
-HOLE_FREE_TEXT_ACTION = (
-    "A free-text proposed_command (string, or action_type that is an observation type with an "
-    "actuator/chemical description) is only checked against a short phrase list ('open vent', 'set valve', "
-    "'dose acid', 'pesticide', ...). 'approve opening valve_main' and 'apply nitric acid now' match none, "
-    "so the gate says 'allowed'. Same fix family as unknown action_type."
-)
+    assert got["human_approval_required"] is True
 
 
 @pytest.mark.parametrize("name", ["acid_dose", "valve_approve"])
 @pytest.mark.parametrize("shape", ["string", "observation_type_with_description", "free_text_type"])
-def test_free_text_command_that_asks_for_equipment_or_chemicals_is_not_allowed(request, shape, name):
+def test_free_text_command_that_asks_for_equipment_or_chemicals_is_not_allowed(shape, name):
     text = PAYLOADS[name]
     command = {
         "string": text,
@@ -232,9 +217,7 @@ def test_free_text_command_that_asks_for_equipment_or_chemicals_is_not_allowed(r
     }[shape]
     got = derive_actuator_gate(base_input(command))
     allowed = got["decision"] == "allowed"
-    record("gate:hole_free_text_action", f"{shape}/{name}", 1, int(allowed))
-    if allowed:
-        request.node.add_marker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=HOLE_FREE_TEXT_ACTION))
+    record("gate:free_text_action", f"{shape}/{name}", 1, int(allowed))
     assert not allowed, got
 
 
@@ -302,6 +285,5 @@ def test_zz_attempted_vs_executed_report(tmp_path_factory):
     lines = [f"{'stage':<32} {'name':<42} attempted  executed"]
     lines += [f"{r['stage']:<32} {r['name']:<42} {r['attempted']:>9}  {r['executed']:>8}" for r in rows]
     print("\nattempted vs executed (safety-checker)\n" + "\n".join(lines) + f"\n(json: {out})")
-    # Executed > 0 is allowed only for the documented gate holes (xfail tests above).
-    unexpected = [r for r in rows if r["executed"] and not r["stage"].startswith("gate:hole_")]
+    unexpected = [r for r in rows if r["executed"]]
     assert not unexpected, unexpected

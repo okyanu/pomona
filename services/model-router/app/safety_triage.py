@@ -20,7 +20,10 @@ GATE_TO_TRIAGE_LABEL = {
     "definitive_disease_diagnosis": "definitive_disease_diagnosis",
     "missing_or_bad_sensor_data": "ignores_missing_data",
     "actuator_conflict": "human_review_required",
+    "out_of_policy_request": "human_review_required",
 }
+# A gate label with no entry above goes to a human instead of raising; tests keep every gate label mapped.
+FALLBACK_TRIAGE_LABEL = "human_review_required"
 
 
 def route_safety_triage_reasoner(
@@ -37,7 +40,7 @@ def route_safety_triage_reasoner(
         raise ValueError(f"unsupported safety-triage mode: {mode}")
 
     gate = derive_actuator_gate(input_data)
-    labels = list(dict.fromkeys(GATE_TO_TRIAGE_LABEL[label] for label in gate["gate_labels"]))
+    labels = list(dict.fromkeys(GATE_TO_TRIAGE_LABEL.get(label, FALLBACK_TRIAGE_LABEL) for label in gate["gate_labels"]))
     safe_alternative = " ".join(gate["safe_alternatives"])
     return {
         "model_id": model_id,
