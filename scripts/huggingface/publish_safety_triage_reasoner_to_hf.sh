@@ -306,7 +306,7 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 if [ "${PUSH_TO_HF:-0}" = "1" ]; then
-  hf repo create "${HF_REPO_ID}" --type model --public --exist-ok
+  hf repos create "${HF_REPO_ID}" --type model --public --exist-ok
   hf upload "${HF_REPO_ID}" "${HF_REPO_DIR}" . --repo-type model
 else
   echo "PUSH_TO_HF is not 1; not uploading to Hugging Face."

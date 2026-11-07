@@ -51,7 +51,7 @@ HF_TOKEN=hf_...
 3. Login locally when training:
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 ## Run anywhere

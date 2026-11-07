@@ -16,7 +16,7 @@ mkdir -p "${HF_REPO_DIR}"
 if [ ! -d "${HF_REPO_DIR}/.git" ]; then
   echo "Hugging Face repo checkout missing: ${HF_REPO_DIR}" >&2
   echo "Create and clone it first:" >&2
-  echo "  hf repo create ${HF_REPO_ID} --type model --public --exist-ok" >&2
+  echo "  hf repos create ${HF_REPO_ID} --type model --public --exist-ok" >&2
   echo "  git clone https://huggingface.co/${HF_REPO_ID} ${HF_REPO_DIR}" >&2
   exit 1
 fi
