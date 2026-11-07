@@ -25,6 +25,15 @@ Detect stream faults that packet-level rules miss today:
 
 See [SENSOR_FAULT_REPLAY.md](./SENSOR_FAULT_REPLAY.md).
 
+## Gaps in a series
+
+A packet that lacks a field (a probe that stopped reporting: absent or `null`) ends a run. Stuck and frozen runs
+(`_trailing_run`, `_longest_run`, the flatline window, the adaptive stuck run) restart after it, so a gap never joins
+two runs of one value and old readings never count as "latest" when the newest packet has none. Step and noise checks
+skip only the step that crosses the gap (no difference is taken between the readings either side, and the
+interval across it is not a sample interval); the noise window keeps its normal length over the remaining steps.
+`rules.js` (sensor-data-checker and demo copies) and `persistent.js` mirror this and the parity cases cover it.
+
 ## Placement
 
 ```text

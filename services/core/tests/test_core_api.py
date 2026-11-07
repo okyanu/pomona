@@ -443,3 +443,81 @@ def test_mqtt_rejects_unsupported_major_without_storing(client):
     ok = SimpleNamespace(topic=message.topic, payload=json.dumps({**payload, "schema_version": "1.0"}).encode(), retain=False)
     ingest._on_message(None, None, ok)
     assert event_store.count() == 1
+
+
+def _partial_payload(**updates) -> dict:
+    """A full packet whose EC probe did not report (absent), plus any updates (null = reported as not read)."""
+    payload = _sensor_payload()
+    del payload["ec_ms_cm"]
+    return {**payload, **updates}
+
+
+@pytest.mark.parametrize("missing", [{"ec_ms_cm": None}, {}])
+def test_partial_packet_is_stored_and_returned_with_none_over_http(client, caplog, missing):
+    caplog.set_level("INFO")
+    payload = _partial_payload(**missing)
+    response = client.post("/v1/sensors/events", json=payload)
+    assert response.status_code == 201
+    assert response.json()["ec_ms_cm"] is None
+    assert response.json()["ph"] == 6.2  # Core never fills a default for the silent probe
+    latest = client.get("/v1/sensors/events/latest").json()
+    assert latest["ec_ms_cm"] is None and latest["schema_version"] == "1.0"
+    assert client.get("/v1/sensors/events").json()["events"][0]["ec_ms_cm"] is None
+    assert [record.getMessage() for record in caplog.records if "sensor event (http)" in record.getMessage()][0].endswith("ec=-")
+    assert not [record for record in caplog.records if record.exc_info or record.levelname == "ERROR"]
+    csv_text = client.get("/v1/sensors/export.csv").text
+    header, row = csv_text.splitlines()[:2]
+    assert row.split(",")[header.split(",").index("ec_ms_cm")] == ""
+
+
+def test_partial_packet_is_stored_over_mqtt_without_a_traceback(client, caplog):
+    import json
+    caplog.set_level("INFO")
+    ingest = MqttIngestClient()
+    payload = {**_partial_payload(ec_ms_cm=None, humidity_pct=None), "farm_id": "farm", "zone_id": "a",
+               "device_id": "node"}
+    ingest._on_message(None, None, SimpleNamespace(topic="pomona/farm/a/sensor/node/state",
+                                                   payload=json.dumps(payload).encode(), retain=False))
+    assert event_store.count() == 1
+    latest = event_store.latest_event()
+    assert latest.ec_ms_cm is None and latest.humidity_pct is None and latest.ph == 6.2
+    messages = [record.getMessage() for record in caplog.records if "sensor event device=" in record.getMessage()]
+    assert messages and messages[0].endswith("ec=- temp=28.5 humidity=-")
+    assert not [record for record in caplog.records if record.exc_info or record.levelname == "ERROR"]
+
+
+def test_substrate_moisture_alone_is_a_reading(client):
+    payload = {"device_id": "node", "farm_id": "farm", "zone_id": "a", "substrate_moisture_pct": 41.0,
+               "timestamp": datetime.now(timezone.utc).isoformat()}
+    response = client.post("/v1/sensors/events", json=payload)
+    assert response.status_code == 201
+    assert response.json()["soil_moisture_pct"] is None and response.json()["substrate_moisture_pct"] == 41.0
+
+
+@pytest.mark.parametrize("readings", [
+    {"ec_ms_cm": None},
+    {},
+    {field: None for field in ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct",
+                               "substrate_temperature_c", "substrate_moisture_pct")},
+    {"weather": {"t_mean_c": 20, "t_min_c": 15, "t_max_c": 25, "rh_mean_pct": 60, "wind_speed_2m_ms": 2,
+                 "solar_radiation_mj_m2_day": 15}, "zone_area_m2": 100.0, "crop_kc": 1.0},
+])
+def test_packet_without_a_reading_is_refused(client, readings):
+    payload = {"device_id": "node", "farm_id": "farm", "zone_id": "a",
+               "timestamp": datetime.now(timezone.utc).isoformat(), **readings}
+    assert client.post("/v1/sensors/events", json=payload).status_code == 422
+    assert event_store.count() == 0
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", True, "bad"])
+def test_a_partial_packet_still_refuses_nan_and_non_numbers(client, value):
+    assert client.post("/v1/sensors/events", json=_partial_payload(ph=value)).status_code == 422
+
+
+def test_a_bare_nan_over_mqtt_is_refused_not_stored(client):
+    import json
+    ingest = MqttIngestClient()
+    payload = {**_partial_payload(ph=float("nan")), "farm_id": "farm", "zone_id": "a", "device_id": "node"}
+    ingest._on_message(None, None, SimpleNamespace(topic="pomona/farm/a/sensor/node/state",
+                                                   payload=json.dumps(payload, allow_nan=True).encode(), retain=False))
+    assert event_store.count() == 0

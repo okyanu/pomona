@@ -146,3 +146,15 @@ def test_cold_stress_action_is_a_warn_card_that_still_blocks_actuators():
     assert card["severity"] == "warn"
     assert "direct_actuator_control" in card["blocked_actions"]
     assert card["human_review_required"] is True
+
+
+def test_card_evidence_says_missing_apart_from_vetoed():
+    card = suggestion_to_advice_card({
+        "id": "s2", "action": "check_sensor", "message": "Check the sensor.", "status": "pending",
+        "context": {"trust_verdict": "partial", "vetoed_fields": ["ec_ms_cm"], "missing_fields": ["ec_ms_cm"],
+                    "readings": {"ec_ms_cm": None}},
+    })
+    assert card["evidence"]["missing_fields"] == ["ec_ms_cm"] and card["evidence"]["vetoed_fields"] == ["ec_ms_cm"]
+    assert card["evidence"]["readings"] == {"ec_ms_cm": None}
+    old = suggestion_to_advice_card({"id": "s3", "action": "review", "context": {}})
+    assert old["evidence"]["missing_fields"] == []  # cards made before this field existed

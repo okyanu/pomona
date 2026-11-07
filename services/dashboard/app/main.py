@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
     safety_checker_url: str = "http://localhost:8082"
     digital_twin_url: str = "http://localhost:8084"
     automation_engine_url: str = "http://localhost:8085"
+    # No reading from a zone for longer than this: the trust line stops saying "all readings passed". Twice the 5-minute
+    # real log interval; fixed, not learned per zone. 0 turns it off (demos and fixed-timestamp replays).
+    zone_stale_after_s: int = 600
 
 
 settings = Settings()
@@ -50,6 +54,10 @@ class OverviewResponse(BaseModel):
     core_available: bool
     latest_event: Optional[Dict[str, Any]] = None
     recent_events: List[Dict[str, Any]] = []
+    # Seconds from the latest reading's sample time to this server's clock (never negative); the page never uses the
+    # browser clock. stale_after_s is ZONE_STALE_AFTER_S (0 = off); both are None/0 when there is nothing to judge.
+    latest_age_s: Optional[float] = None
+    stale_after_s: int = 0
     error: Optional[str] = None
 
 
@@ -228,6 +236,24 @@ async def history_export(kind: Literal["events", "observations"] = "events", off
         return JSONResponse({"detail": "History export unavailable; retry when Core is online."}, status_code=502)
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def reading_age_s(event: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Seconds since the event's sample time on this host's clock (Core allows a sample time 60 s ahead: clamped at 0)."""
+    stamp = (event or {}).get("timestamp")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        sampled = datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if sampled.tzinfo is None:
+        return None
+    return max((utc_now() - sampled).total_seconds(), 0.0)
+
+
 @app.get("/api/overview", response_model=OverviewResponse)
 async def overview() -> OverviewResponse:
     try:
@@ -236,10 +262,13 @@ async def overview() -> OverviewResponse:
             response.raise_for_status()
             payload = response.json()
         events = payload.get("events") or []
+        latest = payload.get("latest_event", events[-1] if events else None)
         return OverviewResponse(
             core_available=True,
-            latest_event=payload.get("latest_event", events[-1] if events else None),
+            latest_event=latest,
             recent_events=list(reversed(events)),
+            latest_age_s=reading_age_s(latest),
+            stale_after_s=max(settings.zone_stale_after_s, 0),
         )
     except Exception as exc:
         return OverviewResponse(core_available=False, error=f"Core unavailable: {exc}")
@@ -455,6 +484,7 @@ async def automation_evaluate() -> AutomationResponse:
                         "farm_id": pipeline_data.sensor_snapshot.get("farm_id"),
                         "zone_id": pipeline_data.sensor_snapshot.get("zone_id"),
                         "sensor_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", []),
+                        "missing_fields": (result.get("sensor_quality") or {}).get("missing_fields", []),
                         "trust_verdict": (result.get("final_decision") or {}).get("trust_verdict"),
                         "vetoed_fields": (result.get("final_decision") or {}).get("vetoed_fields")
                         or (result.get("trust_gate") or {}).get("vetoed_fields", []),
@@ -829,13 +859,28 @@ const trustFields = new Map([['ph', 'pH'], ['previous_ph', 'pH'], ['ec_ms_cm', '
   ['air_temperature_c', 'air temperature'], ['backup_air_temperature_c', 'air temperature'], ['temperature_f', 'air temperature'],
   ['water_temperature_c', 'water temperature'], ['substrate_temperature_c', 'substrate temperature'],
   ['substrate_moisture_pct', 'moisture'], ['soil_moisture_pct', 'moisture'], ['timestamp', 'timestamp']]);
-// Plain-language sensor trust: a badge for the verdict plus which readings were not used.
-const trustLine = (verdict, fields) => {
+// Plain-language sensor trust: a badge for the verdict plus which readings were not used. `missing` (the sensor
+// quality block's missing_fields) are probes that did not report in the latest reading; `fields` (vetoed_fields) are
+// readings that were there but not trusted. A field in both is said once, as not reported.
+const fieldNames = (fields) => [...new Set((fields || []).map(field => trustFields.get(field) || field))];
+const trustLine = (verdict, fields, missing) => {
   if (!verdict) return 'not reported';
-  const names = [...new Set((fields || []).map(field => trustFields.get(field) || field))].join(', ');
-  const text = verdict === 'trusted' ? 'All readings passed the sensor check' : `Can't confirm: ${names || 'some readings'} not used`;
+  const notReported = fieldNames(missing);
+  const notUsed = fieldNames(fields).filter(name => !notReported.includes(name));
+  let text = 'All readings passed the sensor check';
+  if (verdict !== 'trusted') {
+    const parts = [];
+    if (notReported.length) parts.push(`${notReported.join(', ')} not reported in the latest reading`);
+    if (notUsed.length || !parts.length) parts.push(`${notUsed.join(', ') || 'some readings'} not used`);
+    text = `Can't confirm: ${parts.join('; ')}`;
+  }
   return `${badge(String(verdict).replace(/_/g, ' '), trustTone.get(verdict) || 'neutral')} ${escapeHtml(text)}`;
 };
+// A missing value (a probe that did not report) shown as an en dash; other values exactly as sent.
+const dash = (x) => x === null || x === undefined ? '–' : x;
+// Age of the latest reading, from the dashboard server's clock (overview.latest_age_s), never the browser's.
+const ageText = (seconds) => seconds < 120 ? `${Math.round(seconds)} s` : seconds < 7200 ? `${Math.round(seconds / 60)} min`
+  : seconds < 172800 ? `${(seconds / 3600).toFixed(1)} h` : `${Math.round(seconds / 86400)} days`;
 // Farm time: Core stores UTC; the farm zone comes from Core's /health (via /api/farm-time) and is display only.
 // timeCell returns escaped HTML: the time in the farm zone with its UTC offset, the original string in a title.
 // Anything that is not an ISO time with a UTC offset (or no farm zone from Core) is shown exactly as before.
@@ -862,6 +907,17 @@ const farmTimeText = (raw) => {
 const timeCell = (raw) => {
   const text = farmTimeText(raw);
   return text === null ? escapeHtml(raw) : `<span title="${escapeHtml(raw)}">${escapeHtml(text)}</span>`;
+};
+// The latest reading's time for the "no reading from this zone" line: farm time with its offset (the date too when it is
+// not recent, or `full`), else UTC. Escaped by the caller.
+const readingTime = (raw, full) => {
+  const date = typeof raw === 'string' && isoWithOffset.test(raw.trim()) ? new Date(raw.trim().replace(' ', 'T')) : null;
+  if (date === null || Number.isNaN(date.getTime())) return 'an unknown time';
+  try {
+    if (farmTime.available) { const p = farmParts(date, farmTime.farm_timezone); return `${full ? p.day + ' ' : ''}${p.time} ${p.offset}`; }
+  } catch (error) { /* an unknown zone name: UTC below */ }
+  const iso = date.toISOString();
+  return `${full ? iso.slice(0, 10) + ' ' : ''}${iso.slice(11, 16)} UTC`;
 };
 const farmTimeLine = () => {
   if (!farmTime.available) return 'Farm time: UTC (Core did not report a farm time zone) · times below are UTC as stored';
@@ -928,7 +984,7 @@ async function renderHistory() {
   const history = await (await scopedFetch(`/api/history?kind=${historyKind}&offset=${historyOffset}`)).json();
   if (!history.available) { $('history').textContent = history.error || 'History unavailable'; return; }
   const rows = history.result[historyKind] || [];
-  $('history').innerHTML = rows.length ? `<table><thead><tr><th scope="col">Sample time</th><th scope="col">Device</th><th scope="col">Reading</th><th scope="col">Quality</th></tr></thead><tbody>${rows.map(r => `<tr><td>${timeCell(r.timestamp)}</td><td>${escapeHtml(r.device_id)}</td><td>${escapeHtml(historyKind === 'observations' ? `${r.measurement}: ${r.value ?? 'missing'} ${r.unit}` : `Temperature ${r.air_temperature_c} °C · pH ${r.ph} · EC ${r.ec_ms_cm}`)}</td><td>${escapeHtml(r.quality || 'full packet — see sensor-quality assessment')}</td></tr>`).join('')}</tbody></table>` : 'No records on this page.';
+  $('history').innerHTML = rows.length ? `<table><thead><tr><th scope="col">Sample time</th><th scope="col">Device</th><th scope="col">Reading</th><th scope="col">Quality</th></tr></thead><tbody>${rows.map(r => `<tr><td>${timeCell(r.timestamp)}</td><td>${escapeHtml(r.device_id)}</td><td>${escapeHtml(historyKind === 'observations' ? `${r.measurement}: ${r.value ?? 'missing'} ${r.unit}` : `Temperature ${dash(r.air_temperature_c)} °C · pH ${dash(r.ph)} · EC ${dash(r.ec_ms_cm)}`)}</td><td>${escapeHtml(r.quality || 'full packet — see sensor-quality assessment')}</td></tr>`).join('')}</tbody></table>` : 'No records on this page.';
 }
 let automationBusy = false;
 let telemetryUnavailable = true;
@@ -999,10 +1055,10 @@ async function renderAdviceCards() {
       <div class="label">${escapeHtml(card.opportunity || 'operations')} · ${badge(card.severity || 'warn', card.severity === 'info' ? 'neutral' : 'warning')}</div>
       <div class="value" style="font-size:1.05rem">${escapeHtml(card.title || card.summary || '--')}</div>
       <p class="status">${escapeHtml(card.summary || '')}</p>
-      <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields)}</p>
+      <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields, (card.evidence || {}).missing_fields)}</p>
       <p class="status">Checks: ${escapeHtml((card.safe_next_checks || []).join('; ') || 'none')}</p>
       <p class="status">Sample: ${timeCell((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
-      <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
+      <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => value === null || value === undefined ? `${key}: –` : `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
       <details><summary>Recorded evidence</summary><pre>${escapeHtml(JSON.stringify(card.evidence || {}, null, 2))}</pre></details>
       <p class="status">Blocked: ${badge((card.blocked_actions || []).join(', ') || 'none', (card.blocked_actions || []).length ? 'danger' : 'success')}</p>
       <p class="status">Status: ${badge(card.status || 'pending', card.status === 'pending' ? 'warning' : 'neutral')}</p>
@@ -1050,6 +1106,12 @@ async function refreshData() {
   setAutomationBusy(automationBusy);
   $('status').textContent = `Core online · ${data.recent_events.length} recent events`;
   const event = data.latest_event;
+  // No reading from the zone for too long: say so instead of the trust line of the last stored reading.
+  const age = typeof data.latest_age_s === 'number' ? data.latest_age_s : null;
+  const stale = Number(data.stale_after_s) > 0 && age !== null && age > Number(data.stale_after_s);
+  const trustFor = (verdict, vetoed, missing) => stale
+    ? `${badge('cannot confirm', 'danger')} ${escapeHtml(`Can't confirm: no reading from this zone for ${ageText(age)} (last ${readingTime(event.timestamp, age >= 43200)})`)}`
+    : trustLine(verdict, vetoed, missing);
   if (event) {
     $('air').textContent = value(event.air_temperature_c, ' °C');
     $('humidity').textContent = value(event.humidity_pct, ' %');
@@ -1080,7 +1142,7 @@ async function refreshData() {
     const safety = result.safety || {};
     const waterNutrientLabels = [...(water.irrigation_risk_labels || []), ...(nutrient.nutrient_risk_labels || [])];
     const blockedActions = decision.blocked_actions || [];
-    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${badge(decision.risk_level || '--', riskSeverity(decision.risk_level))}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${badge(waterNutrientLabels.join(', ') || 'normal', listSeverity(waterNutrientLabels))}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(decision.human_review_required ? 'required' : 'not required', boolSeverity(decision.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustLine(decision.trust_verdict, decision.vetoed_fields)}</p><p class="status">Pipeline: ${escapeHtml(result.pipeline_id || '--')} · Blocked actions: ${badge(blockedActions.join(', ') || 'none', blockedActions.length ? 'danger' : 'success')}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
+    $('pipeline').innerHTML = `<div class="grid"><div class="metric"><div class="label">Risk level</div><div class="value">${badge(decision.risk_level || '--', riskSeverity(decision.risk_level))}</div></div><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water / nutrient</div><div class="value">${badge(waterNutrientLabels.join(', ') || 'normal', listSeverity(waterNutrientLabels))}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(decision.human_review_required ? 'required' : 'not required', boolSeverity(decision.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustFor(decision.trust_verdict, decision.vetoed_fields, quality.missing_fields)}</p>${stale ? `<p class="status">Pipeline result from the last reading at ${escapeHtml(readingTime(event.timestamp, true))}.</p>` : ''}<p class="status">Pipeline: ${escapeHtml(result.pipeline_id || '--')} · Blocked actions: ${badge(blockedActions.join(', ') || 'none', blockedActions.length ? 'danger' : 'success')}</p><p class="status">Read-only dashboard view. No action is executed.</p>`;
     const specialistRows = [
       ['Sensor quality', quality.data_quality_labels || [], quality.source || 'deterministic_rules', quality.human_review_required],
       ['Water / irrigation', water.irrigation_risk_labels || [], water.source || 'deterministic_rules', water.human_review_required],
@@ -1122,7 +1184,7 @@ async function refreshData() {
     const water = result.water_irrigation || {};
     const safety = result.actuator_safety || {};
     const riskBlocked = result.blocked_actions || [];
-    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${badge((water.irrigation_risk_labels || []).join(', ') || 'normal', listSeverity(water.irrigation_risk_labels))}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${badge(safety.decision || '--', (safety.decision || '').toLowerCase() === 'allowed' ? 'success' : 'danger')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustLine((result.trust_gate || {}).trust_verdict, (result.trust_gate || {}).vetoed_fields)}</p><p class="status">Blocked actions: ${badge(riskBlocked.join(', ') || 'none', riskBlocked.length ? 'danger' : 'success')}</p>`;
+    $('risk').innerHTML = `<div class="grid"><div class="metric"><div class="label">Sensor quality</div><div class="value">${badge((quality.data_quality_labels || []).join(', ') || 'normal', listSeverity(quality.data_quality_labels))}</div></div><div class="metric"><div class="label">Water risk</div><div class="value">${badge((water.irrigation_risk_labels || []).join(', ') || 'normal', listSeverity(water.irrigation_risk_labels))}</div></div><div class="metric"><div class="label">Safety decision</div><div class="value">${badge(safety.decision || '--', (safety.decision || '').toLowerCase() === 'allowed' ? 'success' : 'danger')}</div></div><div class="metric"><div class="label">Human review</div><div class="value">${badge(result.human_review_required ? 'required' : 'not required', boolSeverity(result.human_review_required))}</div></div></div><p class="status">Sensor trust: ${trustFor((result.trust_gate || {}).trust_verdict, (result.trust_gate || {}).vetoed_fields, quality.missing_fields)}</p><p class="status">Blocked actions: ${badge(riskBlocked.join(', ') || 'none', riskBlocked.length ? 'danger' : 'success')}</p>`;
   }
   const safetyResponse = await scopedFetch('/api/safety');
   const safetyData = await safetyResponse.json();

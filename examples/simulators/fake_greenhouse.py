@@ -78,9 +78,6 @@ FIELD_ALIASES = {"substrate_moisture_pct": "soil_moisture_pct"}
 # meter confirmed the probe, which accepts a new level after a flagged step. Substrate temperature has none.
 CALIBRATABLE = ("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct")
 CALIBRATION_METHOD = "fake_greenhouse_confirm"
-# SensorEvent fields without a default (services/core/app/schemas.py): a packet that lacks one is refused by
-# Core (422 over REST, a logged validation error over MQTT), so it is never stored or judged.
-CORE_REQUIRED = ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct")
 
 
 @dataclass(frozen=True)
@@ -287,10 +284,10 @@ class Dropout(Fault):
 class ProbeDropout(Fault):
     """One probe goes silent: its field is absent from every packet while the other probes keep reporting.
 
-    Nothing wrong is sent, so no reading lies and no recovery tail follows. A packet missing one of CORE_REQUIRED is
-    refused by Core as a whole (the zone goes silent, not just the probe); a missing optional field
-    (substrate_temperature_c) is accepted. Pair it with a real event to ask whether Pomona says "can't confirm"
-    or looks fine while the fault runs (scenarios/blind_spot.json).
+    Nothing wrong is sent, so no reading lies and no recovery tail follows. Core accepts the partial packet (a
+    probe that did not report is absent), stores it and the model-router says "can't confirm" for the missing
+    reading. Pair it with a real event to ask whether Pomona says "can't confirm" or looks fine while the fault
+    runs (scenarios/blind_spot.json).
     """
 
     name, needs_field = "probe_dropout", True
@@ -967,12 +964,11 @@ class Simulation:
         dead = any(f.dead_clock for f in zone.faults)
         event = None
         silent = [] if dropout else zone.silent_fields()
-        incomplete = any(field in CORE_REQUIRED for field in silent)  # Core refuses a packet missing a required field
         if not dropout:
             event = zone.build_event(sent, self.farm_id, DEAD_CLOCK_TIMESTAMP if dead else self.now)
             zone.sequence += 1
             zone.last_sent.update(sent)
-            if not (dead or incomplete):  # Core keeps only accepted samples in the history
+            if not dead:  # Core keeps only accepted samples in the history (a partial packet is accepted)
                 for entry in zone.recovery:
                     entry[1] -= 1
                 zone.recovery = [e for e in zone.recovery if e[1] > 0]
@@ -1024,8 +1020,6 @@ class Simulation:
         }
         if silent:  # only while a probe is silent, so other truth lines stay as they were
             truth["expect"]["silent_fields"] = [f for f in silent if f != "substrate_moisture_pct"]
-            if incomplete:
-                truth["expect"]["core_rejects"] = True
         if calibrations:  # only on the tick a calibration happened, so other truth lines stay as they were
             truth["calibrations"] = [{"field": c["field"], "at": c["at"], "source": c["source"]} for c in calibrations]
         topic = f"pomona/{self.farm_id}/{cfg.zone_id}/sensor/{cfg.device_id}/state"

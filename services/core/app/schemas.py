@@ -36,6 +36,11 @@ def check_schema_version(value: str) -> str:
     return value
 
 
+def fmt_reading(value: Optional[float], spec: str) -> str:
+    """A reading for a log line: `-` when the probe did not report."""
+    return "-" if value is None else spec % value
+
+
 def _hours_text(seconds: float) -> str:
     return f"{seconds / 3600:.1f} h" if seconds >= 3600 else f"{seconds / 60:.0f} min"
 
@@ -88,6 +93,11 @@ class NpkTargetReading(NumericReadings):
     volume_liters: float = Field(..., gt=0.0, le=1_000_000.0)
 
 
+# The fields a packet's readings come from. weather, npk_target, zone_area_m2 and crop_kc are context, not readings.
+READING_FIELDS = ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct",
+                  "substrate_temperature_c", "substrate_moisture_pct")
+
+
 class SensorEvent(NumericReadings):
     device_id: str = Field(..., min_length=1, max_length=128)
     farm_id: str = Field(..., min_length=1, max_length=128)
@@ -95,11 +105,13 @@ class SensorEvent(NumericReadings):
     crop: str = Field(default="tomato", min_length=1, max_length=64)
     growth_stage: str = Field(default="flowering", min_length=1, max_length=64)
     system_type: str = Field(default="greenhouse_substrate", min_length=1, max_length=64)
-    air_temperature_c: float = Field(..., ge=-40.0, le=80.0)
-    humidity_pct: float = Field(..., ge=0.0, le=100.0)
-    ec_ms_cm: float = Field(..., ge=0.0, le=20.0)
-    ph: float = Field(..., ge=0.0, le=14.0)
-    soil_moisture_pct: float = Field(..., ge=0.0, le=100.0)
+    # A probe that did not report is absent or null: Core never fills a default, and the model-router says
+    # "can't confirm" for the missing reading. A packet needs at least one reading (READING_FIELDS).
+    air_temperature_c: Optional[float] = Field(default=None, ge=-40.0, le=80.0)
+    humidity_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    ec_ms_cm: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    ph: Optional[float] = Field(default=None, ge=0.0, le=14.0)
+    soil_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     substrate_temperature_c: Optional[float] = Field(default=None, ge=-40.0, le=80.0)
     substrate_moisture_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     # Optional zone-level context for the model-router's FAO-56/NPK
@@ -130,6 +142,12 @@ class SensorEvent(NumericReadings):
         if value.tzinfo is None:
             raise ValueError("timestamp must include a timezone")
         return check_sample_time(value.astimezone(timezone.utc), info)
+
+    @model_validator(mode="after")
+    def has_a_reading(self):
+        if all(getattr(self, name) is None for name in READING_FIELDS):
+            raise ValueError("a packet needs at least one reading: " + ", ".join(READING_FIELDS))
+        return self
 
 
 class SensorObservation(NumericReadings):

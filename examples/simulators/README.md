@@ -188,7 +188,7 @@ JSON, scheduled by tick (not wall time) so replays are exact:
 | `dropout` | No packet is published for the zone while active |
 | `dead_clock` | Timestamp `1970-01-01T00:00:00Z`; Core rejects it (`rejected_by_core`) |
 | `plausible_offset` | Constant in-range EC +3.0 (`offset`); undetectable by Pomona today (`detectable: false`) |
-| `probe_dropout` | One probe goes silent: its field is absent from every packet (the key is missing, not null; soil moisture drops both of its names). Nothing wrong is sent, so there is no recovery tail. Core refuses a packet missing a required field (air temperature, humidity, EC, pH, soil moisture), so the whole zone goes silent; a missing `substrate_temperature_c` is accepted. The truth log's `expect` then has `silent_fields`, and `core_rejects: true` when Core refuses the packet. Not picked by "Hidden random" |
+| `probe_dropout` | One probe goes silent: its field is absent from every packet (the key is missing, not null; soil moisture drops both of its names). Nothing wrong is sent, so there is no recovery tail. Core accepts the partial packet (a probe that did not report is absent or `null`; only a packet with no reading at all is refused), so Pomona sees the missing reading and says "can't confirm". The truth log's `expect` then has `silent_fields`. Not picked by "Hidden random" |
 
 ### Real events (the truth changes, the reading is correct)
 

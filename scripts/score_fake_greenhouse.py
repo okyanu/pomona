@@ -118,7 +118,7 @@ def core_accepted(row: Dict[str, Any]) -> bool:
     if delivery is not None:
         return delivery.get("status") in ACCEPTED_STATUSES
     expect = row["expect"]
-    return expect["kind"] != "rejected_by_core" and not expect.get("core_rejects")  # core_rejects: a required field is missing
+    return expect["kind"] != "rejected_by_core"
 
 
 def device_timeout_s() -> int:

@@ -436,6 +436,45 @@ for n in range(1500):
     history = [{"timestamp": iso(STAMP - timedelta(seconds=cadence)), field: sensor.get(field)}] if r.random() < 0.7 else []
     add_check_case(sensor, history, baseline)
 
+# (b2) The gap rule: packets without the field (absent or null: a probe that stopped reporting) inside the window. The
+# noise check leaves out only the steps that cross a gap; the adaptive stuck run restarts after one.
+for n in range(600):
+    r = random.Random(14000 + n)
+    field = r.choice(list(sq.NOISE_STEP_LIMIT_5MIN))
+    cadence = r.choice([30, 30, 60, 300])
+    length = r.randrange(6, 14)
+    limit = max(sq.NOISE_STEP_FLOOR[field], sq.NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(cadence / 300.0))
+    level = FIELD_BASE.get(field, 40.0)
+    chance = r.choice([0.15, 0.5, 0.9])
+    series = []
+    for k in range(length):
+        value = round(level + limit * r.choice([0.8, 1.0, 1.5]) * (1 if k % 2 else -1), 3)
+        packet = {"timestamp": iso(STAMP - timedelta(seconds=cadence * (length - 1 - k))), field: value}
+        if k < length - 1 and r.random() < chance:
+            if r.random() < 0.5:
+                del packet[field]
+            else:
+                packet[field] = None
+        series.append(packet)
+    add_check_case(series[-1], series[:-1], {field: stats(median=level, spread=100.0)})
+
+for n in range(300):
+    r = random.Random(15000 + n)
+    field = r.choice(["ph", "ec_ms_cm"])
+    cadence = r.choice([30, 60])
+    value = FIELD_BASE[field]
+    count = r.randrange(2, 8)
+    history = [{"timestamp": iso(STAMP - timedelta(seconds=cadence * (k + 1))), field: value} for k in range(count)][::-1]
+    for packet in history[:-1]:
+        if r.random() < 0.35:
+            if r.random() < 0.5:
+                packet[field] = r.choice([None, "gap"])
+            else:
+                del packet[field]
+    held = timedelta(seconds=cadence * (count + 1) + 600)
+    st = stats(change_share=0.9, change_steps=200, longest_run_s=30.0, last_change_at=iso(STAMP - held))
+    add_check_case({"timestamp": iso(STAMP), field: value}, history, {field: st})
+
 # (c) EC's fixed noise limit (0.20 mS/cm, judged only when the window's median sample interval is 90 s or less): every
 # interval around the gate, steps on both sides of the limit, a window with a long gap, a jittered once-a-minute stamp,
 # a one-way ramp (dosing) and a slow stream, side by side with the scaled fields.

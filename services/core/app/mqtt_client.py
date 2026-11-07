@@ -9,7 +9,7 @@ except ModuleNotFoundError:
 
 from app.config import settings
 from app.outcome_feed import outcome_feed
-from app.schemas import SensorEvent, SensorObservation
+from app.schemas import SensorEvent, SensorObservation, fmt_reading
 from app.store import event_store
 
 logger = logging.getLogger(__name__)
@@ -79,14 +79,14 @@ class MqttIngestClient:
         if event_store.add(event):
             outcome_feed.submit(event)
         logger.info(
-            "sensor event device=%s farm=%s zone=%s ph=%.2f ec=%.2f temp=%.1f humidity=%.0f",
+            "sensor event device=%s farm=%s zone=%s ph=%s ec=%s temp=%s humidity=%s",
             event.device_id,
             event.farm_id,
             event.zone_id,
-            event.ph,
-            event.ec_ms_cm,
-            event.air_temperature_c,
-            event.humidity_pct,
+            fmt_reading(event.ph, "%.2f"),
+            fmt_reading(event.ec_ms_cm, "%.2f"),
+            fmt_reading(event.air_temperature_c, "%.1f"),
+            fmt_reading(event.humidity_pct, "%.0f"),
         )
 
     def start(self) -> None:

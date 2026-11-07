@@ -44,6 +44,25 @@ without it is treated as `"1.0"`, so older senders keep working. Core accepts an
 keeps the version, so old records stay readable after the contract changes. The same field
 applies to modular observations (`POST /v1/sensors/observations`).
 
+## A probe that did not report
+
+A full packet may leave out any reading. When a probe fails, send the packet without its field or with
+`null`; Core stores it as `null`, never fills a default, and the model-router says "can't confirm" for that
+reading (`missing_ec`, ...) instead of showing a calm zone: the dashboard's sensor-trust line reads
+`EC not reported in the latest reading`, and the `sensor_check` alert is raised after 3 such readings in a row.
+
+- **Reading fields** are `air_temperature_c`, `humidity_pct`, `ec_ms_cm`, `ph`, `soil_moisture_pct`,
+  `substrate_temperature_c` and `substrate_moisture_pct`. A packet needs at least one that is a number;
+  `{"ec_ms_cm": null}` alone is refused (422). `weather`, `npk_target`, `zone_area_m2` and `crop_kc` do not count.
+- **NaN and Infinity stay refused (422).** A probe library that returns NaN on a failed read must send `null`.
+- **The schema version stays `1.0`:** every 1.x sender may send a partial packet. Behaviour change worth knowing:
+  a firmware bug that drops a field used to get a 422 only the device log saw; now the grower sees the missing
+  reading and a `sensor_check` alert.
+- **One device per zone** sending the full set of probes is the supported case. A zone where two devices each carry
+  some of the probes is not supported: the zone's latest packet would flip between devices and report `missing_*`.
+- A probe not fitted for the zone's system type (for example substrate moisture on a hydroponic zone) is not
+  expected, so leaving it out raises nothing.
+
 ## Boundary rules
 
 | Field | Unit | Accepted range |

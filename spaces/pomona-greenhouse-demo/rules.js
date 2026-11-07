@@ -288,6 +288,24 @@
     return points;
   }
 
+  // seriesPoints split into runs of packets that follow one another: a packet without a numeric reading ends the
+  // run (_series_segments in sensor_quality.py). The last run is empty when the newest packet has no reading.
+  function seriesSegments(history, sensor, field) {
+    const segments = [[]];
+    for (const packet of [...history, sensor]) {
+      if (!isPlainObject(packet)) continue;
+      const parsed = numeric(get(packet, field));
+      if (parsed === null) {
+        if (segments[segments.length - 1].length) segments.push([]);
+      } else {
+        segments[segments.length - 1].push([parsed, packet]);
+      }
+    }
+    return segments;
+  }
+  // _segment_steps: differences between neighbouring values; none is taken across a gap between runs.
+  const segmentSteps = (runs) => runs.flatMap((values) => values.slice(1).map((b, i) => Math.abs(b - values[i])));
+
   function trailingRun(values) {
     let run = 0;
     for (let i = values.length - 1; i >= 0; i--) {
@@ -309,15 +327,17 @@
     const m = Math.floor(o.length / 2);
     return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
   }
-  const steps = (v) => v.slice(1).map((b, i) => Math.abs(b - v[i]));
 
   function applyTemporalChecks(sensor, history, labels, suspect, checks) {
     if (!history.length) return;
     for (const field of STUCK_FIELDS) {
-      const points = seriesPoints(history, sensor, field);
+      // A packet without the field ends a run, so a gap never joins two runs of one value.
+      const segments = seriesSegments(history, sensor, field);
+      const points = segments[segments.length - 1];
       const values = points.map((p) => p[0]);
       const run = trailingRun(values);
-      const earlier = values.slice(0, values.length - run);
+      const earlierRuns = [...segments.slice(0, -1).map((seg) => seg.map((p) => p[0])), values.slice(0, values.length - run)];
+      const earlier = earlierRuns.flat();
       let longEnough = true;
       if (has(STUCK_MIN_DURATION_US, field) && run) {
         const first = parseTimestampUs(get(points[points.length - run][1], "timestamp"));
@@ -325,19 +345,19 @@
         longEnough = first !== null && last !== null && last - first >= STUCK_MIN_DURATION_US[field];
       }
       if (earlier.length >= 2 && Math.max(...earlier) - Math.min(...earlier) > STUCK_EPSILON &&
-          run >= Math.max(STUCK_WINDOW, 2 * longestRun(earlier)) && longEnough) {
+          run >= Math.max(STUCK_WINDOW, 2 * Math.max(...earlierRuns.map(longestRun))) && longEnough) {
         addUnique(labels, "stuck_value");
         addUnique(suspect, field);
         checks.push(`inspect ${field}: identical readings across ${run} fresh samples`);
         continue;
       }
+      // The flatline window must not span a gap.
       const epsilon = FLATLINE_EPSILON[field] || 0;
-      if (values.length >= FLATLINE_WINDOW + 2) {
-        const prior = values.slice(0, -FLATLINE_WINDOW);
+      if (points.length >= FLATLINE_WINDOW && segments.reduce((n, seg) => n + seg.length, 0) >= FLATLINE_WINDOW + 2) {
+        const priorSteps = segmentSteps([...segments.slice(0, -1).map((seg) => seg.map((p) => p[0])), values.slice(0, -FLATLINE_WINDOW)]);
         const window = values.slice(-FLATLINE_WINDOW);
-        const priorStep = median(steps(prior));
         const span = Math.max(...window) - Math.min(...window);
-        if (priorStep >= epsilon && span > STUCK_EPSILON && span <= epsilon) {
+        if (priorSteps.length && median(priorSteps) >= epsilon && span > STUCK_EPSILON && span <= epsilon) {
           addUnique(labels, "flatline_possible");
           addUnique(suspect, field);
           checks.push(`inspect ${field}: near-zero variance may indicate a stuck or clipped probe`);
@@ -346,8 +366,9 @@
     }
     for (const field of BASELINE_DRIFT_FIELDS) {
       const threshold = BASELINE_DRIFT_THRESHOLDS[field];
-      const series = seriesValues(history, sensor, field);
-      if (series.length >= NOISE_MIN_SAMPLES && median(steps(series)) >= threshold) {
+      const runs = seriesSegments(history, sensor, field).map((seg) => seg.map((p) => p[0]));
+      const gapSteps = segmentSteps(runs); // no step is taken across a gap
+      if (runs.reduce((n, run) => n + run.length, 0) >= NOISE_MIN_SAMPLES && gapSteps.length && median(gapSteps) >= threshold) {
         addUnique(labels, "noisy_signal_possible");
         addUnique(suspect, field);
         checks.push(`inspect ${field}: readings jump between samples; check probe shielding, grounding and averaging`);

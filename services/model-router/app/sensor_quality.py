@@ -247,6 +247,28 @@ def _series_points(history: List[Dict[str, Any]], sensor: Dict[str, Any], field:
     return points
 
 
+def _series_segments(history: List[Dict[str, Any]], sensor: Dict[str, Any], field: str) -> List[List[tuple]]:
+    """`_series_points` split into runs of packets that follow one another: a packet without a numeric reading
+    ends the run, so values either side of a gap (a probe that stopped reporting) never look adjacent. The last
+    run is empty when the newest packet has no reading; no other run is."""
+    segments: List[List[tuple]] = [[]]
+    for packet in [*history, sensor]:
+        if not isinstance(packet, dict):
+            continue
+        parsed = numeric(packet.get(field))
+        if parsed is None:
+            if segments[-1]:
+                segments.append([])
+        else:
+            segments[-1].append((parsed, packet))
+    return segments
+
+
+def _segment_steps(segments: List[List[float]]) -> List[float]:
+    """Absolute differences between neighbouring values; none is taken across a gap between runs."""
+    return [abs(b - a) for values in segments for a, b in zip(values, values[1:])]
+
+
 def _trailing_run(values: List[float]) -> int:
     run = 0
     for value in reversed(values):
@@ -282,43 +304,49 @@ def apply_temporal_checks(
         return
 
     for field in STUCK_FIELDS:
-        points = _series_points(history, sensor, field)
+        # A packet without the field ends a run (see _series_segments): a gap neither joins two runs of the same
+        # value nor lets old readings count as "latest" when the newest packet has none.
+        segments = _series_segments(history, sensor, field)
+        points = segments[-1]
         values = [value for value, _ in points]
         # Stuck: the latest value has repeated at least STUCK_WINDOW times and at least
         # twice as long as any earlier repeat in the history. Continuous sensors are
         # flagged after 3 identical samples; quantized probes (e.g. DS18B20 0.0625 C
         # steps) that legitimately repeat 2-3 times need a correspondingly longer freeze.
         run = _trailing_run(values)
-        earlier = values[:len(values) - run]
+        earlier_runs = [[value for value, _ in segment] for segment in segments[:-1]] + [values[:len(values) - run]]
+        earlier = [value for segment in earlier_runs for value in segment]
         long_enough = True
         if field in STUCK_MIN_DURATION and run:
             first = parse_timestamp(points[-run][1].get("timestamp"))
             last = parse_timestamp(points[-1][1].get("timestamp"))
             long_enough = first is not None and last is not None and last - first >= STUCK_MIN_DURATION[field]
         if (len(earlier) >= 2 and max(earlier) - min(earlier) > STUCK_EPSILON
-                and run >= max(STUCK_WINDOW, 2 * _longest_run(earlier)) and long_enough):
+                and run >= max(STUCK_WINDOW, 2 * max(_longest_run(segment) for segment in earlier_runs))
+                and long_enough):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
             checks.append(f"inspect {field}: identical readings across {run} fresh samples")
             continue
         # Flatline: the last FLATLINE_WINDOW samples moved less in total than the
-        # sensor normally moves in a single step.
+        # sensor normally moves in a single step. The window must not span a gap.
         epsilon = FLATLINE_EPSILON.get(field, 0.0)
-        if len(values) >= FLATLINE_WINDOW + 2:
-            prior = values[:-FLATLINE_WINDOW]
+        if len(points) >= FLATLINE_WINDOW and sum(len(segment) for segment in segments) >= FLATLINE_WINDOW + 2:
+            prior_runs = [[value for value, _ in segment] for segment in segments[:-1]] + [values[:-FLATLINE_WINDOW]]
+            prior_steps = _segment_steps(prior_runs)
             window = values[-FLATLINE_WINDOW:]
-            prior_step = _median([abs(b - a) for a, b in zip(prior, prior[1:])])
             span = max(window) - min(window)
-            if prior_step >= epsilon and STUCK_EPSILON < span <= epsilon:
+            if prior_steps and _median(prior_steps) >= epsilon and STUCK_EPSILON < span <= epsilon:
                 add_unique(labels, "flatline_possible")
                 add_unique(suspect_fields, field)
                 checks.append(f"inspect {field}: near-zero variance may indicate a stuck or clipped probe")
 
     for field in BASELINE_DRIFT_FIELDS:
         threshold = BASELINE_DRIFT_THRESHOLDS[field]
-        values = _series_values(history, sensor, field)
-        if (len(values) >= NOISE_MIN_SAMPLES
-                and _median([abs(b - a) for a, b in zip(values, values[1:])]) >= threshold):
+        runs = [[value for value, _ in segment] for segment in _series_segments(history, sensor, field)]
+        steps = _segment_steps(runs)  # no step is taken across a gap
+        if (sum(len(run) for run in runs) >= NOISE_MIN_SAMPLES and steps
+                and _median(steps) >= threshold):
             # Drift cannot be told apart from noise this large; report the noise instead.
             add_unique(labels, "noisy_signal_possible")
             add_unique(suspect_fields, field)
@@ -411,7 +439,7 @@ def apply_persistent_checks(
         previous = numeric(previous_packet.get(field))
         if (limit is not None and sampled is not None and changed_at is not None and previous is not None
                 and abs(current - previous) <= STUCK_EPSILON and sampled - changed_at > limit
-                and (not adaptive or _trailing_run([v for v, _ in _series_points(history, sensor, field)]) >= ADAPTIVE_STUCK_MIN_RUN)):
+                and (not adaptive or _trailing_run([v for v, _ in _series_segments(history, sensor, field)[-1]]) >= ADAPTIVE_STUCK_MIN_RUN)):
             add_unique(labels, "stuck_value")
             add_unique(suspect_fields, field)
             checks.append(f"inspect {field}: the same value for {(sampled - changed_at) // timedelta(minutes=1)} minutes"
@@ -480,11 +508,17 @@ def apply_noise_check(
     checks: List[str],
 ) -> None:
     """A probe jumping between samples by more than a real reading does at this sample rate."""
-    points = _series_points(history, sensor, field)[-NOISE_WINDOW:]
+    # The window keeps its length; only a step that crosses a gap (a packet without the field between the two
+    # readings) is left out, for the jump size and for the sample interval alike.
+    linked = [(value, packet, index > 0) for segment in _series_segments(history, sensor, field)
+              for index, (value, packet) in enumerate(segment)][-NOISE_WINDOW:]
+    points = [(value, packet) for value, packet, _ in linked]
     if len(points) < NOISE_MIN_SAMPLES:
         return
+    adjacent = [joined for _, _, joined in linked[1:]]
     stamps = [parse_timestamp(packet.get("timestamp")) for _, packet in points]
-    gaps = sorted(g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:]) if a and b) if g > 0)
+    gaps = sorted(g for g in ((b - a).total_seconds() for (a, b), joined in zip(zip(stamps, stamps[1:]), adjacent)
+                              if joined and a and b) if g > 0)
     if not gaps:
         return
     if field in NOISE_FIXED_LIMIT:
@@ -495,7 +529,9 @@ def apply_noise_check(
         limit = max(NOISE_STEP_FLOOR[field],
                     NOISE_STEP_LIMIT_5MIN[field] * math.sqrt(_median(gaps) / NOISE_REFERENCE_INTERVAL_S))
     values = [value for value, _ in points]
-    steps = [abs(b - a) for a, b in zip(values, values[1:])]
+    steps = [abs(b - a) for (a, b), joined in zip(zip(values, values[1:]), adjacent) if joined]
+    if not steps:
+        return
     # Noise goes nowhere, a trend does: a real fast ramp (a dry zone drying, a vent opening) has large steps that all
     # point one way, so most of the distance it covers is net displacement; white noise ends within a quarter of the
     # distance it travelled in 95 % of 12-reading windows (a third in 99 %). Require the window to have moved by no

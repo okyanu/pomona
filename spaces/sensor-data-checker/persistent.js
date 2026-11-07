@@ -382,15 +382,22 @@
   }
 
   // ---- sensor_quality.py ----------------------------------------------------------------------------
-  function seriesPoints(history, sensor, field) {
-    const points = [];
+  // (value, packet) points split into runs of packets that follow one another: a packet without a numeric reading
+  // ends the run (_series_segments in sensor_quality.py). The last run is empty when the newest packet has no reading.
+  function seriesSegments(history, sensor, field) {
+    const segments = [[]];
     for (const packet of [...history, sensor]) {
       if (!isPlainObject(packet)) continue;
       const parsed = numeric(get(packet, field));
-      if (parsed !== null) points.push([parsed, packet]);
+      if (parsed === null) {
+        if (segments[segments.length - 1].length) segments.push([]);
+      } else {
+        segments[segments.length - 1].push([parsed, packet]);
+      }
     }
-    return points;
+    return segments;
   }
+  const lastRun = (segments) => segments[segments.length - 1];
   function trailingRun(values) {
     let run = 0;
     for (let i = values.length - 1; i >= 0; i--) {
@@ -439,12 +446,17 @@
   }
 
   function applyNoiseCheck(field, sensor, history, labels, suspect, checks) {
-    const points = seriesPoints(history, sensor, field).slice(-NOISE_WINDOW);
+    // The window keeps its length; only a step that crosses a gap (a packet without the field between the two
+    // readings) is left out, for the jump size and for the sample interval alike.
+    const linked = seriesSegments(history, sensor, field)
+      .flatMap((segment) => segment.map(([value, packet], index) => [value, packet, index > 0])).slice(-NOISE_WINDOW);
+    const points = linked.map(([value, packet]) => [value, packet]);
     if (points.length < NOISE_MIN_SAMPLES) return;
+    const adjacent = linked.slice(1).map((p) => p[2]);
     const stamps = points.map(([, packet]) => R.parseTimestampUs(get(packet, "timestamp")));
     const gaps = [];
     for (let i = 1; i < stamps.length; i++) {
-      if (stamps[i - 1] === null || stamps[i] === null) continue;
+      if (!adjacent[i - 1] || stamps[i - 1] === null || stamps[i] === null) continue;
       const g = totalSeconds(stamps[i] - stamps[i - 1]);
       if (g > 0) gaps.push(g);
     }
@@ -460,7 +472,8 @@
         NOISE_STEP_LIMIT_5MIN[field] * Math.sqrt(median(gaps) / NOISE_REFERENCE_INTERVAL_S));
     }
     const values = points.map((p) => p[0]);
-    const steps = values.slice(1).map((b, i) => Math.abs(b - values[i]));
+    const steps = values.slice(1).map((b, i) => Math.abs(b - values[i])).filter((_, i) => adjacent[i]);
+    if (!steps.length) return;
     let travelled = 0.0;
     for (const step of steps) travelled += step; // left to right, as the Python loop does
     if (median(steps) >= limit && Math.abs(values[values.length - 1] - values[0]) <= NOISE_MAX_NET_SHARE * travelled) {
@@ -503,7 +516,7 @@
       const previous = numeric(get(previousPacket, field));
       if (limit !== null && sampled !== null && changedAt !== null && previous !== null &&
           Math.abs(current - previous) <= STUCK_EPSILON && sampled - changedAt > limit &&
-          (!adaptive || trailingRun(seriesPoints(history, sensor, field).map((p) => p[0])) >= ADAPTIVE_STUCK_MIN_RUN)) {
+          (!adaptive || trailingRun(lastRun(seriesSegments(history, sensor, field)).map((p) => p[0])) >= ADAPTIVE_STUCK_MIN_RUN)) {
         addUnique(labels, "stuck_value");
         addUnique(suspect, field);
         checks.push(`inspect ${field}: the same value for ${floorDiv(sampled - changedAt, MINUTE_US)} minutes${habit}; ${CALIBRATION_HINT}`);

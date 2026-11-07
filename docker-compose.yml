@@ -112,6 +112,7 @@ services:
       SAFETY_CHECKER_URL: ${SAFETY_CHECKER_URL:-http://safety-checker:8082}
       DIGITAL_TWIN_URL: ${DIGITAL_TWIN_URL:-http://digital-twin:8084}
       AUTOMATION_ENGINE_URL: ${AUTOMATION_ENGINE_URL:-http://automation-engine:8085}
+      ZONE_STALE_AFTER_S: ${ZONE_STALE_AFTER_S:-600}
     depends_on:
       core:
         condition: service_started

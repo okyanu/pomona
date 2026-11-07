@@ -20,6 +20,7 @@ from app.schemas import (
     SensorEventListResponse,
     CalibrationEvent,
     CorrectedObservation,
+    fmt_reading,
 )
 from app.probe_health import probe_health
 from app.store import event_store
@@ -79,12 +80,12 @@ def ingest_sensor_event(event: SensorEvent) -> SensorEvent:
     if event_store.add(event):
         outcome_feed.submit(event)
     logger.info(
-        "sensor event (http) device=%s farm=%s zone=%s ph=%.2f ec=%.2f",
+        "sensor event (http) device=%s farm=%s zone=%s ph=%s ec=%s",
         event.device_id,
         event.farm_id,
         event.zone_id,
-        event.ph,
-        event.ec_ms_cm,
+        fmt_reading(event.ph, "%.2f"),
+        fmt_reading(event.ec_ms_cm, "%.2f"),
     )
     return event
 

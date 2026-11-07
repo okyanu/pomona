@@ -197,4 +197,95 @@ const context = vm.createContext({
     assert.equal(cell('2026-11-07T08:00:00Z'), '2026-11-07T08:00:00Z');
     assert.ok(element('history').innerHTML.includes('<td>2026-11-07T08:00:00+00:00</td>'));
   }
+  // Old and missing data: the trust line says what is true instead of the last stored reading's green line.
+  replies['/api/farm-time'] = dubai;
+  const stamped = {...event, timestamp: '2026-11-07T08:00:00+00:00'};
+  const overview = (age, after) => { replies['/api/overview'] = {core_available: true, latest_event: stamped,
+    recent_events: [stamped], latest_age_s: age, stale_after_s: after}; };
+  const goodDecision = {risk_level: 'low', blocked_actions: [], trust_verdict: 'trusted', vetoed_fields: []};
+  replies['/api/pipeline'] = {available: true, result: {pipeline_id: 'p', final_decision: goodDecision, sensor_quality: {}}};
+  replies['/api/risk'] = {available: true, result: {sensor_quality: {}, trust_gate: {trust_verdict: 'trusted', vetoed_fields: []}}};
+  const green = '<span class="badge success">trusted</span> All readings passed the sensor check';
+  const staleLine = (text) => `<span class="badge danger">cannot confirm</span> Can&#39;t confirm: ${text}`;
+  overview(599, 600);  // at or under the threshold: the stored reading's own verdict
+  await vm.runInContext('refresh()', context);
+  for (const id of ['pipeline', 'risk']) assert.ok(element(id).innerHTML.includes(`Sensor trust: ${green}`), `${id}: fresh data keeps the green line`);
+  assert.ok(!element('pipeline').innerHTML.includes('from the last reading at'));
+  overview(720, 600);  // 12 minutes old: Dubai farm time, offset shown
+  await vm.runInContext('refresh()', context);
+  for (const id of ['pipeline', 'risk']) {
+    assert.ok(element(id).innerHTML.includes(`Sensor trust: ${staleLine('no reading from this zone for 12 min (last 12:00 +04)')}`), `${id}: old data is not green`);
+    assert.ok(!element(id).innerHTML.includes('All readings passed'), `${id}: no green line on old data`);
+  }
+  assert.ok(element('pipeline').innerHTML.includes('Pipeline result from the last reading at 2026-11-07 12:00 +04.'));
+  overview(601, 600);
+  await vm.runInContext('refresh()', context);
+  assert.ok(element('pipeline').innerHTML.includes('no reading from this zone for 10 min'));
+  overview(99999, 0);  // 0 turns it off (demos, fixed-timestamp replays)
+  await vm.runInContext('refresh()', context);
+  for (const id of ['pipeline', 'risk']) assert.ok(element(id).innerHTML.includes(`Sensor trust: ${green}`), `${id}: threshold 0 is off`);
+  delete replies['/api/overview'].latest_age_s;  // an older dashboard server without the field
+  replies['/api/overview'].stale_after_s = 600;
+  await vm.runInContext('refresh()', context);
+  assert.ok(element('pipeline').innerHTML.includes(`Sensor trust: ${green}`), 'no age: nothing to judge');
+  overview(45 * 3600, 600);  // the date is named when the reading is not recent
+  await vm.runInContext('refresh()', context);
+  assert.ok(element('pipeline').innerHTML.includes('no reading from this zone for 45.0 h (last 2026-11-07 12:00 +04)'));
+  replies['/api/farm-time'] = {available: false, farm_timezone: 'UTC'};  // no farm zone from Core: UTC, labelled
+  overview(720, 600);
+  await vm.runInContext('refresh()', context);
+  assert.ok(element('pipeline').innerHTML.includes('(last 08:00 UTC)'));
+  assert.ok(element('pipeline').innerHTML.includes('from the last reading at 2026-11-07 08:00 UTC.'));
+  stamped.timestamp = attack;  // a time that cannot be read is never guessed
+  await vm.runInContext('refresh()', context);
+  assert.ok(element('pipeline').innerHTML.includes('(last an unknown time)'));
+  stamped.timestamp = '2026-11-07T08:00:00+00:00';
+  replies['/api/farm-time'] = dubai;
+  const age = (seconds) => vm.runInContext(`ageText(${seconds})`, context);
+  assert.deepEqual([age(0), age(45), age(119), age(120), age(720), age(7199), age(9000), age(172799), age(300000)],
+    ['0 s', '45 s', '119 s', '2 min', '12 min', '120 min', '2.5 h', '48.0 h', '3 days']);
+  // A probe that did not report reads "not reported"; a reading that was there but not used reads "not used".
+  overview(10, 600);
+  const quality = (missing) => ({data_quality_labels: ['x'], missing_fields: missing});
+  replies['/api/pipeline'] = {available: true, result: {pipeline_id: 'p', sensor_quality: quality(['ec_ms_cm']),
+    final_decision: {...goodDecision, trust_verdict: 'partial', vetoed_fields: ['ec_ms_cm']}}};
+  replies['/api/risk'] = {available: true, result: {sensor_quality: quality(['ec_ms_cm']),
+    trust_gate: {trust_verdict: 'partial', vetoed_fields: ['ec_ms_cm']}}};
+  replies['/api/advice-cards'] = {available: true, result: {cards: [
+    {card_id: 'm', title: 't', summary: 's', severity: 'warn', status: 'pending', evidence: {readings: {ec_ms_cm: null, ph: 6.1},
+      units: {ph: 'pH'}, trust_verdict: 'partial', vetoed_fields: ['ec_ms_cm'], missing_fields: ['ec_ms_cm']}},
+    {card_id: 'v', title: 't', summary: 's', severity: 'warn', status: 'pending', evidence: {readings: {},
+      trust_verdict: 'partial', vetoed_fields: ['ec_ms_cm']}}]}};
+  await vm.runInContext('refresh()', context);
+  const notReported = '<span class="badge warning">partial</span> Can&#39;t confirm: EC not reported in the latest reading</p>';
+  for (const id of ['pipeline', 'risk']) {
+    assert.ok(element(id).innerHTML.includes(notReported), `${id}: a missing EC is "not reported"`);
+    assert.ok(!element(id).innerHTML.includes('EC not used'), `${id}: and not also "not used"`);
+  }
+  const cards = element('advice-cards').innerHTML;
+  assert.ok(cards.includes(notReported), 'the advice card says "not reported" for a missing probe');
+  assert.ok(cards.includes('<span class="badge warning">partial</span> Can&#39;t confirm: EC not used</p>'), 'and "not used" for a vetoed reading');
+  assert.ok(cards.includes('Readings: ec_ms_cm: –; ph: 6.1 pH</p>'), 'a null reading in a card is an en dash');
+  assert.ok(cards.includes('Readings: not recorded</p>'));
+  const trustWith = (verdict, vetoed, missing) => vm.runInContext(
+    `trustLine(${JSON.stringify(verdict)}, ${JSON.stringify(vetoed)}, ${JSON.stringify(missing)})`, context);
+  assert.equal(trustWith('partial', ['ph'], ['ec_ms_cm']),
+    '<span class="badge warning">partial</span> Can&#39;t confirm: EC not reported in the latest reading; pH not used');
+  assert.equal(trustWith('cannot_confirm', ['soil_moisture_pct'], ['substrate_moisture_pct']),
+    '<span class="badge danger">cannot confirm</span> Can&#39;t confirm: moisture not reported in the latest reading');
+  assert.equal(trustWith('partial', [], ['air_temperature_c', 'humidity_pct']),
+    '<span class="badge warning">partial</span> Can&#39;t confirm: air temperature, humidity not reported in the latest reading');
+  assert.equal(trustWith('partial', undefined, undefined), '<span class="badge warning">partial</span> Can&#39;t confirm: some readings not used');
+  assert.equal(trustWith('trusted', [], []), '<span class="badge success">trusted</span> All readings passed the sensor check');
+  // None renders as an en dash in the history rows (and the other panels already printed --).
+  const gap = {...stamped, air_temperature_c: null, ph: 6.2, ec_ms_cm: null};
+  replies['/api/history'] = {available: true, result: {events: [gap, {...stamped, air_temperature_c: 21.5, ph: null, ec_ms_cm: 2.1}]}};
+  overview(10, 600);
+  replies['/api/overview'].latest_event = gap;
+  replies['/api/overview'].recent_events = [gap, stamped];
+  await vm.runInContext('refresh()', context);
+  const rows = element('history').innerHTML;
+  assert.ok(rows.includes('Temperature – °C · pH 6.2 · EC –'));
+  assert.ok(rows.includes('Temperature 21.5 °C · pH – · EC 2.1'));
+  assert.equal(element('ec').textContent, '--', 'the panel value keeps its -- for a missing reading');
 })().catch(error => { console.error(error); process.exitCode = 1; });

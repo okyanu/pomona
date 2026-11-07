@@ -74,8 +74,10 @@ reading stays flagged for as long as it lasts instead of becoming the new normal
 recorded. A probe that has merely barely moved (`flatline_possible`, a softer hint than a stuck value)
 has its own card, `sensor_flatline` ("it may be stuck or clipped: check that it still responds"), which
 waits the usual 10 minutes; both cards use the action `check_sensor`. Every card's `evidence` carries
-`trust_verdict` and `vetoed_fields`, and the dashboard shows a "Sensor trust:"
-line. For a `sensor_check` card the outcome differs: a later reading with one of
+`trust_verdict`, `vetoed_fields` (readings that were there but not used) and `missing_fields` (probes that
+did not report in the latest reading), and the dashboard shows a "Sensor trust:" line that says
+"EC not reported in the latest reading" for a missing probe and "EC not used" for a vetoed one. A reading
+that is `null` is shown as an en dash in the card's "Readings" line. For a `sensor_check` card the outcome differs: a later reading with one of
 its watched sensor labels is a trusted reading showing the problem persists
 (`readings_seen` grows, `clean_streak` resets to 0), not an untrusted one; a
 reading with some other sensor label still does not count.

@@ -73,11 +73,12 @@ actually emits:
 | alerted (pass) | The event's own card was open or raised while the probe was silent, from other evidence |
 | too short to judge / no fault in window / no real event | Not judged |
 
-Real episodes that a silent probe kept from ever raising are listed here and not counted as missed. A packet
-missing a required field never reaches the pipeline, because Core refuses it whole: the zone goes silent, not only
-the probe, and the only sign Pomona gives is the passive device flag (the dashboard's main panels keep showing the
-last stored reading). The router itself would flag the missing field within three readings; it is Core's refusal
-that hides it.
+Real episodes that a silent probe kept from ever raising are listed here and not counted as missed. Core stores a
+packet that is missing a probe (the field is absent or `null`; only a packet with no reading at all is refused),
+the router flags the missing reading from the first packet, and the `sensor_check` alert is raised after 3 of
+them in a row (about 60 s at 30 s ticks). So in `blind_spot.json` each probe-dropout case ends in "can't confirm"
+through the `sensor_check` card, or "alerted" by the event's own rule where another probe still carries the event;
+the passive device-silent flag stays a reported category for a node whose packets stop arriving altogether.
 
 ## Reading the report
 

@@ -23,6 +23,14 @@ scope, type, and offset. Live ingestion/retention can move offset pages; pause
 ingestion when a consistent multi-page export is required. Existing sparklines
 show the latest full packets, not the selected historical offset.
 
+Old and missing data: `/api/overview` sends `latest_age_s` (this server's clock minus the latest reading's sample
+time, never negative; the browser clock is never used) and `stale_after_s` (`ZONE_STALE_AFTER_S`, default 600,
+twice the 5-minute real log interval; fixed, not learned per zone; `0` turns it off for demos and replays with
+fixed timestamps). Above it, the "Sensor trust" line reads "Can't confirm: no reading from this zone for 12 min
+(last 09:12 +04)" instead of the last stored reading's green line, and the pipeline block says it is from the
+last reading at that time. A probe that did not report reads "EC not reported in the latest reading"; a reading
+that was there but not trusted reads "EC not used"; a `null` reading shows as an en dash in history and cards.
+
 Core outages visibly mark recommendations unavailable and block review clicks.
 Refresh cycles do not overlap, and selecting a zone reloads all panels. No
 approval or forecast preview executes hardware. Public deployments are unchanged

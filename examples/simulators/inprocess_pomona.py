@@ -3,7 +3,8 @@
 What a reading goes through on the real stack (Core stores it, its outcome feed asks the model-router for
 a verdict, the automation-engine turns labels into cards), as one importable class:
 
-  1. Core: reject a dead clock (sample time before Core's `min_sample_time`).
+  1. Core: reject a dead clock (sample time before Core's `min_sample_time`) and a packet with no reading at
+     all (every reading field absent or null); a packet with some readings missing is accepted.
   2. Core: build the sticky trusted baseline of the stream (core/app/trusted_baseline.py, loaded by path)
      from the stream's earlier readings, less what the pipeline vetoed, and from the calibrations. The engine
      keeps it up to date reading by reading (`StreamBaseline`, byte-identical to Core's `stream_baseline`), so a
@@ -44,9 +45,12 @@ CORE_APP = ROOT / "services" / "core" / "app"
 AUTOMATION_APP = ROOT / "services" / "automation-engine" / "app"
 
 SENSOR_ACTION = "check_sensor"  # every rule with this action is a sensor card (sensor_check, sensor_flatline), not advice
-# Core's SensorEvent optional fields: Core's stored packet has them as null when absent.
-CORE_OPTIONAL = ("substrate_temperature_c", "substrate_moisture_pct", "weather", "zone_area_m2", "crop_kc",
-                 "npk_target")
+# Core's SensorEvent reading fields (services/core/app/schemas.py READING_FIELDS): a packet needs at least one that
+# is a number, else Core refuses it (422). A probe that did not report is absent or null.
+READING_FIELDS = ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct",
+                  "substrate_temperature_c", "substrate_moisture_pct")
+# Core's SensorEvent optional fields: Core's stored packet has them as null when absent (every reading field too).
+CORE_OPTIONAL = (*READING_FIELDS, "weather", "zone_area_m2", "crop_kc", "npk_target")
 # Core's default `min_sample_time` (services/core/app/config.py): earlier sample times are a dead clock.
 # Core's `max_future_sample_s` (a sample time ahead of Core's wall clock) is not mirrored: a replay runs on virtual
 # sample time, with no wall clock to be ahead of.
@@ -226,8 +230,8 @@ class InProcessPomona:
         """Run one reading through Core's checks, the pipeline and the alert monitor.
 
         `event` is the sensor packet the device sent (farm_id, zone_id, device_id, timestamp, readings...).
-        Returns `accepted` / `rejection` (Core's verdict: a dead-clock or unreadable timestamp is rejected and
-        leaves no trace), then for an accepted reading: `labels` (risk labels), `trust` (verdict),
+        Returns `accepted` / `rejection` (Core's verdict: a dead-clock or unreadable timestamp, or a packet with no
+        reading, is rejected and leaves no trace), then for an accepted reading: `labels` (risk labels), `trust` (verdict),
         `vetoed_fields`, `card_labels` (labels some advice card matches), `sensor_check_labels`,
         `alert_events` (raised / recovered, with sample times) and `ignored` (the monitor already saw a
         later sample of the stream). `include_result` adds the full pipeline result as `pipeline`.
@@ -239,6 +243,8 @@ class InProcessPomona:
         if sample < self.min_sample_time:
             return {"accepted": False, "rejection": "dead_clock", "sample_time": sample}
         sensor = core_packet(event)
+        if all(not isinstance(sensor[name], (int, float)) or isinstance(sensor[name], bool) for name in READING_FIELDS):
+            return {"accepted": False, "rejection": "no_reading", "sample_time": sample}
         sensor.update(received_at=iso_z(sample + timedelta(seconds=1)), mqtt_retained=False)
         farm_id, zone_id, device_id = event["farm_id"], event["zone_id"], event["device_id"]
         zone_key = (farm_id, zone_id)

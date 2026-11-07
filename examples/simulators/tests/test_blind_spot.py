@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[3]
 SIM_DIR = ROOT / "examples" / "simulators"
@@ -51,10 +50,10 @@ def run_scenario(path, ticks=None, seed=None):
 
 # --- The simulator ---------------------------------------------------------------------------
 
-def test_core_required_matches_the_sensor_event_schema():
+def test_core_needs_no_reading_field_but_at_least_one_reading():
     required = {name for name, field in SensorEvent.model_fields.items() if field.is_required()}
-    assert set(fg.CORE_REQUIRED) <= required
-    assert required - set(fg.CORE_REQUIRED) == {"device_id", "farm_id", "zone_id", "timestamp"}
+    assert required == {"device_id", "farm_id", "zone_id", "timestamp"}  # a silent probe never makes Core refuse a packet
+    assert not hasattr(fg, "CORE_REQUIRED")
 
 
 def test_blind_spot_scenario_loads_and_every_dropout_leaves_the_probe_out():
@@ -74,24 +73,15 @@ def test_blind_spot_scenario_loads_and_every_dropout_leaves_the_probe_out():
                     (B, "ec_ms_cm"), (B, "humidity_pct"), (B, "air_temperature_c")}
 
 
-def test_core_refuses_a_packet_missing_a_required_field_and_accepts_a_missing_optional_one():
+def test_core_accepts_every_packet_of_the_blind_spot_scenario_partial_or_complete():
     readings = run_scenario(SCENARIOS / "blind_spot.json")
-    refused = accepted = 0
+    partial = 0
     for r in readings:
         expect = r.truth["expect"]
-        if not expect.get("silent_fields"):
-            SensorEvent.model_validate(r.event)  # a complete packet is fine
-            continue
-        required_gone = any(f in fg.CORE_REQUIRED for f in expect["silent_fields"])
-        assert bool(expect.get("core_rejects")) == required_gone
-        try:
-            SensorEvent.model_validate(r.event)
-            accepted += 1
-            assert not required_gone
-        except ValidationError:
-            refused += 1
-            assert required_gone  # the schema agrees with what the truth log says Core does
-    assert refused > 300 and accepted > 50
+        assert "core_rejects" not in expect and expect["kind"] != "rejected_by_core"
+        SensorEvent.model_validate(r.event)  # a packet missing a probe is stored; Core refuses only a packet with no reading
+        partial += bool(expect.get("silent_fields"))
+    assert partial > 300
 
 
 def test_probe_dropout_is_a_sensor_fault_that_sends_no_lie_and_leaves_no_recovery_tail():
@@ -137,15 +127,15 @@ def test_existing_scenarios_carry_no_blind_spot_marks(name):
 # --- The verdict, on hand-built truth logs -----------------------------------------------------
 
 def row(tick, zone=A, silent=None, events=(), expected=(), accepted=True):
-    """One truth-log line at 30 s ticks. `silent` is the field a probe_dropout is on; `accepted` says whether Core stored it."""
+    """One truth-log line at 30 s ticks. `silent` is the field a probe_dropout is on; `accepted` says whether Core stored it
+    (not accepted: the delivery came back 422, as when a whole node's packets stop reaching Core)."""
     wall = BASE + timedelta(seconds=30 * tick)
     expect = {"kind": "real_event" if events else "normal", "expected_labels": list(expected),
               "forbid_domain_cards_from": [], "detectable": True, "onset_step": False, "recovering_from": []}
     if silent:
         expect["silent_fields"] = [silent]
-        if not accepted:
-            expect["core_rejects"] = True
     return {"tick": tick, "wall_timestamp": wall.isoformat(), "zone_id": zone, "device_id": f"dev-{zone}", "published": True,
+            **({} if accepted else {"delivery": {"status": 422}}),
             "sent": {"farm_id": "demo-farm", "zone_id": zone, "device_id": f"dev-{zone}", "timestamp": wall.isoformat()},
             "active_faults": [{"name": "probe_dropout", "field": silent}] if silent else [],
             "active_events": [{"name": "nutrient_over_concentration", "field": None}] if events else [],
@@ -178,7 +168,7 @@ def only_case(report):
 
 
 def test_nothing_shown_while_the_fault_runs_is_false_reassurance():
-    # The probe goes silent but Core keeps storing packets (an optional field), nothing flags it, no card comes.
+    # The probe goes silent but Core keeps storing packets, nothing flags it, no card comes.
     report = grade(case_rows(accepted=True))
     case = only_case(report)
     assert case["outcome"] == "false_reassurance" and case["via"] == [] and case["signal"] is None
@@ -189,7 +179,7 @@ def test_nothing_shown_while_the_fault_runs_is_false_reassurance():
     assert episode["outcome"] == "blind_spot" and report["summary"]["real_episodes"]["missed"] == 0
 
 
-def test_a_zone_gone_silent_is_cant_confirm_through_the_device_flag_only():
+def test_a_node_whose_packets_stop_reaching_core_is_cant_confirm_through_the_device_flag_only():
     report = grade(case_rows(accepted=False))
     case = only_case(report)
     assert case["outcome"] == "cant_confirm" and case["via"] == ["device silent"] and case["silent_flag_only"]
@@ -277,7 +267,8 @@ def test_core_accepted_follows_the_delivery_then_the_truth():
     assert not score.core_accepted(refused)
     assert score.core_accepted({**refused, "delivery": {"status": 201}})  # a real Core answer wins
     assert not score.core_accepted({**row(3, silent="ec_ms_cm"), "delivery": {"status": 422}})
-    assert score.core_accepted(row(3, silent="substrate_temperature_c"))  # an optional field: Core stores it
+    assert score.core_accepted(row(3, silent="ec_ms_cm"))  # a silent probe alone no longer makes Core refuse the packet
+    assert not score.core_accepted({**row(3), "expect": {**row(3)["expect"], "kind": "rejected_by_core"}})  # a dead clock does
 
 
 def test_reports_of_runs_without_a_silent_probe_keep_their_shape():

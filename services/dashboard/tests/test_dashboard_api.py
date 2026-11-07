@@ -710,3 +710,73 @@ def test_farm_time_comes_from_core_health_and_falls_back_to_utc(monkeypatch):
     assert client.get("/api/farm-time").json() == unreported
     health = None  # Core unreachable
     assert client.get("/api/farm-time").json() == unreported
+
+
+class _CoreEvents:
+    """A fake Core that returns one stored reading sampled at `stamp`."""
+    stamp = "2026-11-07T08:00:00Z"
+
+    def __init__(self, *args, **kwargs): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *args): pass
+    async def get(self, path, params=None):
+        event = {"farm_id": "farm", "zone_id": "a", "air_temperature_c": 24, "ec_ms_cm": None, "timestamp": self.stamp}
+        return dashboard_main.httpx.Response(200, json={"events": [event], "latest_event": event},
+                                             request=dashboard_main.httpx.Request("GET", "http://core" + path))
+
+
+def _overview_at(monkeypatch, now, stamp="2026-11-07T08:00:00Z", stale_after=600):
+    from datetime import datetime, timezone
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", _CoreEvents)
+    monkeypatch.setattr(_CoreEvents, "stamp", stamp)
+    monkeypatch.setattr(dashboard_main, "utc_now", lambda: datetime.fromisoformat(now).astimezone(timezone.utc))
+    monkeypatch.setattr(dashboard_main.settings, "zone_stale_after_s", stale_after)
+    return client.get("/api/overview", params={"farm_id": "farm", "zone_id": "a"}).json()
+
+
+def test_overview_sends_the_age_of_the_latest_reading_from_the_server_clock(monkeypatch):
+    body = _overview_at(monkeypatch, "2026-11-07T08:12:00+00:00")
+    assert body["latest_age_s"] == 720.0 and body["stale_after_s"] == 600
+    assert body["latest_event"]["ec_ms_cm"] is None  # a probe that did not report is passed on as null
+
+
+def test_a_sample_time_ahead_of_the_server_clock_is_age_zero_not_negative(monkeypatch):
+    body = _overview_at(monkeypatch, "2026-11-07T07:59:30+00:00")  # Core allows a sample time up to 60 s ahead
+    assert body["latest_age_s"] == 0.0
+
+
+def test_stale_threshold_zero_is_passed_on_as_off_and_a_missing_or_bad_time_has_no_age(monkeypatch):
+    assert _overview_at(monkeypatch, "2026-11-07T20:00:00+00:00", stale_after=0)["stale_after_s"] == 0
+    assert _overview_at(monkeypatch, "2026-11-07T20:00:00+00:00", stamp="not a time")["latest_age_s"] is None
+    assert _overview_at(monkeypatch, "2026-11-07T20:00:00+00:00", stamp="2026-11-07T08:00:00")["latest_age_s"] is None  # no UTC offset
+    assert _overview_at(monkeypatch, "2026-11-07T20:00:00+00:00", stale_after=-5)["stale_after_s"] == 0
+
+
+def test_stale_after_setting_defaults_to_ten_minutes_and_reads_the_environment(monkeypatch):
+    assert dashboard_main.Settings(_env_file=None).zone_stale_after_s == 600
+    monkeypatch.setenv("ZONE_STALE_AFTER_S", "0")
+    assert dashboard_main.Settings(_env_file=None).zone_stale_after_s == 0
+
+
+def test_evaluate_context_carries_missing_fields(monkeypatch):
+    sent = {}
+
+    async def fake_pipeline():
+        return dashboard_main.PipelineResponse(
+            available=True, sensor_snapshot={"farm_id": "farm", "zone_id": "a", "ec_ms_cm": None},
+            result={"pipeline_id": "p", "sensor_quality": {"data_quality_labels": ["missing_ec"], "missing_fields": ["ec_ms_cm"]},
+                    "final_decision": {"trust_verdict": "partial", "vetoed_fields": ["ec_ms_cm"], "blocked_actions": []}})
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, path, json):
+            sent.update(json)
+            return dashboard_main.httpx.Response(200, json={"suggestions": []}, request=dashboard_main.httpx.Request("POST", "http://a" + path))
+
+    monkeypatch.setattr(dashboard_main, "pipeline", fake_pipeline)
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    assert client.post("/api/automation/evaluate").json()["available"]
+    assert sent["context"]["missing_fields"] == ["ec_ms_cm"] and sent["context"]["vetoed_fields"] == ["ec_ms_cm"]
+    assert sent["context"]["readings"] == {"ec_ms_cm": None}

@@ -119,6 +119,35 @@ for n in range(1500):
         history.insert(0, None)
     temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"}, sensor, [field], None, history))
 
+# Gaps (the gap rule): packets without the field (absent or null) inside frozen, flat, noisy and stuck-then-resumed series.
+grng = random.Random(1130)
+for n in range(900):
+    field = grng.choice(fields)
+    length = grng.randrange(3, 14)
+    level = {"ph": 6.0, "ec_ms_cm": 1.8, "humidity_pct": 60.0}.get(field, 22.0)
+    shape = grng.choice(["frozen", "frozen", "flat", "alternating", "runs", "wander"])
+    if shape == "frozen":
+        series = [level + grng.choice([0, 0.5, 1.0]) * k for k in range(length)]
+        tail = grng.randrange(2, length + 1)
+        series[-tail:] = [series[-tail]] * tail
+    elif shape == "flat":
+        series = [level + grng.choice([0.0, 0.3, 0.6]) * (k % 2) for k in range(length - 6)] + \
+                 [level + 0.01 * grng.choice([0, 1]) for _ in range(6)]
+    elif shape == "alternating":
+        series = [level + (1.0 if k % 2 else 0.0) for k in range(length)]
+    elif shape == "runs":  # two long runs of one value, a gap between them, then more of the same
+        series = [level] * grng.randrange(1, 5) + [level + 1.0] * grng.randrange(1, 4) + [level] * grng.randrange(1, 7)
+    else:
+        series = [round(level + grng.uniform(-0.5, 0.5), 2) for _ in range(length)]
+    packets = [{field: round(v, 3), "timestamp": f"2026-01-01T00:{k:02d}:00+00:00"} for k, v in enumerate(series)]
+    for _ in range(grng.choice([1, 1, 2, 3, 5])):  # blank some packets, never always the newest one
+        index = grng.randrange(len(packets) - (0 if grng.random() < 0.15 else 1))
+        if grng.random() < 0.5:
+            packets[index].pop(field, None)
+        else:
+            packets[index][field] = None
+    temporal_cases.append(derive_case({"crop": "tomato", "system_type": "hydroponic"}, packets[-1], [field], None, packets[:-1]))
+
 # Time-stamped series: thermal-mass stuck duration (3 h) and pH/EC noise vs drift.
 trng = random.Random(928)
 for n in range(600):

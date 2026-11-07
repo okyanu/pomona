@@ -575,11 +575,16 @@ def test_offline_blind_spot_scenario_has_no_false_reassurance(tmp_path):
     assert (b["total"], b["false_reassurance"], b["cant_confirm"], b["alerted"]) == (7, 0, 6, 1)
     assert b["too_short_to_judge"] == b["no_fault_in_window"] == b["no_real_event"] == 0
     cases = {(c["zone"], c["field"]): c for c in report["blind_spot_cases"]}
-    # the six probes Core needs: the whole zone goes silent and the device flag is the only sign
+    # Core stores every partial packet; the six probes the event depends on end in the sensor_check card (a card is
+    # also open for the humidity case from the earlier EC episode, so its first sign is not later than 3 minutes
+    # after the silence began), never the passive device flag alone.
     for key in (("greenhouse-a", "soil_moisture_pct"), ("greenhouse-a", "air_temperature_c"), ("greenhouse-a", "ec_ms_cm"),
                 ("greenhouse-b", "ec_ms_cm"), ("greenhouse-b", "humidity_pct"), ("greenhouse-b", "air_temperature_c")):
-        assert cases[key]["outcome"] == "cant_confirm" and cases[key]["silent_flag_only"] and cases[key]["core_refused_frames"] > 0
-    # the control: an optional probe goes silent, Core keeps storing, the air probe still shows the heat
+        case = cases[key]
+        assert case["outcome"] == "cant_confirm" and not case["silent_flag_only"] and "sensor card" in case["via"], key
+        assert case["core_refused_frames"] == 0 and case["signal"]["delay_s"] <= 180, key
+    assert report["summary"]["blind_spot"]["cant_confirm_by_silent_flag_only"] == 0
+    # the control: an optional probe goes silent, the air probe still shows the heat
     control = cases[("greenhouse-a", "substrate_temperature_c")]
     assert control["outcome"] == "alerted" and control["domain_card"]["rule"] == "heat_stress_check"
     assert report["summary"]["real_episodes"]["missed"] == 0 and report["summary"]["false_alarms"] == 0
@@ -587,7 +592,7 @@ def test_offline_blind_spot_scenario_has_no_false_reassurance(tmp_path):
 
 
 def test_the_pipeline_alone_would_say_cant_confirm_for_a_probe_that_is_missing():
-    """Evidence for the gap: the router flags a missing probe within 3 readings; it is Core's refusal that hides it."""
+    """The router flags a missing probe within 3 readings (the scenario above reaches it: Core stores partial packets)."""
     sim = fg.Simulation(seed=7, clock=fake_clock())
     events = [r.event for _ in range(14) for r in sim.step() if r.truth["zone_id"] == B]
     with score.InProcessPomona(RULES, DEFAULTS) as engine:
