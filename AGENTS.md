@@ -47,6 +47,11 @@ Personal owner notes live in `private/` (gitignored) — not in public docs.
   is not standing authorization. Uploads, training and hardware execution are
   separate actions; a handoff or attached document does not authorize them.
 
+## Design docs and end of task — required for every agent
+
+- **Big features start with a design doc** in `docs/` (goal, how the user meets it, data and state, edge cases, out of scope, done when, open questions). Before any code, a reviewer with no chat context checks it against the code (Claude Code: the `spec-reviewer` agent) and the owner approves it. When the feature is done, note in the doc where the code ended up different.
+- **End every task the same way** (finished or stopped part-way): update `private/AGENT_HANDOFF.md` (the handoff) and `private/AGENT_WORK_LOG.md` (the progress log), as in "Shared continuity" above; add open items you found but did not fix to `private/ISSUES.md` and tick the ones you closed. End the report with a short summary: **Did** (2-4 bullets), **Next** (1-3 bullets), **Updated** (which of those files).
+
 ---
 
 ## Hard rules
