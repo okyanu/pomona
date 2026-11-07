@@ -158,7 +158,10 @@ minute) differs from the newest trusted reading by more than the larger of the t
 multiplied by the minutes since that reading), and `noisy_signal_possible` when humidity, air temperature,
 pH, substrate moisture or substrate temperature has a median step over 12 readings beyond its limit (10 %RH / 2 C /
 0.5 pH / 1 % / 0.4 C at 5-minute samples, shrinking with the square root of the interval to a floor of 3 %RH /
-0.4 C / 0.1 pH / 2.5 % / 0.5 C) without having simply moved in one direction; see
+0.4 C / 0.1 pH / 2.5 % / 0.5 C) without having simply moved in one direction. EC has its own fixed limit, 0.20 mS/cm
+over 12 readings, used as it is and only when the window's median sample interval is 90 seconds or less (real
+10-second tank EC never reaches it; a slower stream, such as 5-minute drain EC that jumps by itself, is not judged);
+see
 [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md#stream-habit-checks-in-cores-feed-2026-11-02-widened-2026-11-05). The
 check text tells the operator to verify with a meter and, if the reading is right, to
 record a calibration (`POST /v1/sensors/calibrations`) for that probe: a calibration resets the
@@ -175,7 +178,8 @@ feed does): pH and EC have no fixed "stuck" limit because drain and tank probes 
 hours as a matter of course (80 % of real readings are beyond 20 minutes), so they get the adaptive check
 that leaves such probes alone (0 pH and at most 0.02 % of EC readings flagged); the air temperature, humidity,
 moisture and substrate-temperature step limits and the noise limits keep real-log false flags under 0.15 % of
-readings; substrate temperature needs 6 h because real
+readings (and on 3 months of real 10-second data the 30-second air, humidity and pH noise limits and the fast EC
+noise limit flag none); substrate temperature needs 6 h because real
 slab probes hold one 0.1 C value for up to 9 h; and a drift needs 3 times the probe's own spread because real
 drain pH and EC leave their 2 h median by 0.35 / 0.4 on 1 to 3 % of readings. Moisture has no persistent stuck
 or level check (a hydroponic zone sends a constant placeholder), only the step and noise checks. The unattended numbers are high on historical logs

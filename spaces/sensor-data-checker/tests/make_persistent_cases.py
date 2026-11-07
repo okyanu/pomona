@@ -436,6 +436,60 @@ for n in range(1500):
     history = [{"timestamp": iso(STAMP - timedelta(seconds=cadence)), field: sensor.get(field)}] if r.random() < 0.7 else []
     add_check_case(sensor, history, baseline)
 
+# (c) EC's fixed noise limit (0.20 mS/cm, judged only when the window's median sample interval is 90 s or less): every
+# interval around the gate, steps on both sides of the limit, a window with a long gap, a jittered once-a-minute stamp,
+# a one-way ramp (dosing) and a slow stream, side by side with the scaled fields.
+EC_INTERVALS = [10, 30, 60, 90, 91, 300]
+
+
+def ec_window(r, interval, steps, length=12, gap_at=None, jitter=0, level=1.2, direction=None):
+    values, current = [], level
+    for k in range(length):
+        values.append(round(current, 3))
+        step = steps[k % len(steps)] if direction is None else direction * abs(steps[k % len(steps)])
+        current += step if (direction is not None or k % 2 == 0) else -step
+    offsets = []
+    for k in range(length):
+        base = interval * (k - (length - 1))
+        if gap_at is not None and k < gap_at:
+            base -= interval * 20  # one long hole in the window before reading gap_at
+        offsets.append(base + (r.randint(-jitter, jitter) if jitter and k < length - 1 else 0))
+    return [{"timestamp": iso(STAMP + timedelta(seconds=o)), "ec_ms_cm": v} for o, v in zip(offsets, values)]
+
+
+for n in range(600):
+    r = random.Random(30000 + n)
+    interval = r.choice(EC_INTERVALS)
+    mode = r.choice(["noise", "noise", "edge", "quiet", "ramp", "gap", "jitter", "mixed"])
+    if mode == "noise":
+        steps = [r.choice([0.25, 0.3, 0.4, 0.6])]
+    elif mode == "edge":
+        steps = [0.2 * r.choice([1.0, 0.999999, 1.000001, 0.95, 1.05])]
+    elif mode in ("quiet", "jitter"):
+        steps = [r.choice([0.0, 0.02, 0.1, 0.14, 0.19])]
+    elif mode == "ramp":
+        steps = [r.choice([0.25, 0.3, 0.5])]
+    elif mode == "gap":
+        steps = [r.choice([0.1, 0.3])]
+    else:
+        steps = [r.choice([0.05, 0.1, 0.3, 0.5]) for _ in range(r.randrange(2, 5))]
+    series = ec_window(r, interval, steps, length=r.choice([12, 12, 12, 8, 6, 5]),
+                       gap_at=r.randrange(1, 3) if mode == "gap" else None,
+                       jitter=2 if mode == "jitter" and interval == 60 else 0,
+                       direction=r.choice([1, -1]) if mode == "ramp" else None)
+    sensor, history = series[-1], series[:-1]
+    median = round(series[-1]["ec_ms_cm"], 3)
+    add_check_case(sensor, history, {"ec_ms_cm": stats(median=median, spread=100.0)})
+
+ec_fired = {i: [0, 0] for i in EC_INTERVALS}  # interval -> [windows flagged, windows quiet]
+for case in checks_cases[-600:]:
+    stamps = [sq.parse_timestamp(p["timestamp"]) for p in case["history"] + [case["sensor"]]]
+    if len(stamps) >= 6:
+        gap = sorted(b - a for a, b in zip(stamps, stamps[1:]))[(len(stamps) - 1) // 2].total_seconds()
+        ec_fired[min(EC_INTERVALS, key=lambda i: abs(i - gap))][0 if case["out"]["checks"] else 1] += 1
+assert all(min(v) >= 5 for k, v in ec_fired.items() if k <= 90), ec_fired  # fast EC streams: flagged and quiet
+assert ec_fired[91][0] == 0 and ec_fired[300][0] == 0, ec_fired  # slower than 90 s: never judged
+
 # ---- derive ---------------------------------------------------------------------------------------------------------------
 derive_cases = []
 

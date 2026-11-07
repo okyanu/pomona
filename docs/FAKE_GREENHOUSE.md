@@ -117,7 +117,8 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
   (shorter than 8 to 10 minutes it may not be); a +4 C air-temperature jump, a +15 %RH humidity jump, a +15 %
   substrate-moisture jump and a +4 C substrate-temperature jump are each flagged within a minute (and then accepted as the
   new level after 4, 4, 8 and 13 minutes); a noisy humidity, air, pH, substrate-moisture or substrate-temperature
-  probe is caught within about 4 to 6 minutes; a noisy EC probe is not; a single-sample spike is flagged but too
+  probe is caught within about 4 to 6 minutes, and so is a noisy EC probe at this 30-second rate, in about 6 to 8 minutes (not on a
+  stream slower than 90 seconds); a single-sample spike is flagged but too
   short to raise a card; `plausible_offset` started mid-stream is flagged for as long as it lasts (from the start of
   a stream nobody can see it).
 - Pomona now keeps a trusted reference per probe, so a real step (a nutrient overdose) shows first as
@@ -136,10 +137,13 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
   never judged), a freeze shorter than about 8 to 10 minutes, or a second freeze of the same probe soon after
   the first that lasts less than about 21 minutes, is not caught; a jump of humidity (below 12 %RH), moisture (below
   8 %) or substrate temperature (below 1.5 C) is not caught because real probes make such changes; a slow
-  drift of air temperature, humidity, moisture or substrate temperature, a noisy EC probe and a frozen
-  substrate-temperature probe (thermal mass) are still missed; a step is flagged only as long as it is
-  physically impossible and then accepted as the new level; and the noise limits at 30 seconds are scaled from
-  real 5-minute logs (none are faster) rather than measured. Details and real-data rates:
+  drift of air temperature, humidity, moisture or substrate temperature, a noisy EC probe on a stream slower than 90
+  seconds and a frozen substrate-temperature probe (thermal mass) are still missed; a step is flagged only as long as it is
+  physically impossible and then accepted as the new level; and the noise limits at 30 seconds for air temperature,
+  humidity and pH are scaled from real 5-minute logs rather than measured: they were checked on one real fast log
+  (3 months of 10-second data from one closed growth chamber, no false flags), and a greenhouse with vents and doors
+  may behave differently. The fixed EC noise limit (0.20 mS/cm, streams at 90 seconds or faster) rests on tank EC
+  only; there is no public fast drain EC. Details and real-data rates:
   [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md#stream-habit-checks-in-cores-feed-2026-11-02-widened-2026-11-05).
 - A flagged level that nobody confirms stays "can't confirm" until a calibration (a probe broken for six
   hours stays flagged for the six hours, and its card stays open). That is by design; a lapse is an

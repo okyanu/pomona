@@ -29,7 +29,8 @@ you shouldn't trust:
 - **badly timed** readings (no timezone, future-dated, stale latest reading, logging gaps, reboots,
   time going backwards)
 - **stuck, flat, noisy or drifting** sensors (compared with the previous 11 readings of the same device, and with the
-  device's own earlier readings in the file: slow drift, longer freezes, sudden jumps, noisy probes)
+  device's own earlier readings in the file: slow drift, longer freezes, sudden jumps, noisy probes; a noisy EC
+  probe is caught only when the log is sampled every 90 seconds or faster, since 5-minute drain EC jumps by itself)
 
 Everything runs in your browser. Files are never uploaded.
 
