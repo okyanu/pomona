@@ -265,12 +265,27 @@ def test_history_is_relative_to_the_fed_reading_when_the_queue_backs_up(client, 
 def test_history_same_sample_time_uses_store_order(client, calls):
     feed = OutcomeFeed(event_store, queue_size=5)
     body = payload(30)
-    first = SensorEvent.model_validate({**body, "device_id": "one"})
-    second = SensorEvent.model_validate({**body, "device_id": "two"})
+    # Same device, same sample time: identical content would be a duplicate, so the readings differ.
+    first = SensorEvent.model_validate({**body, "device_id": "one", "air_temperature_c": 24.0})
+    second = SensorEvent.model_validate({**body, "device_id": "one", "air_temperature_c": 25.0})
     event_store.add(first)
-    event_store.add(second)
     feed._process(first)
+    event_store.add(second)
     feed._process(second)
     pipelines = [b for _, path, b in calls if path == "/v1/pipeline/evaluate"]
     assert pipelines[0]["history"] == []
-    assert [h["device_id"] for h in pipelines[1]["history"]] == ["one"]
+    assert [(h["device_id"], h["air_temperature_c"]) for h in pipelines[1]["history"]] == [("one", 24.0)]
+
+
+def test_history_does_not_contain_another_devices_packets(client, calls):
+    feed = OutcomeFeed(event_store, queue_size=5)
+    body = payload(30)
+    first = SensorEvent.model_validate({**body, "device_id": "one"})
+    second = SensorEvent.model_validate({**body, "device_id": "two"})
+    third = SensorEvent.model_validate({**payload(20), "device_id": "two"})
+    for event in (first, second, third):
+        event_store.add(event)
+        feed._process(event)
+    pipelines = [b for _, path, b in calls if path == "/v1/pipeline/evaluate"]
+    assert pipelines[1]["history"] == []  # device "one"'s packet at the same sample time is not device "two"'s history
+    assert [h["device_id"] for h in pipelines[2]["history"]] == ["two"]

@@ -31,6 +31,13 @@ fixed timestamps). Above it, the "Sensor trust" line reads "Can't confirm: no re
 last reading at that time. A probe that did not report reads "EC not reported in the latest reading"; a reading
 that was there but not trusted reads "EC not used"; a `null` reading shows as an en dash in history and cards.
 
+Multi-device zones (two or more devices reporting for one zone; `docs/design/multi-device-zones.md`, slice 1): Core
+judges each device on its own history and expected fields, and `/api/pipeline` ("Evaluate current risk") does the same for
+the device of the latest packet (its own history, and `device_fields` from Core). The zone views are not zone-aware yet
+(slice 2): the overview, tiles, sensor-trust line and "Evaluate current risk" show the zone's newest packet, which flips
+between devices, so tiles from the other device show an en dash. `/api/overview` passes on Core's `zone_multi_device` and
+`latest_device_fields`.
+
 Core outages visibly mark recommendations unavailable and block review clicks.
 Refresh cycles do not overlap, and selecting a zone reloads all panels. No
 approval or forecast preview executes hardware. Public deployments are unchanged

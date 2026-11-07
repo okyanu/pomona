@@ -10,7 +10,9 @@ a verdict, the automation-engine turns labels into cards), as one importable cla
      keeps it up to date reading by reading (`StreamBaseline`, byte-identical to Core's `stream_baseline`), so a
      late reading costs no more than the first.
   3. Model-router: the real `app.pipeline.evaluate_pipeline` in `rules_only` mode, with the stream's last
-     11 packets as history. No network, no model weights.
+     11 packets as history. No network, no model weights. In a multi-device zone (another device of the farm and zone
+     sent a packet within 7 days of the reading) it also passes `device_fields`, the fields the device has sent in that
+     window, as Core's feed does.
   4. Automation-engine: the real `AlertMonitor` (alerts.py, in-memory SQLite) with the real rules.yaml
      rules, advanced by the reading's sample time (never the wall clock).
 
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import math
 import re
 import sys
 import threading
@@ -55,7 +58,11 @@ CORE_OPTIONAL = (*READING_FIELDS, "weather", "zone_area_m2", "crop_kc", "npk_tar
 # Core's `max_future_sample_s` (a sample time ahead of Core's wall clock) is not mirrored: a replay runs on virtual
 # sample time, with no wall clock to be ahead of.
 MIN_SAMPLE_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
-HISTORY_PACKETS = 11  # the model-router's temporal checks see this many earlier packets per zone
+HISTORY_PACKETS = 11  # the model-router's temporal checks see this many earlier packets per stream (farm, zone, device)
+# Core's `retention_days` (services/core/app/config.py): the window for the multi-device test and a device's expected
+# fields (docs/design/multi-device-zones.md 1.1, 1.3). The engine's clock for it is the reading's sample time.
+RETENTION = timedelta(days=7)
+PACKET_FIELD = "__packet__"  # the pseudo-field that records a device's live packets, as in Core's device_fields table
 
 # One lock for every pipeline call in the process: the pipeline's `_now` is module-level state.
 PIPELINE_LOCK = threading.Lock()
@@ -174,8 +181,8 @@ class InProcessPomona:
     """Feed readings in sample-time order with `observe`; record calibrations with `calibrate`.
 
     `rules` are the parsed rules.yaml rules (`load_rules()`), `defaults` the monitor's (raise, clear)
-    seconds (`alert_defaults()`). The engine keeps, per zone, the last 11 packets; per stream
-    (farm, zone, device), the readings the trusted baseline is built from and the calibrations; and one
+    seconds (`alert_defaults()`). The engine keeps, per stream (farm, zone, device), the last 11 packets, the
+    readings the trusted baseline is built from, the calibrations and the fields the device has sent; and one
     AlertMonitor. Not thread-safe by itself per engine: serialise calls on one engine; different engines
     may run in different threads (pipeline calls share PIPELINE_LOCK). `loop` (optional) is an event loop
     shared with other engines; the engine then leaves it open on close.
@@ -201,7 +208,9 @@ class InProcessPomona:
         # one thread uses it at a time); an engine without one owns its loop and closes it.
         self._loop = loop if loop is not None else asyncio.new_event_loop()
         self._owns_loop = loop is None
-        self._history: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}  # per zone, the last 11 packets
+        self._history: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}  # per stream, the last 11 packets
+        # per stream, field (or PACKET_FIELD) -> [first_seen, last_seen] sample times (Core's device_fields table)
+        self._device_fields: Dict[Tuple[str, str, str], Dict[str, List[datetime]]] = {}
         self._streams: Dict[Tuple[str, str, str], Any] = {}  # per stream, its StreamBaseline (Core's trusted reference)
         # (farm_id or None, zone_id, device_id or None, measurement, performed_at); None matches any
         self._calibrations: List[Tuple[Optional[str], str, Optional[str], str, str]] = []
@@ -223,6 +232,32 @@ class InProcessPomona:
         farm, zone, device = stream
         return [{"measurement": field, "performed_at": at} for f, z, d, field, at in self._calibrations
                 if z == zone and f in (None, farm) and d in (None, device)]
+
+    # Multi-device zones: the same bookkeeping as Core's device_fields table (store.py), on sample time.
+
+    def _record_and_device_fields(self, stream: Tuple[str, str, str], sensor: Dict[str, Any],
+                                  sample: datetime) -> Optional[List[str]]:
+        """Remember the fields this packet carries; return the device's fields if the zone is multi-device now, else None.
+
+        Multi-device: another device of the same farm and zone has a packet row with first_seen <= sample and
+        last_seen >= sample - 7 days. The device's fields are the finite-number READING_FIELDS whose rows count the same way.
+        """
+        carried = [name for name in READING_FIELDS
+                   if isinstance(sensor[name], (int, float)) and not isinstance(sensor[name], bool)
+                   and math.isfinite(sensor[name])]
+        rows = self._device_fields.setdefault(stream, {})
+        for name in [*carried, PACKET_FIELD]:
+            seen = rows.setdefault(name, [sample, sample])
+            seen[0], seen[1] = min(seen[0], sample), max(seen[1], sample)
+
+        def counts(seen: List[datetime]) -> bool:
+            return seen[0] <= sample and seen[1] >= sample - RETENTION
+
+        multi = any(other != stream and other[:2] == stream[:2] and PACKET_FIELD in other_rows
+                    and counts(other_rows[PACKET_FIELD]) for other, other_rows in self._device_fields.items())
+        if not multi:
+            return None
+        return sorted(name for name, seen in rows.items() if name != PACKET_FIELD and counts(seen))
 
     # One reading
 
@@ -247,13 +282,13 @@ class InProcessPomona:
             return {"accepted": False, "rejection": "no_reading", "sample_time": sample}
         sensor.update(received_at=iso_z(sample + timedelta(seconds=1)), mqtt_retained=False)
         farm_id, zone_id, device_id = event["farm_id"], event["zone_id"], event["device_id"]
-        zone_key = (farm_id, zone_id)
+        stream = (farm_id, zone_id, device_id)
         prior = [{k: v for k, v in p.items() if k not in ("received_at", "mqtt_retained")}
-                 for p in self._history.get(zone_key, [])[-HISTORY_PACKETS:]]
+                 for p in self._history.get(stream, [])[-HISTORY_PACKETS:]]
         farm = {"crop": sensor["crop"], "system_type": sensor["system_type"], "zone_id": sensor["zone_id"],
                 "weather": sensor.get("weather"), "zone_area_m2": sensor.get("zone_area_m2"),
                 "crop_kc": sensor.get("crop_kc"), "npk_target": sensor.get("npk_target")}
-        stream = (farm_id, zone_id, device_id)
+        device_fields = self._record_and_device_fields(stream, sensor, sample)
         baseline = self._baseline
         tracked = self._streams.get(stream)
         if tracked is None:
@@ -266,12 +301,13 @@ class InProcessPomona:
             original_now = pipeline._now
             pipeline._now = lambda now=sample + timedelta(seconds=1): now
             try:
+                extra = {} if device_fields is None else {"device_fields": device_fields}  # absent in a single-device zone
                 result = self._loop.run_until_complete(pipeline.evaluate_pipeline(
                     farm, sensor, [], {"action_type": "continue_monitoring"}, "core_feed", "rules_only",
-                    "core_feed", history=prior, stream_baseline=reference or None))
+                    "core_feed", history=prior, stream_baseline=reference or None, **extra))
             finally:
                 pipeline._now = original_now
-        history = self._history.setdefault(zone_key, [])
+        history = self._history.setdefault(stream, [])
         history.append(sensor)
         del history[:-HISTORY_PACKETS]
         tracked.add({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})

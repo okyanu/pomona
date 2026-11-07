@@ -284,3 +284,7 @@ class SensorEventListResponse(BaseModel):
     latest_event: Optional[SensorEvent] = None
     count: int
     events: list
+    # Multi-device zones: whether the latest event's zone has another device (docs/design/multi-device-zones.md 1.1), and
+    # the fields its device is expected to report then (null in a single-device zone).
+    zone_multi_device: bool = False
+    latest_device_fields: Optional[list[str]] = None

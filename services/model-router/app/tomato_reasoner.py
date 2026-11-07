@@ -78,7 +78,10 @@ def missing_input_fields(input_data: Dict[str, Any]) -> List[str]:
     if system_type == "greenhouse_substrate":
         critical.extend(["substrate_temperature_c", "substrate_moisture_pct"])
     vetoed = input_data.get("vetoed_fields") or ()  # set by the sensor-quality veto: already reported there
-    return [field for field in critical if input_data.get(field) is None and field not in vetoed]
+    # Set for a device of a multi-device zone that does not carry the field (docs/design/multi-device-zones.md 1.3).
+    not_expected = input_data.get("not_expected_fields") or ()
+    return [field for field in critical
+            if input_data.get(field) is None and field not in vetoed and field not in not_expected]
 
 def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Optional[float]:
     """VPD in kPa, or None when either reading is missing, non-numeric or implausible."""

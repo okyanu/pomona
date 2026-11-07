@@ -58,6 +58,10 @@ class OverviewResponse(BaseModel):
     # browser clock. stale_after_s is ZONE_STALE_AFTER_S (0 = off); both are None/0 when there is nothing to judge.
     latest_age_s: Optional[float] = None
     stale_after_s: int = 0
+    # Core's multi-device test for the latest event's zone and that device's expected fields (docs/design/multi-device-zones.md
+    # 1.5). False/None in a single-device zone: nothing then changes.
+    zone_multi_device: bool = False
+    latest_device_fields: Optional[List[str]] = None
     error: Optional[str] = None
 
 
@@ -269,6 +273,8 @@ async def overview() -> OverviewResponse:
             recent_events=list(reversed(events)),
             latest_age_s=reading_age_s(latest),
             stale_after_s=max(settings.zone_stale_after_s, 0),
+            zone_multi_device=bool(payload.get("zone_multi_device")),
+            latest_device_fields=payload.get("latest_device_fields"),
         )
     except Exception as exc:
         return OverviewResponse(core_available=False, error=f"Core unavailable: {exc}")
@@ -306,6 +312,29 @@ async def risk() -> RiskResponse:
         return RiskResponse(available=False, error=f"Reasoner chain unavailable: {exc}")
 
 
+def sample_time(packet: Dict[str, Any]) -> Optional[datetime]:
+    stamp = packet.get("timestamp")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def earlier_samples(events: List[Dict[str, Any]], timestamp: Any, keep: int = 11) -> List[Dict[str, Any]]:
+    """The packets sampled strictly before `timestamp`, in sample-time order (Core's order breaks ties), newest `keep`.
+
+    Unlike the single-device path this does not drop "the last by arrival": a late packet is not the latest sample.
+    """
+    cutoff = sample_time({"timestamp": timestamp})
+    earlier = [(sample_time(item), item) for item in events]
+    earlier = [(when, item) for when, item in earlier if when is not None and cutoff is not None and when < cutoff]
+    earlier.sort(key=lambda pair: pair[0])  # stable: the API's order breaks equal sample times
+    return [item for _, item in earlier[-keep:]]
+
+
 @app.get("/api/pipeline", response_model=PipelineResponse)
 async def pipeline() -> PipelineResponse:
     """Return the unified guarded pipeline for the latest persisted event."""
@@ -316,6 +345,7 @@ async def pipeline() -> PipelineResponse:
     event = dict(overview_data.latest_event)
     event.pop("source", None)
     history: List[Dict[str, Any]] = []
+    multi_device = overview_data.zone_multi_device
     try:
         params = {"limit": 12}
         scope = request_scope.get()
@@ -323,12 +353,20 @@ async def pipeline() -> PipelineResponse:
             params["farm_id"] = scope["farm_id"]
         if scope.get("zone_id"):
             params["zone_id"] = scope["zone_id"]
+        if multi_device:
+            # Multi-device zone: this device's own history, from the evaluated event's farm, zone and device even when the
+            # request is unscoped (docs/design/multi-device-zones.md 1.6).
+            params = {"limit": 24, "farm_id": event.get("farm_id"), "zone_id": event.get("zone_id"),
+                      "device_id": event.get("device_id")}
         async with httpx.AsyncClient(base_url=settings.core_url, timeout=5.0) as core_client:
             history_response = await core_client.get("/v1/sensors/events", params=params)
             history_response.raise_for_status()
         events = history_response.json().get("events") or []
-        # Core returns chronological pages; drop the latest packet so history is prior-only.
-        prior = events[:-1] if len(events) > 1 else []
+        if multi_device:
+            prior = earlier_samples(events, event.get("timestamp"))
+        else:
+            # Core returns chronological pages; drop the latest packet so history is prior-only.
+            prior = events[:-1] if len(events) > 1 else []
         for item in prior:
             packet = dict(item)
             packet.pop("source", None)
@@ -361,6 +399,7 @@ async def pipeline() -> PipelineResponse:
                     "proposed_command": {"action_type": "continue_monitoring"},
                     "actor": "dashboard",
                     "mode": "hybrid_guarded",
+                    **({"device_fields": overview_data.latest_device_fields} if multi_device else {}),
                 },
             )
             response.raise_for_status()

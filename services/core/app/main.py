@@ -91,14 +91,17 @@ def ingest_sensor_event(event: SensorEvent) -> SensorEvent:
 
 
 @app.get("/v1/sensors/events", response_model=SensorEventListResponse)
-def list_sensor_events(limit: int = Query(default=50, ge=1, le=500), farm_id: Optional[str] = None, zone_id: Optional[str] = None, offset: int = Query(0, ge=0)) -> SensorEventListResponse:
-    events = event_store.list_events(limit=limit, farm_id=farm_id, zone_id=zone_id, offset=offset)
-    return SensorEventListResponse(count=len(events), events=events, latest_event=event_store.latest_event(farm_id, zone_id))
+def list_sensor_events(limit: int = Query(default=50, ge=1, le=500), farm_id: Optional[str] = None, zone_id: Optional[str] = None, offset: int = Query(0, ge=0), device_id: Optional[str] = None) -> SensorEventListResponse:
+    events = event_store.list_events(limit=limit, farm_id=farm_id, zone_id=zone_id, offset=offset, device_id=device_id)
+    latest = event_store.latest_event(farm_id, zone_id, device_id)
+    device_fields = event_store.device_fields_for(latest) if latest else None
+    return SensorEventListResponse(count=len(events), events=events, latest_event=latest,
+                                   zone_multi_device=device_fields is not None, latest_device_fields=device_fields)
 
 
 @app.get("/v1/sensors/events/latest", response_model=SensorEvent)
-def latest_sensor_event(farm_id: Optional[str] = None, zone_id: Optional[str] = None) -> SensorEvent:
-    event = event_store.latest_event(farm_id=farm_id, zone_id=zone_id)
+def latest_sensor_event(farm_id: Optional[str] = None, zone_id: Optional[str] = None, device_id: Optional[str] = None) -> SensorEvent:
+    event = event_store.latest_event(farm_id=farm_id, zone_id=zone_id, device_id=device_id)
     if event is None:
         raise HTTPException(status_code=404, detail="No sensor events recorded yet")
     return event
@@ -112,8 +115,8 @@ def ingest_observation(observation: SensorObservation) -> SensorObservation:
 
 
 @app.get("/v1/sensors/observations")
-def list_observations(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), farm_id: Optional[str] = None, zone_id: Optional[str] = None):
-    observations = event_store.list_observations(limit, farm_id, zone_id, offset)
+def list_observations(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), farm_id: Optional[str] = None, zone_id: Optional[str] = None, device_id: Optional[str] = None):
+    observations = event_store.list_observations(limit, farm_id, zone_id, offset, device_id)
     return {"count": len(observations), "observations": observations}
 
 
@@ -195,11 +198,11 @@ def list_devices(farm_id: Optional[str] = None, zone_id: Optional[str] = None):
 
 
 @app.get("/v1/sensors/export.csv")
-def export_history(kind: Literal["events", "observations"] = "events", limit: int = Query(1000, ge=1, le=10000), offset: int = Query(0, ge=0), farm_id: Optional[str] = None, zone_id: Optional[str] = None):
+def export_history(kind: Literal["events", "observations"] = "events", limit: int = Query(1000, ge=1, le=10000), offset: int = Query(0, ge=0), farm_id: Optional[str] = None, zone_id: Optional[str] = None, device_id: Optional[str] = None):
     """Bounded export; offset pages newest records first, each page chronological."""
     model = SensorEvent if kind == "events" else SensorObservation
     loader = event_store.list_events if kind == "events" else event_store.list_observations
-    rows = loader(limit, farm_id, zone_id, offset)
+    rows = loader(limit, farm_id, zone_id, offset, device_id)
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=list(model.model_fields))
     writer.writeheader()

@@ -30,3 +30,19 @@ def expected_fields_for(farm_context: dict[str, Any], sensor: dict[str, Any]) ->
     if has_moisture_probe(farm_context.get("system_type")):
         fields.append(next((f for f in MOISTURE_FIELDS if sensor.get(f) is not None), MOISTURE_FIELDS[0]))
     return fields
+
+
+# Reading field names a device can report (Core's READING_FIELDS plus the moisture synonym the router knows).
+KNOWN_SENSOR_FIELDS = frozenset([*BASE_EXPECTED_FIELDS, *MOISTURE_FIELDS, "substrate_temperature_c"])
+
+
+def narrow_to_device(fields: list[str], device_fields: list[str]) -> list[str]:
+    """`fields` cut down to what one device of a multi-device zone carries (docs/design/multi-device-zones.md 1.3).
+
+    A field is kept when the device carries it; a moisture field is kept when the device carries any of MOISTURE_FIELDS
+    (firmware may rename it). An empty result means the device carries none of the expected fields: the full list is
+    returned, so such a device keeps today's behaviour (it belongs in a zone of its own).
+    """
+    carried = set(device_fields)
+    narrowed = [f for f in fields if f in carried or (f in MOISTURE_FIELDS and carried & set(MOISTURE_FIELDS))]
+    return narrowed or list(fields)
