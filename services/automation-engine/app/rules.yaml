@@ -39,15 +39,12 @@ rules:
       pH out of range. Check the water/dosing system and recalibrate the pH
       probe if the reading does not match a manual measurement.
 
-  # water_level_risk is the tomato reasoner's label (moisture below 10 % or above 85 %); the water reasoner's own labels
-  # trip earlier (28 % or below, 78 % or above) and used to match no rule.
+  # water_level_risk is the tomato reasoner's label (moisture below 10 % or above 85 %). The water reasoner's own labels
+  # (low_moisture, high_moisture, irrigation_underwatering, irrigation_overwatering) trip earlier (28 % or below, 78 %
+  # or above) with limits that are not validated, so they match no rule on purpose: see NO_CARD_ON_PURPOSE in
+  # services/model-router/tests/test_rule_label_coverage.py.
   - id: water_level_check
-    match_any_labels:
-      - water_level_risk
-      - low_moisture
-      - high_moisture
-      - irrigation_underwatering
-      - irrigation_overwatering
+    match_any_labels: [water_level_risk]
     action: check_irrigation_system
     message: >-
       Substrate moisture out of the expected range. Confirm with a second

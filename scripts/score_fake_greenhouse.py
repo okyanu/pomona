@@ -38,15 +38,6 @@ SENSOR_ACTION = "check_sensor"  # every rule with this action is a sensor card (
 # is not one of them: it is neither a sensor check (it does not count as a caught sensor fault or a can't-confirm) nor
 # a domain card, so a sensor_anomaly label is invisible here, as it was before that rule existed.
 SENSOR_FAMILY = {"sensor_check", "sensor_flatline"}
-# The water reasoner's labels sit on the same water_level_check card as the tomato reasoner's water_level_risk: with
-# water_level_risk expected, any of these is the same (right) card. This is the only label equivalence.
-WATER_CARD_ALIASES = {"low_moisture", "high_moisture", "irrigation_underwatering", "irrigation_overwatering"}
-
-
-def same_card_labels(labels, expected) -> set:
-    """`labels` with the water-card aliases read as water_level_risk when the truth expects water_level_risk."""
-    water = "water_level_risk" in expected
-    return {"water_level_risk" if water and label in WATER_CARD_ALIASES else label for label in labels}
 # Fields a card is built from, per rule: a raise of that rule during a fault on one of them is a wrong card.
 RULE_FIELDS = {
     "ph_out_of_range": ("ph",),
@@ -94,9 +85,9 @@ METRIC_DEFINITIONS = {
     "dead_clock": "the device stamped 1970: expected to be rejected by Core (delivery 422 or not stored)",
     "false_alarm": "a raise whose sample time is in no episode's window (real episodes: same rule, until its clear window ends; fault episodes: any rule)",
     "card_labels": "labels matched by any rule in rules.yaml except the sensor family (action check_sensor: sensor_check, sensor_flatline), i.e. labels that make an advice card",
-    "normal_frame_with_card": "offline: frame the truth log calls normal where the pipeline produced a card label the truth does not expect (the one equivalence: low_moisture, high_moisture, irrigation_underwatering and irrigation_overwatering are the same card as an expected water_level_risk)",
+    "normal_frame_with_card": "offline: frame the truth log calls normal where the pipeline produced a card label the truth does not expect",
     "normal_frame_with_sensor_check": "offline: frame the truth log calls normal where the pipeline produced a sensor_check label, split into outside recovering_from tails, inside tails (expected lingering) and event aftermath (within an hour of a real event's end: the real change lingers, for example substrate EC after a dry spell)",
-    "wrong_cards": "offline: sensor-fault frames whose card labels differ from the card labels of the truth's expected_labels (the one equivalence: low_moisture, high_moisture, irrigation_underwatering and irrigation_overwatering count as an expected water_level_risk)",
+    "wrong_cards": "offline: sensor-fault frames whose card labels differ from the card labels of the truth's expected_labels",
     "trusted_wrong_cards": "wrong_cards frames where trust_verdict is not cannot_confirm: a wrong card still shown as reliable",
     "cannot_confirm_frames": "offline: sensor-fault frames with trust_verdict cannot_confirm",
     "partial_frames": "offline: sensor-fault frames with trust_verdict partial",
@@ -561,8 +552,7 @@ class Grader:
                     out["normal_frames"] += 1
                     out["normal_tail_frames"] += tail
                     # A card label the truth still expects (an event just stopped, the true state not yet back) is right.
-                    out["normal_with_card"] += bool(same_card_labels(got["card_labels"], f.expect["expected_labels"])
-                                                    - set(f.expect["expected_labels"]))
+                    out["normal_with_card"] += bool(set(got["card_labels"]) - set(f.expect["expected_labels"]))
                     if got["sensor_check_labels"]:
                         aftermath = any(z == f.zone and start <= f.time <= end + timedelta(seconds=AFTERMATH_S)
                                         for z, start, end in self.event_windows())
@@ -572,7 +562,7 @@ class Grader:
                 elif kind in ("sensor_fault", "both"):
                     out["faulty_frames"] += 1
                     wanted = sorted(set(f.expect["expected_labels"]) & card_rules)
-                    wrong = sorted(same_card_labels(got["card_labels"], wanted)) != wanted
+                    wrong = sorted(got["card_labels"]) != wanted
                     out["wrong_cards"] += wrong
                     out["trusted_wrong_cards"] += wrong and got["trust"] != "cannot_confirm"
                     out["cannot_confirm_frames"] += got["trust"] == "cannot_confirm"

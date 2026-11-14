@@ -1,9 +1,9 @@
 """Every label a reasoner can emit either matches an automation rule or is listed here as "no card on purpose".
 
 A label with no rule is dropped by the automation engine: the operator sees nothing, however serious the reading.
-That is how `sensor_anomaly` (an extreme pH or EC the sensor check still accepts) and the water reasoner's moisture
-labels went without a card. The emitted labels are read from the reasoners' own label sets, so a label added to a
-reasoner shows up here without anyone remembering to update this file.
+That is how `sensor_anomaly` (an extreme pH or EC the sensor check still accepts) went without a card; the water
+reasoner's moisture labels are listed below as a deliberate gap. The emitted labels are read from the reasoners' own
+label sets, so a label added to a reasoner shows up here without anyone remembering to update this file.
 """
 
 import ast
@@ -31,6 +31,13 @@ NO_CARD_ON_PURPOSE = {
     "actuator_conflict": "only blocks direct_actuator_control in the safety gate; needs actuator states that Core packets do "
                          "not carry yet, so there is nothing for an operator card to say (owner to confirm)",
 }
+# The water reasoner's moisture labels: its 28 % / 78 % limits are unvalidated and raise a card before the simulator's
+# truth counts an event; a card is raised only at the tomato water_level_risk limits (10 % / 85 %). Owner decision pending.
+for _label in ("low_moisture", "high_moisture", "irrigation_underwatering", "irrigation_overwatering"):
+    NO_CARD_ON_PURPOSE[_label] = (
+        "the water reasoner's 28 % / 78 % limits are unvalidated and raise a card before the simulator's truth counts "
+        "an event; a card is raised only at the tomato water_level_risk limits (10 % / 85 %); owner decision pending")
+
 
 
 def rule_labels() -> set:

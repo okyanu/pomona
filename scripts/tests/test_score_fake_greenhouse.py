@@ -343,23 +343,8 @@ def test_aftermath_of_a_real_event_is_counted_apart_offline():
     assert level["normal_with_sensor_check_event_aftermath"] == 3 and level["normal_with_sensor_check_outside_tail"] == 0
 
 
-def test_labels_of_the_same_rule_are_the_same_card_when_counting_unexpected_cards():
-    # The truth expects water_level_risk (an event's tail, or a fault); the water reasoner's labels sit on the same
-    # water_level_check card, so they are not "unexpected". A card of another rule still is.
-    water = ["water_level_risk", "low_moisture", "irrigation_underwatering"]
-    rows = [row(t, A, kind="normal", expected=["water_level_risk"]) for t in range(4)]
-    cards = {0: water, 1: ["low_moisture"], 2: ["high_ec"], 3: water + ["high_ec"]}
-    info = {(A, t): {"labels": c, "trust": "trusted", "vetoed_fields": [], "card_labels": c, "sensor_check_labels": []}
-            for t, c in cards.items()}
-    assert score.Grader(rows, [], RULES, DEFAULTS, info).reading_level()["normal_with_card"] == 2  # ticks 2 and 3
-    faulty = [row(t, A, faults=[("stuck", "substrate_moisture_pct")], expected=["water_level_risk"]) for t in range(2)]
-    info = {(A, 0): info[(A, 0)], (A, 1): info[(A, 2)]}
-    level = score.Grader(faulty, [], RULES, DEFAULTS, info).reading_level()
-    assert level["faulty_frames"] == 2 and level["wrong_cards"] == 1  # the water card is the right one, high_ec is not
-
-
-def test_only_the_water_labels_are_interchangeable_other_labels_of_one_rule_are_different_cards():
-    # low_ph and high_ph are both on the ph_out_of_range rule, but they are different cards (as on main).
+def test_labels_of_one_rule_are_different_cards():
+    # low_ph and high_ph are both on the ph_out_of_range rule, but they are different cards.
     def level(expected, got, kind):
         rows = [row(0, A, kind="normal", expected=[expected])] if kind == "normal" else \
             [row(0, A, faults=[("stuck", "ph")], expected=[expected])]
@@ -369,8 +354,6 @@ def test_only_the_water_labels_are_interchangeable_other_labels_of_one_rule_are_
     assert level("low_ph", "low_ph", "fault")["wrong_cards"] == 0
     assert level("low_ph", "high_ph", "normal")["normal_with_card"] == 1
     assert level("low_ph", "low_ph", "normal")["normal_with_card"] == 0
-    assert level("water_level_risk", "high_moisture", "fault")["wrong_cards"] == 0  # the water alias still holds
-    assert level("low_moisture", "water_level_risk", "fault")["wrong_cards"] == 1  # but only next to water_level_risk
 
 
 def test_extreme_reading_check_is_not_a_sensor_check_rule():

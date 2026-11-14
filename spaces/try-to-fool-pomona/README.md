@@ -15,6 +15,8 @@ tags:
 - hydroponics
 - tomato
 - fault-injection
+models:
+  - Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
 datasets:
   - Okyanus/greenhouse-sensor-data
 ---

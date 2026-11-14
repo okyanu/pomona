@@ -86,9 +86,10 @@ Extreme-reading card: a reading can be far outside any growing range (pH at or b
 EC above 10 or below 0.01) and still inside the sensor check's plausible range (pH 3 to 11, EC 0 to 12), so the probe
 passes and the reasoners call it `sensor_anomaly`. The `extreme_reading_check` rule (`check_sensor`, the usual 10
 minutes) turns that label into a card: "measure it by hand now: either the condition is real and serious, or the probe
-is failing". It suggests a check only, never a dose. The `water_level_check` rule also matches the water reasoner's
-own moisture labels (`low_moisture`, `high_moisture`, `irrigation_underwatering`, `irrigation_overwatering`), which
-trip at 28 % and 78 %, before the tomato reasoner's `water_level_risk` at 10 % and 85 %. A test
+is failing". It suggests a check only, never a dose. The water reasoner's own moisture labels (`low_moisture`, `high_moisture`,
+`irrigation_underwatering`, `irrigation_overwatering`) are reported by the water reasoner but do not raise a card yet,
+because their limits (28 % and 78 %) are not validated against real data; the `water_level_check` rule matches only the
+tomato reasoner's `water_level_risk` (10 % and 85 %). A test
 (`services/model-router/tests/test_rule_label_coverage.py`) fails when a reasoner can emit a label that no rule
 matches and that is not listed there as "no card on purpose".
 
