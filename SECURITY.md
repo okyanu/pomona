@@ -36,6 +36,10 @@ random `MQTT_PASSWORD` into your gitignored `.env`; Docker Compose refuses to st
 The broker builds its password file inside the container at start, so no password file is kept on the host.
 Every client (Core, the simulators, device firmware) must use the same `MQTT_USERNAME` / `MQTT_PASSWORD`.
 
+- By default Docker publishes MQTT (1883), Core (8080) and the dashboard (3000) on `127.0.0.1` only, and the
+  internal services (8081, 8082, 8084, 8085, 11434) always on `127.0.0.1`. To let real devices on your network reach
+  the broker and Core, set `POMONA_BIND_ADDRESS=0.0.0.0` (or the machine's LAN address) in `.env`. That also opens
+  the dashboard, whose approve/reject has no login, so do it only on a network you trust and set `API_KEY`.
 - Port 1883 is plain MQTT without TLS: the login and the readings cross the network unencrypted. It is for the
   local network only. Do not port-forward it or publish it to the internet.
 - If you can, keep sensors on their own network or VLAN, apart from phones and laptops.

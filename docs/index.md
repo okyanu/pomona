@@ -113,7 +113,7 @@ then move to the code, models, or live API without losing context.
 | Capability | Current state |
 |---|---|
 | Sensor ingestion | MQTT and REST ingestion with SQLite persistence |
-| Dashboard | Read-only sensor, guarded-pipeline, audit, and service views |
+| Dashboard | Monitoring views (sensors, guarded pipeline, audit, services); suggestions can be approved or rejected by hand, nothing is actuated |
 | Reasoning | Deterministic rules plus guarded local-model routes |
 | Safety | Dedicated deterministic safety checker and actuator-command gate |
 | Automation | YAML rules produce suggestions with manual approve/reject decisions |
@@ -143,7 +143,7 @@ In a second terminal:
 Model weights and published datasets stay on Hugging Face; platform code, schemas, routing, and deterministic safety logic stay on GitHub.
 
 - [Pomona model and dataset collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9)
-- [Tomato risk reasoner](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora)
+- [Tomato risk reasoner](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): experimental: v0.1.7 learned a training-template shortcut and is advisory only, the deterministic rules decide
 - [Water and irrigation reasoner](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora)
 - [Greenhouse sensor dataset](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data)
 

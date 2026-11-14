@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,7 +28,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r services/${{ matrix.service }}/requirements.txt pytest httpx pyyaml
+          pip install -r services/${{ matrix.service }}/requirements.txt -c services/${{ matrix.service }}/constraints.txt pytest httpx pyyaml
 
       - name: Run tests
         working-directory: services/${{ matrix.service }}
@@ -34,3 +37,96 @@ jobs:
       - name: Dataset contract and evaluation hygiene
         if: matrix.service == 'model-router'
         run: python -m pytest scripts/datasets/tests -q
+
+  # The rest of the test estate, mirroring `make test-local`. The two pytest runs stay SEPARATE processes:
+  # scripts/tests next to other suites in one process is a known module-pollution failure (the `app` package).
+  scripts-and-simulators:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            -r services/core/requirements.txt \
+            -r services/model-router/requirements.txt \
+            -r services/automation-engine/requirements.txt \
+            -r examples/simulators/requirements.txt \
+            -c constraints-dev.txt \
+            pytest httpx pyyaml
+
+      - name: Simulator tests
+        run: python -m pytest examples/simulators/tests -q
+
+      - name: Script tests
+        run: python -m pytest scripts/tests -q
+
+  # The public demos' JavaScript must match the Python rules (the Makefile targets generate cases with Python, then
+  # compare in node). test-demo hard-codes services/model-router/.venv, so create the venv at that path.
+  demo-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create the model-router venv the Makefile expects
+        run: |
+          python -m venv services/model-router/.venv
+          services/model-router/.venv/bin/pip install -r services/model-router/requirements.txt -c services/model-router/constraints.txt
+
+      - name: Sensor Data Checker parity
+        run: make test-checker
+
+      - name: Greenhouse demo parity
+        run: make test-demo
+
+      - name: pH Calibration Checker parity
+        run: make test-ph-checker
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: MQTT_PASSWORD=ci docker compose config -q
+
+  # Builds every image from its Dockerfile (pip installs the exact pins in constraints.txt), so a pin that stops
+  # installing is caught here and not on a user's machine. Nothing is started.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the images
+        run: MQTT_PASSWORD=ci docker compose build
+
+  # Host tests for the logger's decision logic (commands as documented in devices/esp32-cress-logger/README.md).
+  firmware-host-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: devices/esp32-cress-logger
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload logic
+        run: |
+          g++ -std=c++17 -Wall -Iinclude extras/test_upload_logic.cpp -o "$RUNNER_TEMP/test_upload_logic"
+          "$RUNNER_TEMP/test_upload_logic"
+
+      - name: pH calibration
+        run: |
+          g++ -std=c++17 -Wall -Iinclude extras/test_ph_calibration.cpp -o "$RUNNER_TEMP/test_ph_calibration"
+          "$RUNNER_TEMP/test_ph_calibration"

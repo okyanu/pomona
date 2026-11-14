@@ -36,6 +36,13 @@ skip only the step that crosses the gap (no difference is taken between the read
 interval across it is not a sample interval); the noise window keeps its normal length over the remaining steps.
 `rules.js` (sensor-data-checker and demo copies) and `persistent.js` mirror this and the parity cases cover it.
 
+## Sample times ahead of the clock
+
+A sample time more than `MAX_FUTURE_SAMPLE_S` ahead of the router's clock (default 300 s, the same setting as Core's ingest
+limit, so a sample Core accepts is not called a doubtful clock a second later; 0 means 60 s) is flagged
+`insufficient_context` ("verify device clock"). `derive_sensor_quality` keeps its own default of 60 s for callers that pass
+nothing (the browser demos mirror that default and their parity cases use it); the service passes the setting.
+
 ## Placement
 
 ```text

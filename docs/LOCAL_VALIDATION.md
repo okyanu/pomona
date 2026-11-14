@@ -4,11 +4,19 @@ Pomona can be validated without Docker or remote model publication.
 
 ## Commands
 
-Run the service contract tests:
+Create the test environments once (one Python 3.11 venv per service group, with pinned versions):
+
+```bash
+make bootstrap
+```
+
+Run the service contract tests (`make test` is the same command):
 
 ```bash
 make test-local
 ```
+
+If a venv is missing, the target stops and tells you to run `make bootstrap`.
 
 Run the isolated four-service smoke test:
 
@@ -75,9 +83,12 @@ Validate the running Docker database backup and recovery path:
 make backup-recovery-validation
 ```
 
-This backs up Core's live SQLite database, restarts Core, verifies the latest
-event, and restores the backup into a temporary database for verification. It
-does not replace the live database during restore.
+This runs `scripts/backup.sh` (SQLite online backup of Core's and the automation
+engine's databases inside the running containers), restarts Core, verifies the
+latest event, and restores the Core backup into a temporary database for
+verification. It does not replace the live database during restore. The
+Docker restore itself (`scripts/restore.sh`) is described in
+[INSTALL.md](INSTALL.md#backup-and-restore-docker).
 
 The benchmark report from the software-validation scenarios is written to the
 ignored path `private/colab/outputs/software_validation_benchmark.json`.

@@ -44,6 +44,10 @@ PESTICIDE_AND_DIAGNOSIS_BLOCKS = [
 # ("hydroponic_greenhouse"), and the hardware event contract ("hydroponic").
 HYDROPONIC_SYSTEM_TYPES = {"controlled_greenhouse", "hydroponic_greenhouse", "hydroponic"}
 
+# This module is a copy of services/model-router/app/tomato_reasoner.py (a separate image cannot import the router's
+# reasoner_thresholds.py): same numbers, same handling of numeric strings, vetoed_fields and not_expected_fields.
+# services/model-router/tests/test_tomato_vpd.py fails when the two answer differently, including at every threshold.
+
 # Vapour-pressure deficit (kPa) from air temperature and humidity (FAO-56 eq. 11, Magnus form).
 # Below LOW_VPD_KPA leaves stay wet long enough for grey mould and leaf mould even when humidity
 # is under 85 % (e.g. 77 % at 15 C on a cool night). Above HIGH_VPD_KPA tomato stomata close and
@@ -57,12 +61,35 @@ def add_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
+def numeric(value: Any) -> Optional[float]:
+    """A finite number, or a string that holds one; anything else (None, bool, text, NaN) is None.
+
+    Same as services/model-router/app/sensor_quality.numeric.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, str):
+        try:
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) else None
+        except ValueError:
+            return None
+    return None
+
+
 def missing_input_fields(input_data: dict[str, Any]) -> list[str]:
     critical = ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm"]
     system_type = input_data.get("system_type")
     if system_type == "greenhouse_substrate":
         critical.extend(["substrate_temperature_c", "substrate_moisture_pct"])
-    return [field for field in critical if input_data.get(field) is None]
+    vetoed = input_data.get("vetoed_fields") or ()  # set by the sensor-quality veto: already reported there
+    # Set for a device of a multi-device zone that does not carry the field (docs/design/multi-device-zones.md 1.3).
+    not_expected = input_data.get("not_expected_fields") or ()
+    return [field for field in critical
+            if numeric(input_data.get(field)) is None and field not in vetoed and field not in not_expected]
+
 
 def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Optional[float]:
     """VPD in kPa, or None when either reading is missing, non-numeric or implausible."""
@@ -75,12 +102,14 @@ def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Op
 
 
 def is_actuator_conflict(input_data: dict[str, Any]) -> bool:
-    states = input_data.get("actuator_states") or {}
-    humidity = input_data.get("humidity_pct")
-    moisture = input_data.get("substrate_moisture_pct")
-    screen_energy = states.get("screen_energy_pct")
-    screen_blackout = states.get("screen_blackout_pct")
-    water_flow = states.get("water_flow_duration_min")
+    states = input_data.get("actuator_states")
+    if not isinstance(states, dict):  # absent, or not an object: no actuator information
+        states = {}
+    humidity = numeric(input_data.get("humidity_pct"))
+    moisture = numeric(input_data.get("substrate_moisture_pct"))
+    screen_energy = numeric(states.get("screen_energy_pct"))
+    screen_blackout = numeric(states.get("screen_blackout_pct"))
+    water_flow = numeric(states.get("water_flow_duration_min"))
 
     if humidity is not None and humidity >= 88:
         if (screen_energy is not None and screen_energy >= 80) or (
@@ -103,12 +132,12 @@ def derive_tomato_risk(input_data: dict[str, Any]) -> dict[str, Any]:
         add_unique(risks, "missing_critical_data")
         safe_next_checks.append("restore or manually verify missing critical sensor readings")
 
-    ph = input_data.get("ph")
-    ec = input_data.get("ec_ms_cm")
-    air_temp = input_data.get("air_temperature_c")
-    humidity = input_data.get("humidity_pct")
-    substrate_temp = input_data.get("substrate_temperature_c")
-    substrate_moisture = input_data.get("substrate_moisture_pct")
+    ph = numeric(input_data.get("ph"))
+    ec = numeric(input_data.get("ec_ms_cm"))
+    air_temp = numeric(input_data.get("air_temperature_c"))
+    humidity = numeric(input_data.get("humidity_pct"))
+    substrate_temp = numeric(input_data.get("substrate_temperature_c"))
+    substrate_moisture = numeric(input_data.get("substrate_moisture_pct"))
     system_type = input_data.get("system_type")
 
     if ph is not None:
@@ -129,7 +158,7 @@ def derive_tomato_risk(input_data: dict[str, Any]) -> dict[str, Any]:
         elif ec >= 4.5:
             add_unique(risks, "high_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
-        elif system_type in HYDROPONIC_SYSTEM_TYPES and ec <= 0.8:
+        elif isinstance(system_type, str) and system_type in HYDROPONIC_SYSTEM_TYPES and ec <= 0.8:
             add_unique(risks, "low_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
         elif system_type == "greenhouse_substrate" and ec <= 0.05:

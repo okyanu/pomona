@@ -4,6 +4,8 @@
 
 **Open edge AI platform for agriculture** — MQTT ingest, reasoning, deterministic safety checks, and dashboards for greenhouse and hydroponic systems.
 
+<p align="left">Pomona is for researchers, students, and hobby and small growers who want to experiment with greenhouse monitoring. Today it checks whether sensor readings can be believed before it gives advice: step, freeze, noise and drift checks (slow drift of some readings is still not caught), where a failed check vetoes the reading and raises a sensor card. It then gives suggestion-only advice that a person approves or rejects, and nothing is actuated. It ships a fake greenhouse with injected sensor faults, a truth log and a scorer, so you can try all of this with no hardware. It is software only so far: no bench-tested hardware and no field data.</p>
+
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform version](https://img.shields.io/badge/version-v0.1.0--alpha.1-orange.svg)](VERSION)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -37,19 +39,24 @@ cp .env.example .env
 ./scripts/sim.sh            # new terminal
 curl http://localhost:8080/health
 python3 examples/tomato_risk_quickstart.py   # real sensor JSON -> risk labels
+# with the stack up, open the dashboard at http://localhost:3000
 ```
 
 **Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-**Optional:** Python 3.9+ for simulator/tests
+**Also needed for the simulator and tests:** Python 3.11 on the host (`./scripts/sim.sh`, `make test-local`). The Docker stack alone does not need it.
 
 | Service | URL |
 |---------|-----|
+| Dashboard | http://localhost:3000 |
 | Core API | http://localhost:8080 |
 | Model router | http://localhost:8081 |
 | MQTT | localhost:1883 (login from `.env`, see [SECURITY.md](SECURITY.md)) |
 
+Docker publishes MQTT, Core and the dashboard on this computer only by default. To let real devices on your
+network connect, set `POMONA_BIND_ADDRESS=0.0.0.0` in `.env` (trusted network only; see [SECURITY.md](SECURITY.md)).
+
 Full guide: **[docs/INSTALL.md](docs/INSTALL.md)**
-**Target:** one-command full stack (UI + DB in Docker) — [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md)
+One-command full stack (UI + database in Docker): [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md)
 Local validation details: **[docs/LOCAL_VALIDATION.md](docs/LOCAL_VALIDATION.md)**
 
 ### Local validation without Docker
@@ -90,6 +97,14 @@ Sensor / Simulator → MQTT → pomona-core → DB → model-router
 
 More detail: **[docs/architecture.md](docs/architecture.md)**
 
+## 📊 Status and roadmap
+
+**Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **8 active/partial** · **Phase 2 is the primary product focus**
+
+Phases 0 and 1 are done. Phases 2, 3, 4, 5, 6, 7, 9 and 10 are partial: some pieces exist, which does not mean the phase is being worked on now. Phase 8 (ESP32 devices) is still planned: logger firmware compiles; not yet bench-tested, no field data. Phase 2 hardening continues; current focus is sensor-check coverage on real logs, fake-greenhouse scoring and hardware bench testing. The maintainer's plan for the next three months is in **[docs/NEXT_90_DAYS.md](docs/NEXT_90_DAYS.md)**.
+
+The one full phase table is **[docs/PHASES.md](docs/PHASES.md)**. See also [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [ROADMAP.md](docs/ROADMAP.md) · [VERSIONING.md](docs/VERSIONING.md)
+
 ## 🤝 Open source & contribute
 
 | | |
@@ -103,7 +118,7 @@ More detail: **[docs/architecture.md](docs/architecture.md)**
 
 **Good first contributions:** tests, docs, simulators, crop templates, dashboard polish.
 
-Fork → branch → `make test` → open PR.
+Fork → branch → `make test-local` → open PR. Environment setup is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 🔗 Related open repos
 
@@ -132,7 +147,7 @@ Pomona keeps platform code, routing, deterministic safety logic, and metadata in
 | Tomato risk reasoner `v0.1.7` | Published on Hugging Face, experimental: learned a training shortcut and answers `[]` on 146 of 153 varied benchmark cases ([details](docs/TOMATO_RISK_REASONER.md#evaluation-snapshot)) | ⚠️ Research only; the guarded route uses deterministic rules |
 | Water/irrigation reasoner `v0.1.8` | Published release candidate; evaluated only on synthetic, rule-derived cases | ⚠️ Advisory only, behind deterministic validation |
 | Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ⚠️ Owner's local integration tests only; not available publicly |
-| Safety triage reasoner `v0.1` | Local candidate, not published | ⚠️ Owner's local integration tests only; not available publicly |
+| Safety triage reasoner `v0.1` | Local candidate, failed its publish gate; not published | ⚠️ Owner's local integration tests only; not available publicly |
 | Actuator command gate `v0.1` | Published research preview, below standalone release gate | ⚠️ Advisory only; deterministic checker required |
 | Actuator command gate `v0.1.1-hardcases` | Regression in local eval | ❌ Do not use |
 | Actuator command gate `v0.1.2-correction` | Regression on a held-out (mostly generated) eval | ❌ Do not use |
@@ -149,26 +164,6 @@ sensor-quality
 ```
 
 Future model families are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/SMALL_MODEL_FACTORY.md](docs/SMALL_MODEL_FACTORY.md).
-
-## 📊 Project phases
-
-**Platform `v0.1.0-alpha.1`** · **11 phases** · **2 completed** · **8 active/partial** · **Phase 2 is the primary product focus**
-
-| Phase | Name | Status |
-|-------|------|--------|
-| 0 | Project setup & open source | ✅ |
-| 1 | Local MVP (Docker, core, simulator) | ✅ |
-| 2 | Dashboard + database | ⏳ partial — local SQLite, dashboard, audit, Docker, simulation, and backup validation complete; optional sensor-ingestion auth added; broader hardening remains |
-| 3 | Tomato reasoner | ⏳ partial — published adapter + guarded API route |
-| 4 | Safety checker | ⏳ partial — deterministic tomato/actuator gates |
-| 5 | LLM advisor | ⏳ partial — published adapter + router contract |
-| 6 | Automation engine | ⏳ partial — YAML rules, dashboard evaluate/approve/reject, bounded SQLite history in local Compose; [public API demo](https://automation-engine-fawn.vercel.app) remains ephemeral |
-| 7 | Public demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live |
-| 8 | ESP32 devices | ⬜ — logger firmware compiles; not yet bench-tested, no field data |
-| 9 | Model registry | ⏳ partial — public YAML registry + lifecycle metadata |
-| 10 | Fine-tune pipeline | ⏳ partial — builders, validators, Colab, clean eval |
-
-Details & update rules: **[docs/PHASES.md](docs/PHASES.md)** · [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [VERSIONING.md](docs/VERSIONING.md)
 
 ## 📄 License
 

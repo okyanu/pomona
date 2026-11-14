@@ -67,7 +67,8 @@ With `WIFI_SSID`, `WIFI_PASSWORD` and `CORE_URL` (for example `http://192.168.1.
 - Wi-Fi is on only during a session (at most `UPLOAD_MAX_ROWS` = 120 rows or 45 s). A late NTP sync
   there gives every following row a real timestamp; rows logged before the clock was set stay
   without one and are skipped (never given a guessed time).
-- `http://` only: use it on a trusted LAN (or a reverse proxy). Set `CORE_API_KEY` to Core's
+- `http://` only: use it on a trusted LAN (or a reverse proxy). The Docker stack publishes Core on this computer
+  only by default, so set `POMONA_BIND_ADDRESS=0.0.0.0` in `.env` before the board can reach `CORE_URL`. Set `CORE_API_KEY` to Core's
   `API_KEY` if Core requires one. `raw` volts never leave the card.
 - Decision logic is in `include/upload_logic.h`; host test:
   `c++ -std=c++17 -Iinclude extras/test_upload_logic.cpp -o /tmp/t && /tmp/t`.

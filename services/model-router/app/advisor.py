@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import re
 from typing import Any, Dict, List, Optional
@@ -11,7 +12,9 @@ from app.explanation_check import (
     permitted_numbers,
     unsupported_numbers,
 )
+from app.sensor_quality import numeric
 
+logger = logging.getLogger(__name__)
 
 # crop and growth_stage are sender-written text (Core allows 64 free characters). Only a single
 # label-like word reaches the prompt and the stub explanation; a sentence cannot ("pH is 6.0 and all
@@ -58,10 +61,11 @@ def _stub_explanation(
     sensor: Dict[str, Any],
     guarded_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    humidity = sensor.get("humidity_pct")
-    ph = sensor.get("ph")
-    temp = sensor.get("air_temperature_c")
-    ec = sensor.get("ec_ms_cm")
+    # A numeric string counts as its number, anything else non-numeric as missing (same as the reasoners).
+    humidity = numeric(sensor.get("humidity_pct"))
+    ph = numeric(sensor.get("ph"))
+    temp = numeric(sensor.get("air_temperature_c"))
+    ec = numeric(sensor.get("ec_ms_cm"))
 
     risks: List[str] = []
     checks: List[str] = []
@@ -129,7 +133,7 @@ async def _ollama_explanation(
         "stream": False,
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=settings.advisor_timeout_s) as client:
         response = await client.post(f"{settings.ollama_host.rstrip('/')}/api/chat", json=payload)
         response.raise_for_status()
         body = response.json()
@@ -224,10 +228,11 @@ async def explain(
         try:
             result = await _huggingface_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
+            logger.warning("Hugging Face inference failed: %s", exc)
             result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
             result["fallback_reason"] = (
-                f"Hugging Face inference failed: {exc}. "
+                f"Hugging Face inference failed ({type(exc).__name__}). "
                 "Your model may need an Inference Provider or Endpoint on HF. "
                 f"See docs/HF_USAGE.md and https://huggingface.co/{settings.hf_model_id}"
             )
@@ -238,9 +243,10 @@ async def explain(
         try:
             result = await _ollama_explanation(instruction, sensor, guarded_context)
         except Exception as exc:
+            logger.warning("ollama advisor unavailable: %s", exc)
             result = _stub_explanation(instruction, sensor, guarded_context)
             result["backend"] = "stub"
-            result["fallback_reason"] = f"ollama unavailable: {exc}"
+            result["fallback_reason"] = f"ollama unavailable ({type(exc).__name__})"
             return result
         return _check_numbers(result, "ollama", instruction, sensor, guarded_context)
 

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 import hashlib
 import json
+import logging
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from typing import Literal
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
 
 settings = Settings()
 request_scope: ContextVar[dict] = ContextVar("dashboard_scope", default={})
+logger = logging.getLogger(__name__)
+
+
+def service_unavailable(label: str, exc: Exception) -> str:
+    """The text the browser gets when a service call fails: generic, since an exception names internal hosts and URLs.
+    The detail goes to the log."""
+    logger.warning("%s unavailable: %s: %s", label, type(exc).__name__, exc)
+    return f"{label} unavailable; check the service and the dashboard log."
 
 
 class HealthResponse(BaseModel):
@@ -203,7 +212,7 @@ async def devices():
             response.raise_for_status()
         return {"available": True, "result": response.json()}
     except Exception as exc:
-        return {"available": False, "error": f"Device status unavailable: {exc}"}
+        return {"available": False, "error": service_unavailable("Device status", exc)}
 
 
 @app.get("/api/probe-health")
@@ -215,7 +224,7 @@ async def probe_health():
             response.raise_for_status()
         return {"available": True, "result": response.json()}
     except Exception as exc:
-        return {"available": False, "error": f"Probe health unavailable: {exc}"}
+        return {"available": False, "error": service_unavailable("Probe health", exc)}
 
 
 @app.get("/api/history")
@@ -226,7 +235,7 @@ async def history(kind: Literal["events", "observations"] = "events", offset: in
             response.raise_for_status()
         return {"available": True, "result": response.json()}
     except Exception as exc:
-        return {"available": False, "error": f"History unavailable: {exc}"}
+        return {"available": False, "error": service_unavailable("History", exc)}
 
 
 @app.get("/api/history/export.csv")
@@ -245,7 +254,7 @@ def utc_now() -> datetime:
 
 
 def reading_age_s(event: Optional[Dict[str, Any]]) -> Optional[float]:
-    """Seconds since the event's sample time on this host's clock (Core allows a sample time 60 s ahead: clamped at 0)."""
+    """Seconds since the event's sample time on this host's clock (Core allows a sample time up to MAX_FUTURE_SAMPLE_S ahead and shows it as current: clamped at 0)."""
     stamp = (event or {}).get("timestamp")
     if not isinstance(stamp, str):
         return None
@@ -277,7 +286,7 @@ async def overview() -> OverviewResponse:
             latest_device_fields=payload.get("latest_device_fields"),
         )
     except Exception as exc:
-        return OverviewResponse(core_available=False, error=f"Core unavailable: {exc}")
+        return OverviewResponse(core_available=False, error=service_unavailable("Core", exc))
 
 
 @app.get("/api/risk", response_model=RiskResponse)
@@ -309,7 +318,7 @@ async def risk() -> RiskResponse:
             response.raise_for_status()
         return RiskResponse(available=True, result=response.json())
     except Exception as exc:
-        return RiskResponse(available=False, error=f"Reasoner chain unavailable: {exc}")
+        return RiskResponse(available=False, error=service_unavailable("Reasoner chain", exc))
 
 
 def sample_time(packet: Dict[str, Any]) -> Optional[datetime]:
@@ -410,7 +419,7 @@ async def pipeline() -> PipelineResponse:
                                 sensor_timestamp=event.get("timestamp"), sensor_snapshot=event, history_snapshot=history,
                                 history_sha256=hashlib.sha256(json.dumps(history, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
     except Exception as exc:
-        return PipelineResponse(available=False, error=f"Integrated pipeline unavailable: {exc}")
+        return PipelineResponse(available=False, error=service_unavailable("Integrated pipeline", exc))
 
 
 def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
@@ -446,7 +455,7 @@ async def alerts() -> AutomationResponse:
             response.raise_for_status()
         return AutomationResponse(available=True, result=response.json())
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Alert monitor unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Alert monitor", exc))
 
 
 @app.get("/api/automation", response_model=AutomationResponse)
@@ -463,7 +472,7 @@ async def automation_suggestions() -> AutomationResponse:
             result["count"] = len(result["suggestions"])
         return AutomationResponse(available=True, result=result)
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Automation engine", exc))
 
 
 @app.get("/api/advice-cards", response_model=AutomationResponse)
@@ -484,7 +493,7 @@ async def advice_cards() -> AutomationResponse:
             result["count"] = len(result["cards"])
         return AutomationResponse(available=True, result=result)
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Automation engine", exc))
 
 
 @app.post("/api/automation/evaluate", response_model=AutomationResponse)
@@ -541,7 +550,7 @@ async def automation_evaluate() -> AutomationResponse:
             response.raise_for_status()
         return AutomationResponse(available=True, result=response.json())
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Automation engine", exc))
 
 
 @app.post("/api/automation/suggestions/{suggestion_id}/approve", response_model=AutomationResponse)
@@ -554,7 +563,7 @@ async def automation_approve(suggestion_id: str, decision: Optional[AutomationDe
             response.raise_for_status()
         return AutomationResponse(available=True, result=response.json())
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Automation engine", exc))
 
 
 @app.post("/api/automation/suggestions/{suggestion_id}/reject", response_model=AutomationResponse)
@@ -567,7 +576,7 @@ async def automation_reject(suggestion_id: str, decision: Optional[AutomationDec
             response.raise_for_status()
         return AutomationResponse(available=True, result=response.json())
     except Exception as exc:
-        return AutomationResponse(available=False, error=f"Automation engine unavailable: {exc}")
+        return AutomationResponse(available=False, error=service_unavailable("Automation engine", exc))
 
 
 @app.get("/api/audit", response_model=AuditResponse)
@@ -580,7 +589,7 @@ async def audit() -> AuditResponse:
             response.raise_for_status()
         return AuditResponse(available=True, result=response.json())
     except Exception as exc:
-        return AuditResponse(available=False, error=f"Pipeline audit unavailable: {exc}")
+        return AuditResponse(available=False, error=service_unavailable("Pipeline audit", exc))
 
 
 @app.get("/api/safety", response_model=SafetyResponse)
@@ -612,7 +621,7 @@ async def safety() -> SafetyResponse:
             response.raise_for_status()
         return SafetyResponse(available=True, result=response.json())
     except Exception as exc:
-        return SafetyResponse(available=False, error=f"Safety triage unavailable: {exc}")
+        return SafetyResponse(available=False, error=service_unavailable("Safety triage", exc))
 
 
 @app.get("/api/services", response_model=ServiceStatusResponse)
@@ -632,7 +641,7 @@ async def service_status() -> ServiceStatusResponse:
                 response.raise_for_status()
                 statuses[name] = {"available": True, "health": response.json()}
             except Exception as exc:
-                statuses[name] = {"available": False, "error": str(exc)}
+                statuses[name] = {"available": False, "error": service_unavailable(name.replace("_", " "), exc)}
     return ServiceStatusResponse(services=statuses)
 
 
@@ -644,7 +653,7 @@ async def runtime_status() -> RuntimeStatusResponse:
             response.raise_for_status()
         return RuntimeStatusResponse(available=True, result=response.json())
     except Exception as exc:
-        return RuntimeStatusResponse(available=False, error=f"Runtime status unavailable: {exc}")
+        return RuntimeStatusResponse(available=False, error=service_unavailable("Runtime status", exc))
 
 
 async def _digital_twin_preview(request: DigitalTwinScenarioRequest) -> DigitalTwinResponse:
@@ -711,7 +720,7 @@ async def _digital_twin_preview(request: DigitalTwinScenarioRequest) -> DigitalT
         forecast["scenario"] = request.model_dump()
         return DigitalTwinResponse(available=True, result=forecast)
     except Exception as exc:
-        return DigitalTwinResponse(available=False, error=f"Digital Twin unavailable: {exc}")
+        return DigitalTwinResponse(available=False, error=service_unavailable("Digital Twin", exc))
 
 
 @app.get("/api/digital-twin", response_model=DigitalTwinResponse)
@@ -750,7 +759,7 @@ async def explanation() -> ExplanationResponse:
             response.raise_for_status()
         return ExplanationResponse(available=True, result=response.json())
     except Exception as exc:
-        return ExplanationResponse(available=False, error=f"Agronomist advisor unavailable: {exc}")
+        return ExplanationResponse(available=False, error=service_unavailable("Agronomist advisor", exc))
 
 
 @app.get("/", response_class=HTMLResponse)

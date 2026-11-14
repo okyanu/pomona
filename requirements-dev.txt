@@ -1,7 +1,13 @@
-# Dev dependencies — install with: pip3 install -r requirements-dev.txt
+# Dev dependencies: everything needed to run every test suite (make test) and the linter.
+# Create the venvs with: make bootstrap     Update the pins with: make lock
 -r services/core/requirements.txt
+-r services/dashboard/requirements.txt
+-r services/safety-checker/requirements.txt
+-r services/digital-twin/requirements.txt
 -r services/model-router/requirements.txt
+-r services/automation-engine/requirements.txt
 -r examples/simulators/requirements.txt
 pytest>=8.0
 httpx>=0.28.0
 pyyaml>=6.0.0
+ruff>=0.8.0

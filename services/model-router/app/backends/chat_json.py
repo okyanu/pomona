@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.config import settings
+
 
 def parse_json_object(text: str) -> Dict[str, Any]:
     start = text.find("{")
@@ -47,7 +49,7 @@ async def ollama_chat_json(
         "format": output_schema or "json",
         "options": {"temperature": 0},
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=settings.reasoner_timeout_s) as client:
         response = await client.post(f"{host.rstrip('/')}/api/chat", json=payload)
         response.raise_for_status()
     return parse_json_object(response.json().get("message", {}).get("content", ""))
@@ -70,7 +72,7 @@ async def ollama_chat_json_array(
         "format": output_schema,
         "options": {"temperature": 0},
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=settings.reasoner_timeout_s) as client:
         response = await client.post(f"{host.rstrip('/')}/api/chat", json=payload)
         response.raise_for_status()
     return parse_json_array(response.json().get("message", {}).get("content", ""))
@@ -92,7 +94,7 @@ async def openai_compatible_chat_json(
     }
     if model:
         payload["model"] = model
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=settings.reasoner_timeout_s) as client:
         response = await client.post(f"{host.rstrip('/')}/v1/chat/completions", json=payload)
         response.raise_for_status()
     choices = response.json().get("choices") or []

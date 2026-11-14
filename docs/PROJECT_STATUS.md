@@ -4,14 +4,7 @@ Living record of completed work. **Update when a phase completes** — see check
 
 ## Phase progress (summary)
 
-| | |
-|---|---|
-| **Total phases** | 11 (Phase 0 – Phase 10) |
-| **Completed** | Phase 0 ✅, Phase 1 ✅ |
-| **Primary focus** | Phase 2 ⏳ |
-| **Active / partial** | Phases 2, 3, 4, 5, 6, 7, 9, 10 |
-| **Platform version** | `v0.1.0-alpha.1` |
-| **Canonical tracker** | [PHASES.md](./PHASES.md) |
+Platform `v0.1.0-alpha.1`, 11 phases (Phase 0 to Phase 10). Phases 0 and 1 are done; phases 2, 3, 4, 5, 6, 7, 9 and 10 are partial (some pieces exist, which does not mean the phase is being worked on now); Phase 8 is still planned. Primary focus: Phase 2. The one full phase table is [PHASES.md](./PHASES.md); this file does not copy it.
 
 Agents: read [PHASES.md](./PHASES.md) before starting work.
 
@@ -40,6 +33,13 @@ No phase completed; no hardware bench test, field data or model release claimed.
   calibration check, optional Wi-Fi upload of the SD log) and 3D-print designs
   for sensor stations, mounts and a probe lid. The firmware has not run on a
   board yet.
+- **Multi-device zones, slice 1.** Each device of a multi-device zone is judged on
+  its own (commit 8c23e0c, merged 9c90800; design in
+  [design/multi-device-zones.md](./design/multi-device-zones.md)): the router keeps a
+  separate history per device and expects only the fields that device reported, so an
+  offset between two probes no longer looks like noise and a device no longer raises a
+  `missing_*` alert that never clears. One-device zones are unchanged. Dashboard zone
+  views, the simulator, the scorer and the game are not multi-device yet (later slices).
 - **Models.** Tomato v0.1.7 was found to have learned a training-template
   shortcut (see [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)); the
   nutrient adapter's published scores are on synthetic cases (see
@@ -97,9 +97,8 @@ checks. This checkpoint does not complete a phase or approve a model release.
 | README | ✅ |
 | `docs/architecture.md` | ✅ |
 | `docs/ROADMAP.md` | ✅ |
-| `docs/DAILY_LOG.md` | ✅ |
 | `docs/CURSOR_RULES.md` | ✅ |
-| `docs/HF_MODEL_CARD_TODO.md` | ✅ |
+| Daily log and model-card to-do | Maintainer-only notes, kept locally and not published in this repository |
 | `LICENSE` (Apache-2.0) | ✅ |
 | Root `.gitignore` | ✅ |
 | This status file | ✅ |
@@ -163,7 +162,7 @@ checks. This checkpoint does not complete a phase or approve a model release.
 | Tomato risk `v0.1.7` | Published on Hugging Face, experimental | Research only; learned a training shortcut (2026-11-07); deterministic tomato rules decide |
 | Water/irrigation `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
 | Sensor quality `v0.1.1-boundary` | Local candidate, not published | Training paused; best label F1 0.684 on a 123-case holdout; rules do the work |
-| Safety triage `v0.1` | Local candidate, failed its publish gate | Local tests only; rules do the work |
+| Safety triage `v0.1` | Local candidate, failed its publish gate; not published | Local tests only; rules do the work |
 | Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker is final authority |
 | Actuator command gate `v0.1.1-hardcases` | Local regression | Do not use |
 | Actuator command gate `v0.1.2-correction` | Independent-eval regression | Do not use |
@@ -232,7 +231,7 @@ Simulator soak and physical sensor trials are still pending.
 
 **Goal:** Web UI + SQLite persistence.
 
-See `private/planning/ROADMAP.full.md` for deliverables (local).
+See `private/planning/ROADMAP.full.md` for deliverables (maintainer-only, local; not in the repository).
 
 ### Current local checkpoint (2026-07-21)
 
@@ -309,11 +308,10 @@ be extended to call the live model-router API once a public backend exists.
 
 ## When a phase completes — update checklist
 
-1. [PHASES.md](./PHASES.md) — status table + completed count
-2. [ROADMAP.md](./ROADMAP.md) — status column
-3. [PROJECT_STATUS.md](./PROJECT_STATUS.md) — deliverables section (this file)
-4. [README.md](https://github.com/okyanu/pomona/blob/main/README.md) — "Project phases" table
-5. `private/DAILY_LOG.md` — optional (local)
+1. [PHASES.md](./PHASES.md) — status table + completed count (the only full phase table)
+2. [PROJECT_STATUS.md](./PROJECT_STATUS.md) — deliverables section (this file) and the short summary at the top
+3. [ROADMAP.md](./ROADMAP.md) and [README.md](https://github.com/okyanu/pomona/blob/main/README.md) — check their one-sentence status summaries still match
+4. `private/DAILY_LOG.md` — optional (maintainer-only, local; not in the repository)
 
 ---
 
@@ -330,5 +328,5 @@ be extended to call the live model-router API once a public backend exists.
 - Read `AGENTS.md` and `docs/CURSOR_RULES.md` before coding
 - Add `/health` to every new service
 - Return JSON from every API endpoint
-- Update [PHASES.md](./PHASES.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](https://github.com/okyanu/pomona/blob/main/README.md) when a phase completes
-- Owner notes go in `private/` (gitignored)
+- Update [PHASES.md](./PHASES.md) and [PROJECT_STATUS.md](./PROJECT_STATUS.md) when a phase completes, then check the short summaries in [ROADMAP.md](./ROADMAP.md) and [README.md](https://github.com/okyanu/pomona/blob/main/README.md)
+- Owner notes go in `private/` (gitignored; maintainer-only, not in the repository)

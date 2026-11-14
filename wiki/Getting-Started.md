@@ -33,6 +33,8 @@ pip3 install -r requirements-dev.txt
 | Model router | http://localhost:8081 |
 | MQTT | localhost:1883 |
 
+Docker publishes these on this computer only by default; set `POMONA_BIND_ADDRESS=0.0.0.0` in `.env` to let devices on your network connect (trusted network only, set `API_KEY`).
+
 ## What works / doesn't
 
 | Works locally | Not yet |

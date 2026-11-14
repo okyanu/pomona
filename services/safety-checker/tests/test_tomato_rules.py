@@ -101,3 +101,24 @@ def test_actuator_conflict_blocks_direct_control():
 
     assert "actuator_conflict" in result["risk_labels"]
     assert "direct_actuator_control" in result["blocked_actions"]
+
+
+def test_vetoed_and_not_expected_fields_are_not_reported_missing_again():
+    reading = base_input()
+    reading.update(ph=None, ec_ms_cm=None, humidity_pct=None)
+    reading["vetoed_fields"] = ["ph"]
+    reading["not_expected_fields"] = ["ec_ms_cm"]
+
+    result = derive_tomato_risk(reading)
+
+    assert result["missing_data"] == ["humidity_pct"]
+
+
+def test_numeric_string_is_read_as_its_number_and_odd_actuator_states_do_not_crash():
+    reading = base_input()
+    reading.update(ph="9.9", air_temperature_c="35", actuator_states="on")
+
+    result = derive_tomato_risk(reading)
+
+    assert "sensor_anomaly" in result["risk_labels"] and "heat_stress" in result["risk_labels"]
+    assert "actuator_conflict" not in result["risk_labels"]

@@ -1,6 +1,6 @@
 # Possible Pomona repositories
 
-Where each piece of the ecosystem lives. **Split-first layout** (recommended).
+Where each piece of the ecosystem lives. **Split-first layout** (in use today): platform in `pomona`, ML training in `pomona-agronomist-llm`, weights on Hugging Face.
 
 ---
 
@@ -11,9 +11,10 @@ Where each piece of the ecosystem lives. **Split-first layout** (recommended).
 **This folder.** Everything needed to run the edge AI stack locally.
 
 ```text
-services/          core, dashboard, model-router, safety-checker, automation-engine
+services/          core, dashboard, model-router, safety-checker, digital-twin, automation-engine
 examples/          simulators
-devices/           ESP32 firmware (future)
+devices/           ESP32 firmware: esp32-cress-logger (compiles, not bench-tested); esp32-greenhouse-basic (not implemented yet)
+hardware/          3D-printable sensor station
 templates/         greenhouse-tomato deployment template
 models/registry/   YAML metadata only — points to Hugging Face
 docs/              architecture, roadmap, publishing
@@ -23,6 +24,8 @@ docker-compose.yml
 **Who clones it:** Platform developers, users running Docker, contributors to dashboard/automation.
 
 **Does NOT contain:** Training code, checkpoints, datasets, model weights.
+
+**What stayed here after the split:** `models/registry/*.yaml` (metadata pointing to Hugging Face), all of `services/`, Docker, simulators and docs. Everything that was `models/agronomist-llm/` and `models/checkpoints/` moved to the ML repo (`checkpoints/` there).
 
 ---
 
@@ -66,7 +69,7 @@ Platform GitHub repo keeps code, schemas, and registry YAML — not `.safetensor
 | `pomona-docs` | Only if docs outgrow platform repo | Public site, tutorials |
 | `pomona-devices` | Only if firmware explodes (many boards) | ESP32, RP2040 firmware monorepo |
 
-**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in [okyanu/pomona](https://github.com/okyanu/pomona).
+**Do not create yet:** Separate repos for `core`, `dashboard`, `model-router` — keep those in [okyanu/pomona](https://github.com/okyanu/pomona). Do not split per service.
 
 ---
 
@@ -95,14 +98,9 @@ Platform GitHub repo keeps code, schemas, and registry YAML — not `.safetensor
 
 ---
 
-## Split command
+## The split (done once)
 
-```bash
-# From pomona/ root — moves ML code to ../pomona-agronomist-llm
-./scripts/split/extract-ml-repo.sh
-```
-
-Then publish each repo independently. Maintainer publish checklists are local only (not in this public repo).
+The ML code was moved out of this repo into a sibling repo once, with `./scripts/split/extract-ml-repo.sh` (`make split-ml`). That is finished and does not need repeating. The two repos are published independently; the platform repo is published with `make publish-github` after `make publish-check`. Maintainer publish checklists are local only (not in this public repo).
 
 ---
 

@@ -93,7 +93,7 @@ def test_upsert_keeps_first_and_last_seen_and_only_finite_reading_fields(clock):
 
 def test_retained_ineligible_duplicate_and_observation_packets_are_not_recorded(clock):
     event_store.add(packet(clock, device="retained", mqtt_retained=True))
-    event_store.add(packet(clock, device="future", at=clock.now + timedelta(seconds=200)))  # bad clock: stored, not current
+    event_store.add(packet(clock, device="future", at=clock.now + timedelta(hours=1)))  # bad clock: stored, not current
     event_store.add_observation(SensorObservation.model_validate({
         "device_id": "obs", "farm_id": "farm", "zone_id": "a", "sensor_id": "t", "measurement": "air_temperature_c",
         "unit": "C", "value": 24, "timestamp": clock.now.isoformat()}))
@@ -137,7 +137,7 @@ def test_backfill_runs_once_when_the_table_is_created_on_an_existing_database(cl
     clock.now += timedelta(minutes=1)
     add(packet(clock, device="b", fields={"ph": 6.2, "air_temperature_c": 22.0}))
     event_store.add(packet(clock, device="retained-only", mqtt_retained=True))
-    event_store.add(packet(clock, device="future", at=clock.now + timedelta(seconds=200)))
+    event_store.add(packet(clock, device="future", at=clock.now + timedelta(hours=1)))
     expected = [row for row in stored_rows() if row[0] == "b"]
     with event_store._connect() as db:
         db.execute("DROP TABLE device_fields")  # the database as it was before this feature
@@ -231,7 +231,7 @@ def test_partners_that_are_not_live_full_packets_do_not_make_a_zone_multi_device
     if partner == "retained":
         event_store.add(packet(clock, device="other", mqtt_retained=True))
     elif partner == "future":
-        event_store.add(packet(clock, device="other", at=clock.now + timedelta(seconds=200)))
+        event_store.add(packet(clock, device="other", at=clock.now + timedelta(hours=1)))
     else:
         event_store.add_observation(SensorObservation.model_validate({
             "device_id": "other", "farm_id": "farm", "zone_id": "a", "sensor_id": "t",

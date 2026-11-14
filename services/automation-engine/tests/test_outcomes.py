@@ -77,6 +77,24 @@ def test_approve_starts_awaiting_and_reject_does_not(store):
     assert rejected["outcome_status"] is None and rejected["outcome_deadline"] is None and rejected["outcome_evidence"] is None
 
 
+def test_pruning_never_deletes_an_approval_still_awaiting_its_outcome(clock):
+    small = SuggestionStore(max_suggestions=200)
+    try:
+        item = approved(small)
+        for number in range(250):
+            small.add("ec", "review", f"other {number}", dict(CONTEXT))
+        clock.now = T0 + timedelta(minutes=20)  # all 250 expire (TTL 15 min); the outcome window (2 h) is still open
+        small.add("ec", "review", "one more", dict(CONTEXT))
+        assert len(small.list(status="expired", limit=1000)) == 200  # history is still bounded
+        assert small.get(item["id"])["outcome_status"] == "awaiting"
+        observe(small, 25)
+        observe(small, 30)
+        observe(small, 35)
+        assert outcome(small, item)[0] == "confirmed"
+    finally:
+        small.close()
+
+
 def test_unknown_rule_or_no_rules_leaves_outcome_untracked(store):
     gone = store.add("removed_rule", "review", "check", dict(CONTEXT))
     assert store.decide(gone["id"], "approved", rules=RULES)["outcome_status"] is None
@@ -126,7 +144,7 @@ def test_old_repeated_and_future_samples_do_not_count(store, clock):
     observe(store, 5)  # repeat
     observe(store, 3)  # older than the last counted sample
     assert outcome(store, item)[1]["readings_seen"] == 1
-    observe(store, 7, advance=False)  # more than 60 s ahead of the wall clock
+    observe(store, 11, advance=False)  # more than MAX_FUTURE_SAMPLE_S (300 s) ahead of the wall clock
     assert outcome(store, item)[1]["readings_seen"] == 1
 
 

@@ -39,8 +39,15 @@ rules:
       pH out of range. Check the water/dosing system and recalibrate the pH
       probe if the reading does not match a manual measurement.
 
+  # water_level_risk is the tomato reasoner's label (moisture below 10 % or above 85 %); the water reasoner's own labels
+  # trip earlier (28 % or below, 78 % or above) and used to match no rule.
   - id: water_level_check
-    match_any_labels: [water_level_risk]
+    match_any_labels:
+      - water_level_risk
+      - low_moisture
+      - high_moisture
+      - irrigation_underwatering
+      - irrigation_overwatering
     action: check_irrigation_system
     message: >-
       Substrate moisture out of the expected range. Confirm with a second
@@ -94,6 +101,18 @@ rules:
       timestamp before acting on any advice that uses it. If a meter agrees
       with the reading, the condition is real: record a calibration for that
       probe to accept the new level.
+
+  # A reasoner calls a reading extreme (pH at or below 3.5 or at or above 9.0, EC above 10 or below 0.01, and the
+  # like) although it is still inside the sensor check's plausible range, so the probe is "trusted" and no domain
+  # rule matches that label. Either the condition is real and serious or the probe is failing: a sensor card with
+  # the default windows, so a single odd reading does not raise one.
+  - id: extreme_reading_check
+    match_any_labels: [sensor_anomaly]
+    action: check_sensor
+    message: >-
+      A reading is far outside any normal growing range although the probe
+      passed its checks. Measure it by hand now: either the condition is real
+      and serious, or the probe is failing.
 
   # The softer hint, on its own rule: a probe that has barely moved over the last readings is often just a
   # quiet probe, so it has no sample-count raise and waits the default windows like the domain rules. It is

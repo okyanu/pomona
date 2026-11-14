@@ -32,7 +32,7 @@ Platform, models, and datasets each version independently
 [docs/VERSIONING.md](https://github.com/okyanu/pomona/blob/main/docs/VERSIONING.md).
 
 **How can I contribute?**
-Fork → branch → `make test` → open a PR. Good first contributions: tests, docs, simulators, crop templates. See
+Fork → branch → `make test-local` → open a PR. Good first contributions: tests, docs, simulators, crop templates. See
 [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md).
 
 **Is it open source?**

@@ -10,14 +10,9 @@ This file adds Cursor-specific notes. Keep it short — details live in AGENTS.m
 2. [docs/ROADMAP.md](./ROADMAP.md)
 3. Owner daily plan (if present): `private/DAILY_PLAN_30_DAYS.md` or `private/planning/` — local only
 
-## Completed phases
+## Phases
 
-| Phase | Status |
-|-------|--------|
-| 0 — Repo setup | ✅ |
-| 1 — MVP skeleton | ✅ |
-| 1b — Split + HF registry | ✅ |
-| 2 — Dashboard + DB | ⏳ **current** |
+Phase status lives in one place: [PHASES.md](./PHASES.md). Do not copy the table here.
 
 ## Local commands
 

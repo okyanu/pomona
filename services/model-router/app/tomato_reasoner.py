@@ -8,11 +8,28 @@ rules so downstream services can integrate against the final response shape.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from typing import Any, Dict, List, Optional
 
 from app.backends.chat_json import ollama_chat_json_array
 from app.config import settings
+from app.reasoner_thresholds import (
+    EC_ANOMALY_HIGH,
+    EC_ANOMALY_LOW,
+    EC_HIGH,
+    EC_LOW_HYDROPONIC,
+    EC_LOW_SUBSTRATE,
+    PH_ANOMALY_HIGH,
+    PH_ANOMALY_LOW,
+    PH_HIGH,
+    PH_LOW,
+    SUBSTRATE_SYSTEM_TYPE,
+    is_hydroponic,
+)
+from app.sensor_quality import numeric
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_RISK_LABELS = {
@@ -54,11 +71,6 @@ PESTICIDE_AND_DIAGNOSIS_BLOCKS = [
     "unsafe_chemical_recommendation",
 ]
 
-# Recirculating/no-substrate systems: covers naming drift between the
-# platform ("controlled_greenhouse"), the training dataset
-# ("hydroponic_greenhouse"), and the hardware event contract ("hydroponic").
-HYDROPONIC_SYSTEM_TYPES = {"controlled_greenhouse", "hydroponic_greenhouse", "hydroponic"}
-
 # Vapour-pressure deficit (kPa) from air temperature and humidity (FAO-56 eq. 11, Magnus form).
 # Below LOW_VPD_KPA leaves stay wet long enough for grey mould and leaf mould even when humidity
 # is under 85 % (e.g. 77 % at 15 C on a cool night). Above HIGH_VPD_KPA tomato stomata close and
@@ -75,13 +87,14 @@ def add_unique(items: List[str], value: str) -> None:
 def missing_input_fields(input_data: Dict[str, Any]) -> List[str]:
     critical = ["air_temperature_c", "humidity_pct", "ph", "ec_ms_cm"]
     system_type = input_data.get("system_type")
-    if system_type == "greenhouse_substrate":
+    if system_type == SUBSTRATE_SYSTEM_TYPE:
         critical.extend(["substrate_temperature_c", "substrate_moisture_pct"])
     vetoed = input_data.get("vetoed_fields") or ()  # set by the sensor-quality veto: already reported there
     # Set for a device of a multi-device zone that does not carry the field (docs/design/multi-device-zones.md 1.3).
     not_expected = input_data.get("not_expected_fields") or ()
     return [field for field in critical
-            if input_data.get(field) is None and field not in vetoed and field not in not_expected]
+            if numeric(input_data.get(field)) is None and field not in vetoed and field not in not_expected]
+
 
 def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Optional[float]:
     """VPD in kPa, or None when either reading is missing, non-numeric or implausible."""
@@ -94,12 +107,14 @@ def vapour_pressure_deficit_kpa(air_temperature_c: Any, humidity_pct: Any) -> Op
 
 
 def is_actuator_conflict(input_data: Dict[str, Any]) -> bool:
-    states = input_data.get("actuator_states") or {}
-    humidity = input_data.get("humidity_pct")
-    moisture = input_data.get("substrate_moisture_pct")
-    screen_energy = states.get("screen_energy_pct")
-    screen_blackout = states.get("screen_blackout_pct")
-    water_flow = states.get("water_flow_duration_min")
+    states = input_data.get("actuator_states")
+    if not isinstance(states, dict):  # absent, or not an object: no actuator information
+        states = {}
+    humidity = numeric(input_data.get("humidity_pct"))
+    moisture = numeric(input_data.get("substrate_moisture_pct"))
+    screen_energy = numeric(states.get("screen_energy_pct"))
+    screen_blackout = numeric(states.get("screen_blackout_pct"))
+    water_flow = numeric(states.get("water_flow_duration_min"))
 
     if humidity is not None and humidity >= 88:
         if (screen_energy is not None and screen_energy >= 80) or (
@@ -121,36 +136,37 @@ def derive_tomato_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
         add_unique(risks, "missing_critical_data")
         safe_next_checks.append("restore or manually verify missing critical sensor readings")
 
-    ph = input_data.get("ph")
-    ec = input_data.get("ec_ms_cm")
-    air_temp = input_data.get("air_temperature_c")
-    humidity = input_data.get("humidity_pct")
-    substrate_temp = input_data.get("substrate_temperature_c")
-    substrate_moisture = input_data.get("substrate_moisture_pct")
+    # A numeric string ("9.9") counts as its number; anything else non-numeric counts as missing.
+    ph = numeric(input_data.get("ph"))
+    ec = numeric(input_data.get("ec_ms_cm"))
+    air_temp = numeric(input_data.get("air_temperature_c"))
+    humidity = numeric(input_data.get("humidity_pct"))
+    substrate_temp = numeric(input_data.get("substrate_temperature_c"))
+    substrate_moisture = numeric(input_data.get("substrate_moisture_pct"))
     system_type = input_data.get("system_type")
 
     if ph is not None:
-        if ph <= 3.5 or ph >= 9.0:
+        if ph <= PH_ANOMALY_LOW or ph >= PH_ANOMALY_HIGH:
             add_unique(risks, "sensor_anomaly")
             safe_next_checks.append("inspect pH probe calibration and raw telemetry")
-        elif ph >= 7.2:
+        elif ph >= PH_HIGH:
             add_unique(risks, "high_ph")
             safe_next_checks.append("repeat pH measurement with a calibrated meter")
-        elif ph <= 5.3:
+        elif ph <= PH_LOW:
             add_unique(risks, "low_ph")
             safe_next_checks.append("repeat pH measurement with a calibrated meter")
 
     if ec is not None:
-        if ec < 0.01 or ec > 10:
+        if ec < EC_ANOMALY_LOW or ec > EC_ANOMALY_HIGH:
             add_unique(risks, "sensor_anomaly")
             safe_next_checks.append("inspect EC sensor units, sample availability, and calibration")
-        elif ec >= 4.5:
+        elif ec >= EC_HIGH:
             add_unique(risks, "high_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
-        elif system_type in HYDROPONIC_SYSTEM_TYPES and ec <= 0.8:
+        elif is_hydroponic(system_type) and ec <= EC_LOW_HYDROPONIC:
             add_unique(risks, "low_ec")
             safe_next_checks.append("verify EC manually and review nutrient concentration logs")
-        elif system_type == "greenhouse_substrate" and ec <= 0.05:
+        elif system_type == SUBSTRATE_SYSTEM_TYPE and ec <= EC_LOW_SUBSTRATE:
             add_unique(risks, "low_ec")
             safe_next_checks.append("verify soil EC manually before making any nutrient conclusion")
 
@@ -305,10 +321,12 @@ async def route_tomato_reasoner(
                 )
                 result["human_review_required"] = bool(labels or result["blocked_actions"])
         except Exception as exc:
+            # The full text goes to the log only: callers get the exception class, never model- or host-written text.
+            logger.warning("%s inference failed: %s", selected_backend, exc)
             if selected == "model_only":
                 raise RuntimeError(f"{selected_backend} inference failed: {exc}") from exc
             fallback_reason = (
-                f"{selected_backend} unavailable or invalid; used deterministic rules: {exc}"
+                f"{selected_backend} unavailable or invalid ({type(exc).__name__}); used deterministic rules"
             )
     elif selected == "model_only":
         raise NotImplementedError("model_only requires a configured tomato runtime backend")

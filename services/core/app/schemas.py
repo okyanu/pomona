@@ -27,6 +27,7 @@ def utc_now() -> datetime:
 # 1.x is accepted; a different major is rejected instead of being stored as if it were 1.x.
 SCHEMA_MAJOR = 1
 SCHEMA_VERSION = "1.0"
+MAX_SOURCE_LENGTH = 64  # SensorEvent.source, as in schemas/sensor-event.schema.json
 
 
 def check_schema_version(value: str) -> str:
@@ -124,7 +125,7 @@ class SensorEvent(NumericReadings):
     crop_kc: Optional[float] = Field(default=None, ge=0.0, le=3.0)
     npk_target: Optional[NpkTargetReading] = None
     timestamp: datetime  # Required: Core never invents a sample time.
-    source: Optional[str] = None
+    source: Optional[str] = None  # at most 64 characters on ingest (checked in `source_length`: stored rows are not re-checked)
     received_at: Optional[datetime] = None  # Set by Core, never trusted from the sender.
     sequence: Optional[int] = Field(default=None, ge=0, strict=True)
     boot_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
@@ -135,6 +136,13 @@ class SensorEvent(NumericReadings):
     @classmethod
     def supported_schema(cls, value):
         return check_schema_version(value)
+
+    @field_validator("source")
+    @classmethod
+    def source_length(cls, value, info: ValidationInfo):
+        if value is not None and len(value) > MAX_SOURCE_LENGTH and not (info.context and info.context.get("stored")):
+            raise ValueError(f"source must be at most {MAX_SOURCE_LENGTH} characters")
+        return value
 
     @field_validator("timestamp")
     @classmethod
@@ -215,6 +223,12 @@ class HealthResponse(BaseModel):
     mqtt_connected: bool
     events_stored: int
     outcome_feed_dropped: int = 0
+    # The outcome feed's last attempts: false when the most recent one failed (the alerts may have stopped).
+    outcome_feed_ok: bool = True
+    outcome_feed_failed: int = 0
+    outcome_feed_last_error: Optional[str] = None  # exception class name only
+    outcome_feed_last_success_at: Optional[datetime] = None
+    outcome_feed_last_failure_at: Optional[datetime] = None
     time: Optional[FarmTimeInfo] = None
 
 

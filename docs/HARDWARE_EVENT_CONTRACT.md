@@ -37,6 +37,15 @@ The MQTT payload must be one JSON object matching
 }
 ```
 
+Required: `device_id`, `farm_id`, `zone_id`, `timestamp` and at least one reading. `crop`,
+`growth_stage` and `system_type` are optional (Core fills `tomato`, `flowering`,
+`greenhouse_substrate`). The schema also lists the optional `weather`, `zone_area_m2`, `crop_kc`,
+`npk_target` (context for the model-router's calculations), `sequence` and `boot_id` (duplicate and
+stale-packet detection), `source` (at most 64 characters), and `received_at` / `mqtt_retained`, which Core
+sets itself and ignores from a sender. Properties the schema does not list are ignored, not rejected.
+`services/core/tests/test_sensor_event_schema.py` checks that the schema and Core accept and reject the
+same packets; a sample time too old or too far ahead is rejected by Core only (see below).
+
 `schema_version` is the payload contract version, `"MAJOR.MINOR"` as a string. A packet
 without it is treated as `"1.0"`, so older senders keep working. Core accepts any `1.x`
 (minor versions only add optional fields) and rejects another major version, for example
@@ -109,7 +118,8 @@ often 2000; check the device clock, NTP sync or RTC battery. Sample times more
 than `MAX_FUTURE_SAMPLE_S` (default 300 s, 0 disables) ahead of Core's clock are
 rejected too: a device or spreadsheet that writes local time but labels it `Z`
 lands hours ahead in UTC+ zones, so stamp local time with its UTC offset
-(`+04:00`) or convert to UTC. Core stores and compares UTC only; `FARM_TIMEZONE`
+(`+04:00`) or convert to UTC. A sample time Core accepts counts as current (a clock a few minutes fast still
+shows); with the check off (0), only a sample time up to 60 s ahead does. Core stores and compares UTC only; `FARM_TIMEZONE`
 (shown on `GET /health` and the dashboard) is display only and converts no data.
 Stored rows are not re-checked.
 
@@ -170,12 +180,15 @@ are filled in. A validated state-assembly policy is a later task.
 
 Retention defaults to seven days by server receipt time and at most 100,000
 records per farm/zone **per record type**, whichever limit is reached first.
-Cleanup runs on ingest, not on a timer. Configure `RETENTION_DAYS`, `MAX_EVENTS`,
+Cleanup runs on ingest, not on a timer (the age limit at most once a minute). Configure `RETENTION_DAYS`, `MAX_EVENTS`,
 and `DEVICE_TIMEOUT_SECONDS`. Legacy rows without receipt times remain subject
 to the count limit; device last-seen metadata is retained separately. This is
 not a global disk quota: many zones/devices can increase storage usage.
-Back up SQLite before upgrading; the schema migration adds scope columns and
-observation/presence tables. No authentication change accompanies these APIs;
+Back up SQLite before upgrading; the schema migration adds scope columns,
+observation/presence tables and a numeric sample-time column with indexes (the
+latest-reading queries read it), and the database file switches to write-ahead
+logging (`-wal` and `-shm` files beside it; copy it with `scripts/backup.sh`,
+not `cp`). No authentication change accompanies these APIs;
 keep the MVP on a trusted local network.
 
 The dashboard accepts a farm/zone selection and displays device health plus

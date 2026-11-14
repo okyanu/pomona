@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List
 
 from app.backends.chat_json import ollama_chat_json, openai_compatible_chat_json
 from app.config import settings
+from app.sensor_quality import numeric
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_LABELS = {
@@ -121,7 +125,7 @@ def derive_water_irrigation_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
     context = input_data.get("farm_context") or {}
     expected = input_data.get("expected_fields") or []
     field = _moisture_field(input_data)
-    moisture = sensor.get(field)
+    moisture = numeric(sensor.get(field))  # a numeric string counts as its number; anything else non-numeric as missing
     labels: List[str] = []
     missing: List[str] = []
     suspect: List[str] = []
@@ -135,7 +139,7 @@ def derive_water_irrigation_risk(input_data: Dict[str, Any]) -> Dict[str, Any]:
         _add_unique(labels, "missing_moisture")
         _add_unique(missing, field)
         checks.append("restore or manually verify root-zone moisture before irrigation decisions")
-    if isinstance(moisture, (int, float)):
+    if moisture is not None:
         if moisture < 0 or moisture > 100:
             _add_unique(labels, "sensor_anomaly")
             _add_unique(suspect, field)
@@ -251,11 +255,13 @@ async def route_water_irrigation_reasoner(
             source = selected_backend if selected_mode == "model_only" else f"{selected_backend}_guarded"
             fallback_reason = None
         except Exception as exc:
+            # The full text goes to the log only: callers get the exception class, never model- or host-written text.
+            logger.warning("%s inference failed: %s", selected_backend, exc)
             if selected_mode == "model_only":
                 raise RuntimeError(f"{selected_backend} inference failed: {exc}") from exc
             result = rules
             source = "deterministic_rules"
-            fallback_reason = f"{selected_backend} unavailable or invalid; used deterministic rules: {exc}"
+            fallback_reason = f"{selected_backend} unavailable or invalid ({type(exc).__name__}); used deterministic rules"
     return {
         **result,
         "model_id": model_id,

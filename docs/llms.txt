@@ -1,6 +1,6 @@
 # Pomona
 
-> Open-source, local-first edge AI platform for controlled agriculture — greenhouse and hydroponic systems. Pomona combines MQTT sensor ingestion, SQLite persistence, compact specialist reasoners, deterministic safety checks, human-reviewed automation suggestions, and a read-only dashboard. The project is an early alpha (`v0.1.0-alpha.1`), not a production automation product.
+> Open-source, local-first edge AI platform for controlled agriculture — greenhouse and hydroponic systems. Pomona combines MQTT sensor ingestion, SQLite persistence, compact specialist reasoners, deterministic safety checks, human-reviewed automation suggestions, and a monitoring dashboard with manual approve/reject of suggestions (nothing is actuated). The project is an early alpha (`v0.1.0-alpha.1`), not a production automation product.
 
 Pomona's hard rule: an LLM or reasoner may advise, but it never directly controls hardware. A deterministic safety checker remains the final authority before any actuator or automation action.
 
@@ -23,13 +23,13 @@ License: Apache-2.0
 
 - [Guarded browser demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo): public greenhouse and hydroponic scenarios, with no installation or login
 - [Live automation API](https://automation-engine-fawn.vercel.app): suggestion-only service with interactive API documentation
-- [Docker quickstart](https://github.com/okyanu/pomona#-quickstart-any-os--docker): run the local platform stack
+- [Docker quickstart](https://github.com/okyanu/pomona#-quickstart-docker): run the local platform stack
 - [Example scenarios](https://github.com/okyanu/pomona/tree/main/examples/scenarios): routine, high-risk, missing-data, and stale-data sensor inputs
 - [Tomato risk quickstart](https://github.com/okyanu/pomona/blob/main/examples/tomato_risk_quickstart.py): standalone example against a local stack
 
 ## Reasoners and safety
 
-- [Tomato risk reasoner](https://okyanu.github.io/pomona/TOMATO_RISK_REASONER/)
+- [Tomato risk reasoner](https://okyanu.github.io/pomona/TOMATO_RISK_REASONER/): experimental: v0.1.7 learned a training-template shortcut and is advisory only, the deterministic rules decide
 - [Water and irrigation reasoner](https://okyanu.github.io/pomona/WATER_IRRIGATION_RISK_REASONER/)
 - [Nutrient, pH, and EC reasoner](https://okyanu.github.io/pomona/NUTRIENT_PH_EC_REASONER/)
 - [Sensor quality reasoner](https://okyanu.github.io/pomona/SENSOR_QUALITY_REASONER/)
@@ -39,7 +39,7 @@ License: Apache-2.0
 ## Models and data
 
 - [Pomona Hugging Face collection](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9): published models and dataset
-- [Tomato risk reasoner v0.1.7](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora)
+- [Tomato risk reasoner v0.1.7](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora): experimental: v0.1.7 learned a training-template shortcut and is advisory only, the deterministic rules decide
 - [Water and irrigation reasoner v0.1.8](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora)
 - [Agronomist advisor](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)
 - [Greenhouse sensor dataset](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data)

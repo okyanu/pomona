@@ -3,7 +3,8 @@
 Core posts the reading to model-router (/v1/pipeline/evaluate, rules_only) and then the resulting
 labels to automation-engine (/v1/automation/alerts/observe), so approved-suggestion outcomes and
 alerts move even when no dashboard is open. Suggestions only: no actuator path. A background
-worker with a bounded queue keeps ingest independent of both services; failures are only logged.
+worker with a bounded queue keeps ingest independent of both services; failures are logged and counted, and
+GET /health reports them (`status()`), so a dead feed does not look healthy.
 """
 import json
 import logging
@@ -11,10 +12,11 @@ import queue
 import threading
 import time
 import urllib.request
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.schemas import SensorEvent
+from app.schemas import SensorEvent, utc_now
 from app.store import SensorEventStore, event_store
 from app.trusted_baseline import stream_baseline
 
@@ -50,6 +52,17 @@ class OutcomeFeed:
         self._thread: Optional[threading.Thread] = None
         self._last_drop_log = 0.0
         self.dropped = 0
+        self.failed = 0  # readings whose evaluation or alert post failed (the second post is skipped after a failed first)
+        self.last_error: Optional[str] = None  # class name of the last failure, never its text (it can hold URLs)
+        self.last_success_at: Optional[datetime] = None
+        self.last_failure_at: Optional[datetime] = None
+        self.last_ok = True  # false when the most recent attempt failed
+
+    def status(self) -> Dict[str, Any]:
+        """What GET /health reports about the feed, next to `outcome_feed_dropped`."""
+        return {"outcome_feed_dropped": self.dropped, "outcome_feed_failed": self.failed, "outcome_feed_ok": self.last_ok,
+                "outcome_feed_last_error": self.last_error, "outcome_feed_last_success_at": self.last_success_at,
+                "outcome_feed_last_failure_at": self.last_failure_at}
 
     @property
     def enabled(self) -> bool:
@@ -94,7 +107,10 @@ class OutcomeFeed:
                 continue
             try:
                 self._process(event)
+                self.last_success_at, self.last_ok = utc_now(), True
             except Exception as exc:
+                self.failed += 1
+                self.last_error, self.last_failure_at, self.last_ok = type(exc).__name__, utc_now(), False
                 logger.warning("outcome feed failed for device=%s farm=%s zone=%s: %s",
                                event.device_id, event.farm_id, event.zone_id, exc)
 

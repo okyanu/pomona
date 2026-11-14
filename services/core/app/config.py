@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     trust_baseline_max_age_s: int = Field(default=DEFAULT_MAX_AGE_S, ge=0)
     trust_baseline_scan_limit: int = Field(default=DEFAULT_SCAN_LIMIT, ge=10)
 
+    @property
+    def future_slack_s(self) -> int:
+        """How far ahead of Core's clock a sample time still counts as current: the ingest limit, or 60 s when it is off."""
+        return self.max_future_sample_s or 60
+
     @field_validator("min_sample_time")
     @classmethod
     def floor_timezone_required(cls, value: datetime) -> datetime:

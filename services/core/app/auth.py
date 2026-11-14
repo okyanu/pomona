@@ -8,6 +8,7 @@ intended for any deployment reachable beyond localhost.
 
 from __future__ import annotations
 
+import hmac
 from typing import Optional
 
 from fastapi import Header, HTTPException
@@ -19,5 +20,8 @@ def require_api_key(authorization: Optional[str] = Header(default=None)) -> None
     if not settings.api_key:
         return
     expected = f"Bearer {settings.api_key}"
-    if authorization != expected:
+    # Constant-time compare (bytes, so a non-ASCII header cannot raise).
+    if authorization is None or not hmac.compare_digest(
+        authorization.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Missing or invalid API key")

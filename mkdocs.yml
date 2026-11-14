@@ -53,11 +53,23 @@ nav:
       - Offline demo: LOCAL_DEMO.md
   - Platform:
       - Architecture: architecture.md
+      - Advice cards: ADVICE_CARDS.md
+      - Digital twin: DIGITAL_TWIN.md
+      - Calibration provenance: CALIBRATION_PROVENANCE.md
+      - Reliability hardening: RELIABILITY_HARDENING.md
       - Project status: PROJECT_STATUS.md
       - Roadmap: ROADMAP.md
       - Phases: PHASES.md
+      - Next 90 days: NEXT_90_DAYS.md
+  - Sensor trust and testing:
+      - Fake greenhouse: FAKE_GREENHOUSE.md
+      - Temporal sensor checks: SENSOR_TEMPORAL_CHECKS.md
+      - Sensor fault replay: SENSOR_FAULT_REPLAY.md
+      - Sensor quality input contract: SENSOR_QUALITY_INPUT_CONTRACT.md
+      - Watercress pilot: WATERCRESS_PILOT.md
   - Reasoners:
       - Model catalog: MODEL_CATALOG.md
+      - Local model runtimes: LOCAL_MODEL_RUNTIMES.md
       - Tomato risk: TOMATO_RISK_REASONER.md
       - Water and irrigation: WATER_IRRIGATION_RISK_REASONER.md
       - Nutrient, pH and EC: NUTRIENT_PH_EC_REASONER.md
@@ -71,6 +83,9 @@ nav:
       - Publishing: PUBLISHING.md
       - Repository map: REPOS.md
       - Versioning: VERSIONING.md
+  - Design docs:
+      - Multi-device zones: design/multi-device-zones.md
+      - Silent probe: design/silent-probe.md
 
 plugins:
   - search

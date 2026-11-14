@@ -9,7 +9,7 @@ Hugging Face. See [Versioning](https://github.com/okyanu/pomona/blob/main/docs/V
 | Tomato risk reasoner `v0.1.7` | Published, experimental: learned a training shortcut ([details](https://github.com/okyanu/pomona/blob/main/docs/TOMATO_RISK_REASONER.md)) | ⚠️ Research only; deterministic rules decide |
 | Water/irrigation reasoner `v0.1.8` | Published release candidate; synthetic evaluation only | ⚠️ Advisory only, behind deterministic validation |
 | Sensor quality reasoner `v0.1.1-boundary` | Local candidate, not published | ⚠️ Owner's local tests only |
-| Safety triage reasoner `v0.1` | Local candidate, failed its publish gate | ⚠️ Owner's local tests only |
+| Safety triage reasoner `v0.1` | Local candidate, failed its publish gate; not published | ⚠️ Owner's local tests only |
 | Actuator command gate `v0.1` | Published research preview, below standalone release gate | ⚠️ Advisory only; deterministic checker required |
 | Actuator command gate `v0.1.1-hardcases` | Regression in local eval | ❌ Do not use |
 | Actuator command gate `v0.1.2-correction` | Regression on a held-out eval | ❌ Do not use |
