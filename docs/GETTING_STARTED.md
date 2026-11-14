@@ -23,7 +23,9 @@ The broker does not accept anonymous clients. `./scripts/up.sh` (and `./scripts/
 needs the same pair. The password is never printed. If you start Compose yourself and `MQTT_PASSWORD` is blank,
 it stops and tells you to run `./scripts/setup.sh`.
 
-Port 1883 is plain MQTT (no TLS): keep it on your local network and never port-forward it. See
+Port 1883 is plain MQTT (no TLS): keep it on your local network and never port-forward it. Docker publishes the
+broker, Core and the dashboard on this computer only by default; set `POMONA_BIND_ADDRESS=0.0.0.0` in `.env` to let
+devices on your network connect (trusted network only, set `API_KEY`). See
 [SECURITY.md](https://github.com/okyanu/pomona/blob/main/SECURITY.md).
 
 ## Alternative: pip dev
@@ -52,6 +54,7 @@ pip3 install -r requirements-dev.txt
 | Monitoring dashboard (http://localhost:3000) | Live LLM advisor by default (stub unless you enable Ollama) |
 | Deterministic sensor checks, crop rules and safety checker | Actuator execution (by design: suggestions only) |
 | Suggestion-only automation with manual approve/reject | Production hardening |
+| | Running on a Raspberry Pi (not tested) |
 
 ## Contribute
 

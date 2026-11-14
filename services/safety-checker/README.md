@@ -10,6 +10,11 @@ Filters model and automation output before it reaches users or actuators.
 - Unit tests in `tests/test_tomato_rules.py`
 - API tests in `tests/test_safety_checker_api.py`
 
+`app/tomato_rules.py` is a copy of the model-router's `app/tomato_reasoner.py` rules (the two services ship in separate
+images, so one cannot import the other). They must answer the same: numeric strings read as numbers, `vetoed_fields` and
+`not_expected_fields` skipped when listing missing data, the same thresholds and hydroponic system names.
+`services/model-router/tests/test_tomato_vpd.py` fails when they differ, including at every threshold.
+
 **Current API behavior:**
 
 - Accept normalized Pomona tomato greenhouse input under an `input` key

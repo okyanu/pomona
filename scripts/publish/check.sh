@@ -130,10 +130,12 @@ if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
   if command -v python3 >/dev/null 2>&1; then
     echo ""
     echo "==> Running tests..."
-    if make test >/dev/null 2>&1; then
+    if ! make check-venvs >/dev/null 2>&1; then
+      fail "Test environments are missing (services/*/.venv) — run: make bootstrap, then make test"
+    elif make test >/dev/null 2>&1; then
       ok "Tests passed"
     else
-      warn "Tests failed or dependencies missing — run: make test"
+      fail "Tests failed — run: make test"
     fi
   fi
 fi

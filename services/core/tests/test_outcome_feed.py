@@ -36,7 +36,9 @@ RESULT = {"sensor_quality": {"data_quality_labels": ["stuck_value", "noisy_signa
 def clear_store(tmp_path, monkeypatch):
     monkeypatch.setattr(event_store, "_db_path", tmp_path / "test.db")
     SensorEventStore(db_path=event_store._db_path)
-    monkeypatch.setattr(outcome_feed, "dropped", 0)
+    for name, value in (("dropped", 0), ("failed", 0), ("last_error", None), ("last_success_at", None),
+                        ("last_failure_at", None), ("last_ok", True)):
+        monkeypatch.setattr(outcome_feed, name, value)
     yield
 
 
@@ -147,14 +149,20 @@ def test_retained_mqtt_message_does_not_feed_even_when_promoted(client, calls):
     assert calls == []
 
 
-def test_future_clock_and_stale_sequence_do_not_feed(client, calls):
-    assert client.post("/v1/sensors/events", json=payload(-120)).status_code == 201  # 2 min ahead: stored, never current
+def test_future_clock_and_stale_sequence_do_not_feed(client, calls, monkeypatch):
+    monkeypatch.setattr(settings, "max_future_sample_s", 0)  # guard off: only the 60 s rule keeps a far-future clock out
+    assert client.post("/v1/sensors/events", json=payload(-86400)).status_code == 201  # a day ahead: stored, never current
     assert client.post("/v1/sensors/events", json=payload(boot_id="b", sequence=10)).status_code == 201
     assert wait_for(lambda: len(calls) >= 2)
     assert client.post("/v1/sensors/events", json=payload(-5, boot_id="b", sequence=9)).status_code == 201
     settle()
     assert len(calls) == 2
     assert calls[0][2]["sensor"]["sequence"] == 10
+
+
+def test_a_clock_a_few_minutes_fast_feeds(client, calls):
+    assert client.post("/v1/sensors/events", json=payload(-120)).status_code == 201  # 2 min ahead: accepted and current
+    assert wait_for(lambda: len(calls) >= 2)
 
 
 def test_observations_and_other_records_do_not_feed(client, calls):
@@ -196,6 +204,41 @@ def test_failing_downstream_never_breaks_ingest(client, monkeypatch, caplog, fai
         assert wait_for(lambda: len([p for p in seen if p == failing]) >= 2)  # the worker survives a failure
     assert wait_for(lambda: "outcome feed failed" in caplog.text)
     assert event_store.count() == 2
+    assert wait_for(lambda: outcome_feed.failed >= 2)
+    if failing == "/v1/pipeline/evaluate":
+        assert "/v1/automation/alerts/observe" not in seen  # the first post failed: the second is skipped
+    health = client.get("/health")
+    assert health.status_code == 200  # Docker health checks look at the status: it stays 200
+    body = health.json()
+    assert body["status"] == "ok" and body["outcome_feed_ok"] is False and body["outcome_feed_failed"] >= 2
+    assert body["outcome_feed_last_error"] == "OSError" and "connection refused" not in health.text  # class name only
+    assert body["outcome_feed_last_failure_at"] is not None
+
+
+def test_health_says_ok_after_a_success_following_a_failure(client, monkeypatch):
+    monkeypatch.setattr(settings, "model_router_url", ROUTER)
+    monkeypatch.setattr(settings, "automation_engine_url", AUTOMATION)
+    health = client.get("/health").json()
+    assert health["outcome_feed_ok"] is True and health["outcome_feed_failed"] == 0
+    assert health["outcome_feed_last_error"] is None and health["outcome_feed_last_success_at"] is None
+    broken = [True]
+
+    def fake_post(base_url, path, body):
+        if broken[0]:
+            raise OSError("connection refused")
+        return RESULT
+
+    monkeypatch.setattr(feed_module, "_post", fake_post)
+    assert client.post("/v1/sensors/events", json=payload(10)).status_code == 201
+    assert wait_for(lambda: outcome_feed.failed == 1)
+    assert client.get("/health").json()["outcome_feed_ok"] is False
+    broken[0] = False
+    assert client.post("/v1/sensors/events", json=payload(5)).status_code == 201
+    assert wait_for(lambda: outcome_feed.last_ok)
+    body = client.get("/health").json()
+    assert body["outcome_feed_ok"] is True and body["outcome_feed_failed"] == 1  # the count and last error are history
+    assert body["outcome_feed_last_error"] == "OSError"
+    assert body["outcome_feed_last_success_at"] is not None and body["outcome_feed_last_failure_at"] is not None
 
 
 def test_full_queue_drops_without_blocking(monkeypatch):

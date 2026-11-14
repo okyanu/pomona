@@ -220,7 +220,7 @@ def test_explain_exception_fallbacks_unchanged(monkeypatch):
     monkeypatch.setattr(advisor, "_ollama_explanation", boom)
     result = asyncio.run(advisor.explain(INSTRUCTION, SENSOR, backend="ollama"))
     assert result["backend"] == "stub"
-    assert result["fallback_reason"] == "ollama unavailable: down"
+    assert result["fallback_reason"] == "ollama unavailable (RuntimeError)"  # class name only; "down" goes to the log
 
 
 def test_stub_backend_is_unchanged_and_unchecked(monkeypatch):

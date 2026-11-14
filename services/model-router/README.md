@@ -51,6 +51,18 @@ Specialist reasoners can use `rules`, `ollama`, or `mlx` independently of the
 advisor backend. See [Local Model Runtimes](../../docs/LOCAL_MODEL_RUNTIMES.md).
 | `stub` | Default — offline demo, no GPU |
 
+Settings that bound a run (environment variables, defaults in `app/config.py`):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `REASONER_TIMEOUT_S` | 60 | Longest wait for a specialist reasoner's model; the rules decide either way, so a slow model is only a delay |
+| `ADVISOR_TIMEOUT_S` | 60 | Longest wait for the advisor's explanation |
+| `AUDIT_LOG_MAX_BYTES` | 20971520 | The pipeline audit file is renamed to `<name>.1` at this size (one rotated file kept); 0 = never |
+| `MAX_FUTURE_SAMPLE_S` | 300 | A sample time this far ahead of the clock still counts as current (Core's own limit); 0 = 60 |
+
+A model failure never reaches clients as raw text: `fallback_reason` names the exception class (for example
+`ollama unavailable or invalid (ConnectError); used deterministic rules`) and the full message is in the service log.
+
 ## Example
 
 ```bash

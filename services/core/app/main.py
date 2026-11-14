@@ -23,7 +23,7 @@ from app.schemas import (
     fmt_reading,
 )
 from app.probe_health import probe_health
-from app.store import event_store
+from app.store import IdConflict, event_store
 
 
 class RecalibrateQualityBody(BaseModel):
@@ -63,7 +63,7 @@ def health() -> HealthResponse:
         service="pomona-core",
         mqtt_connected=mqtt_client.connected,
         events_stored=event_store.count(),
-        outcome_feed_dropped=outcome_feed.dropped,
+        **outcome_feed.status(),
         time=farm_time_info(settings.farm_timezone),
     )
 
@@ -122,7 +122,11 @@ def list_observations(limit: int = Query(50, ge=1, le=500), offset: int = Query(
 
 @app.post("/v1/sensors/calibrations", status_code=201, response_model=CalibrationEvent, dependencies=[Depends(require_api_key)])
 def ingest_calibration(event: CalibrationEvent) -> CalibrationEvent:
-    return event_store.add_calibration(event)
+    """A repeat of a stored id with the same content returns the stored record; with different content it is a 409."""
+    try:
+        return event_store.add_calibration(event)
+    except IdConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/v1/sensors/calibrations")
@@ -135,6 +139,8 @@ def list_calibrations(limit: int = Query(50, ge=1, le=500), offset: int = Query(
 def ingest_corrected(observation: CorrectedObservation) -> CorrectedObservation:
     try:
         return event_store.add_corrected_observation(observation)
+    except IdConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

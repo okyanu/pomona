@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _CONFIG_PATH = Path(__file__).resolve()
@@ -28,6 +29,20 @@ class Settings(BaseSettings):
     water_irrigation_mlx_model: str = ""
     default_model_id: str = "ai-pomona-agronomist-gemma4"
     audit_log_path: Path = _REPO_ROOT / "data" / "pomona-pipeline-audit.jsonl"
+    # Seconds to wait for a model. A specialist reasoner's answer is checked against the rules and (in hybrid_guarded)
+    # discarded for them, so it gets a short wait; the advisor's explanation is the text people read and gets longer.
+    reasoner_timeout_s: float = Field(default=60, gt=0)
+    advisor_timeout_s: float = Field(default=60, gt=0)
+    # The pipeline audit file is renamed to `<name>.1` when it reaches this size (one rotated file is kept). 0 = never.
+    audit_log_max_bytes: int = Field(default=20 * 1024 * 1024, ge=0)
+    # Same setting and meaning as Core's MAX_FUTURE_SAMPLE_S: a sample time up to this many seconds ahead of the clock
+    # still counts as current (Core accepts it), so the sensor check must not call it a doubtful clock. 0 = Core's
+    # check is off and the old 60 s limit applies.
+    max_future_sample_s: int = Field(default=300, ge=0)
+
+    @property
+    def future_slack_s(self) -> int:
+        return self.max_future_sample_s or 60
 
     @property
     def backend(self) -> str:

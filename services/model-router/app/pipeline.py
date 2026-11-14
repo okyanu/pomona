@@ -105,6 +105,7 @@ async def evaluate_pipeline(
     history: list[dict[str, Any]] | None = None,
     stream_baseline: dict[str, dict[str, Any]] | None = None,
     device_fields: list[str] | None = None,
+    future_slack_s: float = 60,
 ) -> dict[str, Any]:
     """Evaluate all deterministic specialists, then apply the final gate.
 
@@ -114,6 +115,9 @@ async def evaluate_pipeline(
     `device_fields` (multi-device zones, docs/design/multi-device-zones.md 1.3): the fields the sensor's device has
     reported lately. Without an explicit `expected_fields`, only those of the system type's fields are expected, and the
     tomato reasoner is told which critical fields to skip (`not_expected_fields`). Omitted: nothing changes.
+
+    `future_slack_s`: how far ahead of the clock a sample time still counts as current (the service passes
+    `settings.future_slack_s`, the same number as Core's ingest limit). The default 60 is what the browser demos mirror.
     """
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
@@ -147,6 +151,7 @@ async def evaluate_pipeline(
         specialist_mode,
         "pomona-sensor-quality-reasoner-v0.1",
         now=evaluated_at,
+        future_slack_s=future_slack_s,
     )
     masked_sensor, masked_history, gate = apply_sensor_veto(sensor, history, quality, fields)
     if gate["trust_verdict"] == "cannot_confirm":

@@ -13,17 +13,24 @@ docker compose down
 docker compose up -d
 ```
 
-Create a local backup before deleting Docker volumes:
+Create a backup before deleting Docker volumes (the stack must be running; it uses SQLite's online backup API, so
+the copy is consistent while Core writes):
 
 ```bash
-./scripts/backup_core_db.sh
+./scripts/backup.sh
 ```
 
-Restore a backup after stopping the core service:
+It writes a timestamped folder, `backups/YYYYMMDD-HHMMSS/`, with `core.db` (Core), `automation.db` (the automation
+engine) and `audit.jsonl` (the model-router audit log, when it exists). Restore a folder (it replaces the live
+data, stops and restarts each service itself, and checks every file first):
 
 ```bash
-./scripts/restore_core_db.sh backups/pomona-YYYYMMDD-HHMMSS.db
+./scripts/restore.sh backups/YYYYMMDD-HHMMSS
 ```
+
+`scripts/backup_core_db.sh` and `restore_core_db.sh` still work and call the two scripts above; `restore.sh` also takes
+a single old Core `.db` file. The database runs in write-ahead-log mode (`pomona.db-wal` and `-shm` files beside it
+in the volume), so copy it with these scripts or SQLite's backup API, never with a plain file copy.
 
 Without Docker, use the SQLite backup API directly:
 
@@ -52,6 +59,8 @@ Central API and sensor ingest for Pomona.
 times before `MIN_SAMPLE_TIME` (default `2020-01-01T00:00:00Z`) are rejected for packets,
 observations and corrected observations (a device clock that was never set), and so are times more
 than `MAX_FUTURE_SAMPLE_S` (default 300 s, 0 disables) ahead of Core's clock (local time labelled `Z`).
+A sample time the check accepts counts as current: a clock a few minutes fast shows in the latest reading and the
+device list. With the check off (0), a sample time more than 60 s ahead is stored but never current.
 Stored rows are not re-checked. Everything is stored in UTC; `FARM_TIMEZONE` (an IANA name, default
 `UTC`) is display only and appears in `GET /health` under `time`, with the next clock change.
 

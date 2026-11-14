@@ -15,8 +15,6 @@ tags:
 - hydroponics
 - tomato
 - fault-injection
-models:
-  - Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora
 datasets:
   - Okyanus/greenhouse-sensor-data
 ---
@@ -105,7 +103,7 @@ make fool-space-pyodide-check    # needs node: the same engine in Pyodide must e
 
 - Platform: [github.com/okyanu/pomona](https://github.com/okyanu/pomona)
 - Collection: [Pomona -- Local AI for Safer Greenhouse Decision Support](https://huggingface.co/collections/Okyanus/pomona-local-ai-for-safer-greenhouse-decision-support-6a89931ffcc2f7a3f777f3b9)
-- Model: [pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora)
+- Related model (not used on this page: only the deterministic rules run here): [pomona-tomato-risk-reasoner-v0.1.7-lora](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora)
 - Dataset: [greenhouse-sensor-data](https://huggingface.co/datasets/Okyanus/greenhouse-sensor-data)
 - Other Spaces: [Greenhouse demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo),
   [Sensor Data Checker](https://huggingface.co/spaces/Okyanus/pomona-sensor-data-checker),

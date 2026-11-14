@@ -309,3 +309,55 @@ def test_api_alert_events_limit(client):
 def test_api_observe_validates_input(client, update):
     body = {"farm_id": "farm", "zone_id": "zone", "sample_time": T0.isoformat(), "risk_labels": [], **update}
     assert client.post("/v1/automation/alerts/observe", json=body).status_code == 422
+
+
+def gap_monitor(max_gap, rules=RULES):
+    return AlertMonitor(rules, 600, 900, max_gap_seconds=max_gap)
+
+
+def observe_at(m, minutes, labels):
+    return m.observe("farm", "zone", "node", T0 + timedelta(minutes=minutes), labels)["events"]
+
+
+def test_a_gap_restarts_a_pending_alert_instead_of_raising_it():
+    m = gap_monitor(1800)
+    assert observe_at(m, 0, ["high_ec"]) == []
+    assert observe_at(m, 300, ["high_ec"]) == []  # five hours later, nothing in between: a new wait, not "lasting"
+    assert m.states()[0]["state"] == "pending"
+    assert observe_at(m, 305, ["high_ec"]) == []
+    assert kinds([observe_at(m, 310, ["high_ec"])]) == [("ec", "raised")]  # 10 minutes after the restart
+    assert m.states()[0]["since"] == (T0 + timedelta(minutes=300)).isoformat()
+
+
+def test_a_gap_restarts_the_reading_count_of_a_samples_rule():
+    rules = [{"id": "chk", "match_any_labels": ["sensor_anomaly"], "action": "check", "message": "m", "raise_after_samples": 3}]
+    m = gap_monitor(1800, rules)
+    observe_at(m, 0, ["sensor_anomaly"])
+    observe_at(m, 1, ["sensor_anomaly"])
+    assert observe_at(m, 200, ["sensor_anomaly"]) == []  # would have been the third reading without the gap
+    assert observe_at(m, 201, ["sensor_anomaly"]) == []
+    assert kinds([observe_at(m, 202, ["sensor_anomaly"])]) == [("chk", "raised")]
+
+
+def test_without_a_gap_the_wait_is_unchanged():
+    m = gap_monitor(1800)
+    events = [observe_at(m, minute, ["high_ec"]) for minute in range(0, 31, 10)]  # 10 minutes apart, under the limit
+    assert kinds(events) == [("ec", "raised")] and len(events[1]) == 1
+
+
+def test_a_gap_does_not_touch_an_alert_that_is_already_raised():
+    m = gap_monitor(1800, [{**RULES[0], "raise_after_seconds": 0}])
+    assert kinds([observe_at(m, 0, ["high_ec"])]) == [("ec", "raised")]
+    assert observe_at(m, 300, ["high_ec"]) == []
+    state = m.states()[0]
+    assert state["state"] == "active" and state["since"] == T0.isoformat()
+
+
+def test_the_gap_limit_can_be_switched_off():
+    m = gap_monitor(0)
+    observe_at(m, 0, ["high_ec"])
+    assert kinds([observe_at(m, 300, ["high_ec"])]) == [("ec", "raised")]  # the old behaviour
+
+
+def test_the_shipped_default_is_30_minutes():
+    assert settings.alert_max_gap_seconds == 1800

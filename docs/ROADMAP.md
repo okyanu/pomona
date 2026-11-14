@@ -4,20 +4,7 @@ Open edge AI for controlled agriculture.
 
 **Platform `v0.1.0-alpha.1`** · **11 phases (0–10)** · **2 done** · **8 active/partial** · **Phase 2 primary focus** · [Full tracker →](./PHASES.md)
 
-| # | Focus | Status |
-|---|--------|--------|
-| 0 | Repo, docs, open source | ✅ |
-| 1 | Docker, core API, MQTT, simulator | ✅ |
-| 2 | Dashboard + persistence | ⏳ partial — local SQLite/dashboard/Docker/simulation/backup validation complete; optional sensor-ingestion API-key auth added; authentication elsewhere, signed device identity, and production observability remain |
-| 3 | Tomato reasoner | ⏳ partial — deterministic rules decide; the v0.1.7 adapter learned a training shortcut (answers `[]` on 146 of 153 varied benchmark cases) and needs a retrain |
-| 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published; guarded platform wiring verified locally |
-| 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
-| 5 | LLM advisor ([HF](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4)) | ⏳ partial — adapter/router contract exists; live backend remains optional |
-| 6 | Automation (suggestions) | ⏳ partial — [services/automation-engine](https://github.com/okyanu/pomona/tree/main/services/automation-engine) live: YAML rules, suggestions, manual approve/reject; deployed at [automation-engine-fawn.vercel.app](https://automation-engine-fawn.vercel.app); dashboard integration and bounded SQLite history available locally |
-| 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live; full platform playground still planned |
-| 8 | ESP32 devices | ⬜ — logger firmware compiles; not yet bench-tested, no field data |
-| 9 | Model registry | ⏳ partial — `models/registry/` |
-| 10 | Train reasoner models | ⏳ partial — small LoRAs on HF; evaluations so far are on generated data |
+Phases 0 and 1 are done; phases 2, 3, 4, 5, 6, 7, 9 and 10 are partial (some pieces exist, which does not mean the phase is being worked on now); Phase 8 (ESP32 devices) is still planned: logger firmware compiles; not yet bench-tested, no field data. Phase 2 stays the primary focus: local SQLite, dashboard, Docker, simulation and backup validation are complete and optional sensor-ingestion API-key auth was added, but authentication elsewhere, signed device identity and production observability remain. The tomato adapter (v0.1.7) learned a training shortcut (answers `[]` on 146 of 153 varied benchmark cases) and needs a retrain, so the deterministic rules decide. The full phase table is in [PHASES.md](./PHASES.md); the maintainer's current plan is in [NEXT_90_DAYS.md](./NEXT_90_DAYS.md).
 
 Product phases and release versions are separate. See [VERSIONING.md](./VERSIONING.md).
 
@@ -109,21 +96,23 @@ Current best model set:
 |----------|--------|-------|
 | Tomato risk `v0.1.7` | Published, experimental | Learned a training shortcut; research only, deterministic tomato rules decide |
 | Sensor quality `v0.1.1-boundary` | Local, not published | Candidate for first integration tests; trained to label missing/suspect/stale/conflicting packets (generated data only) |
-| Safety triage `v0.1` | Local, not published | Candidate for first integration tests; trained to classify unsafe proposed actions (generated data only) |
+| Safety triage `v0.1` | Local candidate, failed its publish gate; not published | Local tests only; trained to classify unsafe proposed actions (generated data only); rules do the work |
 | Water / irrigation risk `v0.1.8` | Published release candidate | Advisory; deterministic validation and human review required |
 | Actuator command gate `v0.1` | Published research preview | Below standalone gate; deterministic checker remains final authority |
 | Actuator command gate `v0.1.1-hardcases` | Rejected | Local eval regression; do not use |
 | Actuator command gate `v0.1.2-correction` | Rejected | Held-out eval regression; do not use |
 | Nutrient / pH-EC `v0.1.1-correction` | Published | LoRA, GGUF, and MLX; evaluated on synthetic cases only; use only through the deterministic guarded route |
 
-Next integration work:
+Integration endpoints (all four exist; see [PROJECT_STATUS.md](./PROJECT_STATUS.md) for what each does):
 
 ```text
 POST /v1/reasoners/sensor-quality
 POST /v1/reasoners/tomato-risk
-POST /v1/reasoners/safety-triage
-POST /v1/actuator-command-gate/check
+POST /v1/reasoners/safety-triage            (deterministic fallback; model runtime pending)
+POST /v1/actuator-command-gate/check        (safety-checker; deterministic final authority)
 ```
+
+Still to do: wire the remaining specialist model runtimes and improve tomato model-only quality.
 
 Future model families:
 

@@ -54,6 +54,6 @@ Run: `./scripts/up.sh` then `./scripts/sim.sh`
 
 ## More detail
 
-Maintainers: full architecture notes in `private/planning/` (local, not in Git).
+Maintainers: fuller architecture notes are in `private/planning/` (maintainer-only, on the maintainer's machine; not in the repository, so you cannot open them).
 
 Public progress: [PROJECT_STATUS.md](./PROJECT_STATUS.md) · [PHASES.md](./PHASES.md)

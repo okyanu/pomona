@@ -741,7 +741,7 @@ def test_overview_sends_the_age_of_the_latest_reading_from_the_server_clock(monk
 
 
 def test_a_sample_time_ahead_of_the_server_clock_is_age_zero_not_negative(monkeypatch):
-    body = _overview_at(monkeypatch, "2026-11-07T07:59:30+00:00")  # Core allows a sample time up to 60 s ahead
+    body = _overview_at(monkeypatch, "2026-11-07T07:59:30+00:00")  # Core allows a sample time up to MAX_FUTURE_SAMPLE_S ahead
     assert body["latest_age_s"] == 0.0
 
 
@@ -869,3 +869,34 @@ def test_overview_passes_the_two_core_keys_on(monkeypatch):
     monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
     body = client.get("/api/overview").json()
     assert body["zone_multi_device"] is True and body["latest_device_fields"] == ["ph"]
+
+
+def test_failed_service_calls_do_not_leak_internal_text_to_the_browser(monkeypatch, caplog):
+    secret = "http://core.internal.example:8080/v1/sensors/devices"
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path, params=None):
+            raise dashboard_main.httpx.ConnectError(f"connection refused: {secret}")
+        async def post(self, path, json=None):
+            raise dashboard_main.httpx.ConnectError(f"connection refused: {secret}")
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    expected = {"/api/devices": "Device status", "/api/probe-health": "Probe health", "/api/history": "History",
+                "/api/overview": "Core", "/api/runtimes": "Runtime status", "/api/alerts": "Alert monitor",
+                "/api/automation": "Automation engine", "/api/audit": "Pipeline audit"}
+    with caplog.at_level("WARNING"):
+        for path, label in expected.items():
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert secret not in response.text and "refused" not in response.text and "internal" not in response.text, path
+            assert f"{label} unavailable" in response.text, path
+        services = client.get("/api/services")
+    assert secret not in services.text and "refused" not in services.text
+    statuses = services.json()["services"]
+    assert set(statuses) == {"core", "model_router", "safety_checker", "digital_twin", "automation_engine"}
+    assert all(item["available"] is False and "unavailable" in item["error"] for item in statuses.values())
+    assert statuses["model_router"]["error"].startswith("model router unavailable")
+    assert secret in caplog.text  # the detail stays in the log

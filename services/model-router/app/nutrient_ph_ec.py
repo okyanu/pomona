@@ -3,10 +3,27 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List
 
 from app.backends.chat_json import ollama_chat_json
 from app.config import settings
+from app.reasoner_thresholds import (
+    EC_ANOMALY_HIGH,
+    EC_ANOMALY_LOW,
+    EC_HIGH,
+    EC_LOW_HYDROPONIC,
+    EC_LOW_SUBSTRATE,
+    PH_ANOMALY_HIGH,
+    PH_ANOMALY_LOW,
+    PH_HIGH,
+    PH_LOW,
+    SUBSTRATE_SYSTEM_TYPE,
+    is_hydroponic,
+)
+from app.sensor_quality import numeric
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_LABELS = {
@@ -73,7 +90,7 @@ def derive_nutrient_ph_ec(input_data: Dict[str, Any]) -> Dict[str, Any]:
     checks: List[str] = []
 
     for field in ("ph", "ec_ms_cm"):
-        if field in expected and sensor.get(field) is None:
+        if field in expected and numeric(sensor.get(field)) is None:
             _add(missing, field)
     if not system_type or not expected:
         _add(labels, "missing_critical_data")
@@ -82,27 +99,28 @@ def derive_nutrient_ph_ec(input_data: Dict[str, Any]) -> Dict[str, Any]:
         _add(labels, "missing_critical_data")
         checks.append("restore or manually verify pH and EC readings before changing fertigation")
 
-    ph = sensor.get("ph")
-    ec = sensor.get("ec_ms_cm")
-    if isinstance(ph, (int, float)):
-        if ph <= 3.5 or ph >= 9.0:
+    # A numeric string ("9.9") counts as its number; anything else non-numeric counts as missing.
+    ph = numeric(sensor.get("ph"))
+    ec = numeric(sensor.get("ec_ms_cm"))
+    if ph is not None:
+        if ph <= PH_ANOMALY_LOW or ph >= PH_ANOMALY_HIGH:
             _add(labels, "sensor_anomaly")
             checks.append("inspect pH probe calibration and raw telemetry")
-        elif ph <= 5.3:
+        elif ph <= PH_LOW:
             _add(labels, "low_ph")
             checks.append("repeat pH measurement with a calibrated meter")
-        elif ph >= 7.2:
+        elif ph >= PH_HIGH:
             _add(labels, "high_ph")
             checks.append("repeat pH measurement with a calibrated meter")
-    if isinstance(ec, (int, float)):
-        if ec < 0.01 or ec > 10:
+    if ec is not None:
+        if ec < EC_ANOMALY_LOW or ec > EC_ANOMALY_HIGH:
             _add(labels, "sensor_anomaly")
             checks.append("inspect EC sensor units, sample availability, and calibration")
-        elif ec >= 4.5:
+        elif ec >= EC_HIGH:
             _add(labels, "high_ec")
             checks.append("verify EC manually and review nutrient concentration logs")
-        elif (system_type == "controlled_greenhouse" and ec <= 0.8) or (
-            system_type == "greenhouse_substrate" and ec <= 0.05
+        elif (is_hydroponic(system_type) and ec <= EC_LOW_HYDROPONIC) or (
+            system_type == SUBSTRATE_SYSTEM_TYPE and ec <= EC_LOW_SUBSTRATE
         ):
             _add(labels, "low_ec")
             checks.append("verify EC manually and review nutrient concentration logs")
@@ -197,10 +215,12 @@ async def route_nutrient_ph_ec_reasoner(
             if selected == "model_only":
                 result = model
         except Exception as exc:
+            # The full text goes to the log only: callers get the exception class, never model- or host-written text.
+            logger.warning("%s inference failed: %s", selected_backend, exc)
             if selected == "model_only":
                 raise RuntimeError(f"{selected_backend} inference failed: {exc}") from exc
             fallback_reason = (
-                f"{selected_backend} unavailable or invalid; used deterministic rules: {exc}"
+                f"{selected_backend} unavailable or invalid ({type(exc).__name__}); used deterministic rules"
             )
     elif selected == "model_only":
         raise NotImplementedError("model_only requires a configured nutrient/pH-EC runtime backend")
