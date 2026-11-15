@@ -19,7 +19,7 @@ from app.config import settings
 from app.rules import InvalidRuleError, evaluate_rules, load_rules
 from app.store import suggestion_store
 from app.advice_cards import suggestions_to_advice_cards
-from app.alerts import AlertMonitor
+from app.alerts import AlertMonitor, clean_detail
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,6 +109,14 @@ class AlertObserveRequest(BaseModel):
     sample_time: datetime
     risk_labels: List[str] = Field(default_factory=list, max_length=100)
     data_quality_labels: List[str] = Field(default_factory=list, max_length=100)
+    # The router's sensor check text for this reading (multi-device zones; docs/design/multi-device-zones-slice2.md 2.6).
+    # Free text from a client: control characters are stripped and it is cut to 500 characters including a trailing "…".
+    detail: Optional[str] = None
+
+    @field_validator("detail", mode="before")
+    @classmethod
+    def sanitize_detail(cls, value: Any) -> Optional[str]:
+        return clean_detail(value) if isinstance(value, str) else value
 
     @field_validator("sample_time")
     @classmethod
@@ -130,6 +138,7 @@ class AlertState(BaseModel):
     consecutive: Optional[int] = None  # readings in a row carrying the label while pending
     raised_at: Optional[str] = None
     recovering_since: Optional[str] = None
+    detail: Optional[str] = None  # sensor check text, only on sensor-check alerts in multi-device zones
 
 
 class AlertEvent(BaseModel):
@@ -141,6 +150,7 @@ class AlertEvent(BaseModel):
     message: Optional[str] = None
     event: Literal["raised", "recovered"]
     sample_time: str
+    detail: Optional[str] = None  # copied to "raised"; a "recovered" event has none
 
 
 class AlertObserveResponse(BaseModel):
@@ -486,7 +496,8 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 def observe_alerts(request: AlertObserveRequest) -> AlertObserveResponse:
     """Feed one reading's risk labels to the alert monitor. Advisory state only; no actuator path."""
     result = alert_monitor.observe(request.farm_id, request.zone_id, request.device_id,
-                                   request.sample_time, request.risk_labels)
+                                   request.sample_time, request.risk_labels, detail=request.detail,
+                                   data_quality_labels=request.data_quality_labels)
     if not result["ignored"]:
         suggestion_store.observe_outcomes(request.farm_id, request.zone_id, request.device_id, request.sample_time,
                                           request.risk_labels, request.data_quality_labels)

@@ -57,6 +57,34 @@ type's fields (a moisture field counts when any moisture name is present; an emp
 and the tomato reasoner skips the others as missing critical data. An explicit `expected_fields` always wins. Absent
 `device_fields`, nothing changes.
 
+`POST /v1/pipeline/evaluate` and the shared chain (`POST /v1/reasoners/shared-chain`) also take three optional keys for a
+zone snapshot (`docs/design/multi-device-zones-slice2.md` 2.3), where the sensor packet is built from several devices
+and has no history of its own, so a persistent fault such as a stuck probe is invisible to the router and arrives as
+the check result of the device the reading came from:
+
+- `known_vetoed_fields`: fields a device's own check did not trust. Names that are not known sensor fields are
+  dropped.
+- `known_data_quality_labels`: labels from that check; at most 50, each matching `^[a-z_]{1,64}$`, others dropped.
+- `known_safe_next_checks`: the matching checks; at most 20, each at most 300 characters, others dropped.
+
+They are merged into the sensor quality right after the sensor-quality reasoner and before the gate:
+
+- Labels are added, except `stale_reading`, `insufficient_context` and `unit_mismatch` (the global veto labels: one
+  device's stale packet must not veto the whole zone, so the dashboard turns them into vetoed fields) and any
+  `missing_*` label (the router decides missing fields on the snapshot itself).
+- A known vetoed field becomes a suspect field only when the sensor holds a value for it; a field the snapshot does not
+  hold is the router's own missing-field call. The gate then treats it like any suspect field: it is named in the one
+  reason string, takes its companion fields with it (a carried `ph` veto also vetoes `previous_ph`), and counts toward
+  `cannot_confirm` when every expected field ends up vetoed.
+- Known checks not already present are appended, and `continue routine monitoring` is removed when any other check is
+  there. Anything added makes human review required; labels added to a clean result give the "Sensor packet needs
+  verification" rationale.
+- `from_device_checks` (`data_quality_labels` and `vetoed_fields` that were added) is added to the sensor quality
+  block. It is absent when nothing was added.
+
+Absent keys: no merge runs, no new key appears, and the output is byte-identical. The JavaScript gate mirrors under
+`spaces/*/trust_gate.js` do not implement the merge, because their parity cases never send these keys.
+
 ## Output Shape
 
 ```json

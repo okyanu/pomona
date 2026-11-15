@@ -11,6 +11,7 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.config import settings
+from app.outcome_fields import counting_devices, watched_fields
 
 
 def utc_now_iso() -> str:
@@ -162,7 +163,13 @@ class SuggestionStore:
         """Judge one reading against approved suggestions awaiting an outcome. Uses sample time; readings
         from before the approval, repeats, future clocks and untrusted (data-quality-flagged) readings
         never count toward recovery, except a data-quality label the suggestion itself watches (a sensor-rule
-        card, sensor_check or sensor_flatline): that is a trusted reading showing the sensor problem persists."""
+        card, sensor_check or sensor_flatline): that is a trusted reading showing the sensor problem persists.
+
+        A suggestion made on a multi-device zone view carries `sources` in its context (docs/design/
+        multi-device-zones-slice2.md 2.7): then only readings from the devices that supply the fields behind its watched
+        labels count (app/outcome_fields.py), each device keeps its own last sample time, and it is confirmed only when
+        the clean streak is reached and every counting device sent a clean reading inside it. Without `sources`, the
+        suggestion's own device (if any) is the only one that counts, as before."""
         t = sample_time.astimezone(timezone.utc)
         labels, quality = set(risk_labels), set(data_quality_labels)
         with self._lock, self._db:
@@ -175,22 +182,42 @@ class SuggestionStore:
                 if context.get("farm_id") != farm_id or context.get("zone_id") != zone_id or (own_device and own_device != device_id):
                     continue
                 evidence = json.loads(row["outcome_evidence"])
-                last = evidence["last_sample_time"]
+                sources = context.get("sources")
+                counting: Optional[List[str]] = None
+                if isinstance(sources, dict) and sources:
+                    counting = counting_devices(sources, watched_fields(evidence["watched_labels"], context))
+                    if device_id is None or device_id not in counting:  # includes "nobody carries the field": nothing counts
+                        continue
+                by_device = evidence.get("last_sample_by_device") if counting is not None else None
+                last = by_device.get(device_id) if by_device is not None else evidence["last_sample_time"]
                 if (t <= datetime.fromisoformat(row["decided_at"]) or (last and t <= datetime.fromisoformat(last))
                         or t > now + timedelta(seconds=60)):
                     continue
                 if t > datetime.fromisoformat(row["outcome_deadline"]):
                     self._finalize_outcome(row["id"], evidence)
                     continue
-                evidence["last_sample_time"] = t.isoformat()
+                if counting is None:
+                    evidence["last_sample_time"] = t.isoformat()
+                else:
+                    evidence.setdefault("last_sample_by_device", {})[device_id] = t.isoformat()
+                    newest = evidence["last_sample_time"]
+                    if not newest or t > datetime.fromisoformat(newest):
+                        evidence["last_sample_time"] = t.isoformat()
                 watched = set(evidence["watched_labels"])
                 if quality and not quality & watched:
                     evidence["untrusted_readings"] += 1
                 else:
                     evidence["readings_seen"] += 1
-                    evidence["clean_streak"] = 0 if (labels | quality) & watched else evidence["clean_streak"] + 1
+                    flagged = bool((labels | quality) & watched)
+                    evidence["clean_streak"] = 0 if flagged else evidence["clean_streak"] + 1
+                    if counting is not None:
+                        streak_devices = [] if flagged else list(evidence.get("clean_streak_devices") or [])
+                        if not flagged and device_id not in streak_devices:
+                            streak_devices.append(device_id)
+                        evidence["clean_streak_devices"] = streak_devices
                 status = row["outcome_status"]
-                if evidence["clean_streak"] >= evidence["required_clean_readings"]:
+                if evidence["clean_streak"] >= evidence["required_clean_readings"] and (
+                        counting is None or set(counting) <= set(evidence.get("clean_streak_devices") or [])):
                     status, evidence["resolved_sample_time"] = "confirmed", t.isoformat()
                 self._db.execute("UPDATE suggestions SET outcome_status=?, outcome_evidence=? WHERE id=?",
                                  (status, json.dumps(evidence), row["id"]))

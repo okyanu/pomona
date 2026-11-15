@@ -6,9 +6,9 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.expected_fields import expected_fields_for
+from app.expected_fields import expected_fields_for, narrow_to_device
 from app.sensor_quality import derive_sensor_quality
-from app.trust_gate import apply_sensor_veto, neutral_specialists
+from app.trust_gate import apply_sensor_veto, merge_known_checks, neutral_specialists
 from app.water_irrigation import derive_water_irrigation_risk
 
 
@@ -38,13 +38,25 @@ def run_shared_reasoner_chain(
     proposed_command: Dict[str, Any] | None,
     actor: str,
     mode: str,
+    device_fields: List[str] | None = None,
+    known_vetoed_fields: List[str] | None = None,
+    known_data_quality_labels: List[str] | None = None,
+    known_safe_next_checks: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """Run quality, water-risk, and actuator safety in dependency order."""
+    """Run quality, water-risk, and actuator safety in dependency order.
+
+    `device_fields` and the three `known_*` lists work as in `evaluate_pipeline`: without an explicit `expected_fields`
+    only the fields the zone's devices carry are expected, and the devices' own sensor-check results are merged into the
+    sensor quality before the gate. Omitted: nothing changes.
+    """
     selected = mode.strip().lower()
     if selected not in {"rules_only", "hybrid_guarded"}:
         raise NotImplementedError("shared chain model_only mode is not wired yet")
 
+    explicit_fields = bool(expected_fields)
     expected_fields = expected_fields or expected_fields_for(farm_context, sensor)
+    if device_fields and not explicit_fields:
+        expected_fields = narrow_to_device(expected_fields, device_fields)
     quality_input = {
         "farm_context": farm_context,
         "sensor": sensor,
@@ -55,6 +67,8 @@ def run_shared_reasoner_chain(
         sensor,
         expected_fields,
     )
+    if known_vetoed_fields or known_data_quality_labels or known_safe_next_checks:
+        quality = merge_known_checks(quality, sensor, known_vetoed_fields, known_data_quality_labels, known_safe_next_checks)
 
     masked_sensor, _, gate = apply_sensor_veto(sensor, None, quality, expected_fields)
     if gate["trust_verdict"] == "cannot_confirm":

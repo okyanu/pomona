@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Dict, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field, ConfigDict, ValidationInfo, model_validator, field_validator
 
@@ -288,3 +288,53 @@ class SensorEventListResponse(BaseModel):
     # the fields its device is expected to report then (null in a single-device zone).
     zone_multi_device: bool = False
     latest_device_fields: Optional[list[str]] = None
+
+
+class ZoneSnapshotOther(BaseModel):
+    """A device that also carries a field the zone view takes from another device."""
+    device_id: str
+    value: float
+    sample_time: str
+    vetoed: bool
+
+
+class ZoneSnapshotField(BaseModel):
+    value: float
+    device_id: str
+    sample_time: str
+    age_s: float
+    others: List[ZoneSnapshotOther]
+
+
+class ZoneSnapshotDevice(BaseModel):
+    device_id: str
+    event: Dict[str, Any]
+    sample_time: str
+    received_at: Optional[str] = None
+    age_s: float
+    interval_s: Optional[float] = None
+    stale_limit_s: float
+    stale: bool
+    device_fields: List[str]
+    supplied: List[str]
+    # {"status": "pending"}, or {"status": "judged", "trust_verdict", "vetoed_fields", "data_quality_labels",
+    # "safe_next_checks"} (the last two null for a verdict recorded before they were kept).
+    trust: Dict[str, Any]
+
+
+class ZoneSnapshotResponse(BaseModel):
+    """GET /v1/sensors/zone-snapshot (docs/design/multi-device-zones-slice2.md 2.1). A zone that is not multi-device
+    answers `{"multi_device": false}` and nothing else (the endpoint leaves every other key unset)."""
+    multi_device: bool
+    farm_id: Optional[str] = None
+    zone_id: Optional[str] = None
+    stale_after_s: Optional[int] = None
+    devices: Optional[List[ZoneSnapshotDevice]] = None
+    fields: Optional[Dict[str, ZoneSnapshotField]] = None
+    sensor: Optional[Dict[str, Any]] = None  # the zone's reading for the router: no device_id; null when nothing is live
+    sources: Optional[Dict[str, List[str]]] = None
+    zone_device_fields: Optional[List[str]] = None
+    context: Optional[Dict[str, Any]] = None
+    context_source: Optional[Dict[str, str]] = None
+    context_conflicts: Optional[List[str]] = None
+    newest_age_s: Optional[float] = None

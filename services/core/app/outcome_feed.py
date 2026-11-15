@@ -22,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 12
 TIMEOUT_SECONDS = 5.0
+DETAIL_MAX_CHARS = 500  # the automation engine cuts to the same length
+ROUTINE_CHECK = "continue routine monitoring"
+
+
+def alert_detail(result: Dict[str, Any]) -> Optional[str]:
+    """The router's own sensor check text for one reading: its safe next checks without "continue routine monitoring",
+    joined with "; ", cut to 500 characters ending in "…". None when there is nothing to say."""
+    checks = [c for c in (result.get("sensor_quality") or {}).get("safe_next_checks") or []
+              if isinstance(c, str) and c and c != ROUTINE_CHECK]
+    text = "; ".join(checks)
+    if len(text) > DETAIL_MAX_CHARS:
+        text = text[:DETAIL_MAX_CHARS - 1] + "…"
+    return text or None
 
 
 def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
@@ -142,11 +155,17 @@ class OutcomeFeed:
         })
         gate = result.get("trust_gate")
         if gate:  # what this reading's verdict was, so later readings' references leave vetoed values out
-            self._store.add_trust(event, gate.get("trust_verdict", "trusted"), gate.get("vetoed_fields") or [])
+            quality = result.get("sensor_quality") or {}
+            self._store.add_trust(event, gate.get("trust_verdict", "trusted"), gate.get("vetoed_fields") or [],
+                                  quality.get("data_quality_labels") or [], quality.get("safe_next_checks") or [])
+        # The check text goes to alerts only in a multi-device zone (device_fields is not None); a single-device
+        # zone's request body is unchanged.
+        detail = alert_detail(result) if device_fields is not None else None
         _post(settings.automation_engine_url, "/v1/automation/alerts/observe", {
             "farm_id": event.farm_id, "zone_id": event.zone_id, "device_id": event.device_id,
             "sample_time": sensor["timestamp"], "risk_labels": pipeline_risk_labels(result),
-            "data_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", [])})
+            "data_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", []),
+            **({"detail": detail} if detail else {})})
 
 
 outcome_feed = OutcomeFeed()

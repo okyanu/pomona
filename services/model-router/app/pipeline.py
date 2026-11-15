@@ -24,7 +24,7 @@ from app.safety_triage import route_safety_triage_reasoner
 from app.sensor_quality import route_sensor_quality_reasoner
 from app.shared_chain import derive_actuator_gate
 from app.tomato_reasoner import derive_tomato_risk
-from app.trust_gate import NUTRIENT_MODEL_ID, WATER_MODEL_ID, apply_sensor_veto, neutral_specialists
+from app.trust_gate import NUTRIENT_MODEL_ID, WATER_MODEL_ID, apply_sensor_veto, merge_known_checks, neutral_specialists
 from app.water_irrigation import route_water_irrigation_reasoner
 
 
@@ -105,6 +105,9 @@ async def evaluate_pipeline(
     history: list[dict[str, Any]] | None = None,
     stream_baseline: dict[str, dict[str, Any]] | None = None,
     device_fields: list[str] | None = None,
+    known_vetoed_fields: list[str] | None = None,
+    known_data_quality_labels: list[str] | None = None,
+    known_safe_next_checks: list[str] | None = None,
 ) -> dict[str, Any]:
     """Evaluate all deterministic specialists, then apply the final gate.
 
@@ -114,6 +117,10 @@ async def evaluate_pipeline(
     `device_fields` (multi-device zones, docs/design/multi-device-zones.md 1.3): the fields the sensor's device has
     reported lately. Without an explicit `expected_fields`, only those of the system type's fields are expected, and the
     tomato reasoner is told which critical fields to skip (`not_expected_fields`). Omitted: nothing changes.
+
+    `known_vetoed_fields`, `known_data_quality_labels` and `known_safe_next_checks` (zone snapshots,
+    docs/design/multi-device-zones-slice2.md 2.3): the sensor-check results of the devices the snapshot's readings came
+    from, merged into the sensor quality before the gate (trust_gate.merge_known_checks). Omitted: nothing changes.
     """
     pipeline_id = f"pipeline-{uuid4().hex[:12]}"
     evaluated_at = _now()
@@ -148,6 +155,8 @@ async def evaluate_pipeline(
         "pomona-sensor-quality-reasoner-v0.1",
         now=evaluated_at,
     )
+    if known_vetoed_fields or known_data_quality_labels or known_safe_next_checks:
+        quality = merge_known_checks(quality, sensor, known_vetoed_fields, known_data_quality_labels, known_safe_next_checks)
     masked_sensor, masked_history, gate = apply_sensor_veto(sensor, history, quality, fields)
     if gate["trust_verdict"] == "cannot_confirm":
         water, nutrient, tomato = neutral_specialists(specialist_mode)

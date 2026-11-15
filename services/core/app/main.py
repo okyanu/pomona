@@ -18,6 +18,7 @@ from app.schemas import (
     SensorEvent,
     SensorObservation,
     SensorEventListResponse,
+    ZoneSnapshotResponse,
     CalibrationEvent,
     CorrectedObservation,
     fmt_reading,
@@ -97,6 +98,14 @@ def list_sensor_events(limit: int = Query(default=50, ge=1, le=500), farm_id: Op
     device_fields = event_store.device_fields_for(latest) if latest else None
     return SensorEventListResponse(count=len(events), events=events, latest_event=latest,
                                    zone_multi_device=device_fields is not None, latest_device_fields=device_fields)
+
+
+@app.get("/v1/sensors/zone-snapshot", response_model=ZoneSnapshotResponse, response_model_exclude_unset=True)
+def zone_snapshot(farm_id: str = Query(..., min_length=1), zone_id: str = Query(..., min_length=1),
+                  stale_after_s: int = Query(default=0, ge=0)) -> ZoneSnapshotResponse:
+    """One view of a multi-device zone: each reading field from one device, each device's own sensor check, the zone's
+    context. `{"multi_device": false}` for a single-device zone (docs/design/multi-device-zones-slice2.md 2.1)."""
+    return ZoneSnapshotResponse(**event_store.zone_snapshot(farm_id, zone_id, stale_after_s))
 
 
 @app.get("/v1/sensors/events/latest", response_model=SensorEvent)

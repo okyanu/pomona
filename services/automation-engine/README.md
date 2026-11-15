@@ -79,6 +79,14 @@ never move an alert. `GET /v1/automation/alerts?farm_id=&zone_id=` lists open al
 last raised / recovered events. Alerts are advisory: they never create suggestions or touch
 hardware.
 
+`observe` also accepts an optional `detail` (the router's sensor check text for the reading; Core sends it in
+multi-device zones only). It is free text from a client: control characters (Unicode category Cc) are stripped and it is
+cut to 500 characters including a trailing `…`. It is kept only on a sensor card (a rule that matched through one of the
+reading's `data_quality_labels`, today `sensor_check` and `sensor_flatline`), carried through every state change, copied to
+the `raised` event (a `recovered` event has none), and returned as `detail` (`null` when absent) in `GET /v1/automation/alerts`
+items and events. It is never copied into suggestions, advice cards or any prompt. `alert_states` and `alert_events` gain a
+`detail` column on start (`ALTER TABLE` when missing).
+
 ## Outcome confirmation (after an approval)
 
 Approval records a decision; it does **not** mean the suggested check or change
