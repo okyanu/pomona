@@ -237,3 +237,43 @@ def test_include_result_and_states(demo_rows):
         got = pomona.observe(first, include_result=True)
         assert "trust_gate" in got["pipeline"] and "pipeline" not in pomona.observe(second)
         assert pomona.states() == [] and got["sample_time"] == score.parse_ts(first["timestamp"])
+
+
+def test_capture_hands_over_the_exact_pipeline_input_and_changes_nothing(demo_rows):
+    rows = [r["sent"] for r in demo_rows if r["published"] and r["sent"]][:80]
+    captured = []
+
+    def run(capture):
+        with engine.InProcessPomona() as pomona:
+            return [json.dumps(pomona.observe(sent, include_result=True, capture=capture), sort_keys=True, default=str)
+                    for sent in rows]
+
+    plain = run(None)
+    seen = run(lambda pipeline_input: captured.append(json.loads(json.dumps({k: v for k, v in pipeline_input.items() if k != "now"}))))
+    scrub = lambda text: re.sub(r'"pipeline_id": "[^"]*"', "", text)  # a random id per call
+    assert [scrub(t) for t in plain] == [scrub(t) for t in seen]  # capture=None and capture=callback: same results
+    assert len(captured) == len(rows)
+    assert all(set(c) <= {"farm_context", "sensor", "expected_fields", "history", "stream_baseline", "device_fields"} for c in captured)
+    assert all(c["expected_fields"] == [] and "device_fields" not in c for c in captured)  # one device per zone here
+    assert captured[0]["history"] == [] and len(captured[-1]["history"]) == engine.HISTORY_PACKETS
+    assert captured[-1]["sensor"]["received_at"].endswith("Z") and captured[-1]["stream_baseline"]
+
+
+def test_evaluate_input_reruns_a_recorded_input_at_another_clock_and_leaves_the_engine_alone(demo_rows):
+    rows = [r["sent"] for r in demo_rows if r["published"] and r["sent"] and r["zone_id"] == A][:60]
+    seen = []
+    with engine.InProcessPomona() as pomona:
+        for sent in rows:
+            got = pomona.observe(sent, include_result=True, capture=seen.append)
+        last = seen[-1]
+        history_before = [list(h) for h in pomona._history.values()]
+        again = pomona.evaluate_input(last)  # its own clock: the same verdict
+        assert again["trust_gate"] == got["pipeline"]["trust_gate"]
+        late = pomona.evaluate_input(last, last["now"] + timedelta(hours=2))  # past the router's stale limit
+        assert late["trust_gate"]["trust_verdict"] == "cannot_confirm"
+        assert "stale_reading" in late["sensor_quality"]["data_quality_labels"]
+        text = pomona.evaluate_input(last, engine.iso_z(last["now"] + timedelta(hours=2)))
+        assert text["trust_gate"] == late["trust_gate"]
+        assert [list(h) for h in pomona._history.values()] == history_before  # no engine state changed
+        after = pomona.observe({**rows[-1], "timestamp": engine.iso_z(last["now"] + timedelta(seconds=29))})
+        assert after["accepted"] and after["sample_time"] > last["now"]

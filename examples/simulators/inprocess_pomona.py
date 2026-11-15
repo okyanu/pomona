@@ -16,6 +16,9 @@ a verdict, the automation-engine turns labels into cards), as one importable cla
   4. Automation-engine: the real `AlertMonitor` (alerts.py, in-memory SQLite) with the real rules.yaml
      rules, advanced by the reading's sample time (never the wall clock).
 
+`observe(capture=...)` hands the exact pipeline input of a reading to a callback and `evaluate_input` runs such an input
+again at another clock without touching the engine (the abstention eval's stale cases).
+
 Shared by `scripts/score_fake_greenhouse.py --offline` and the "Try to fool Pomona" Space, so both use one
 code path. Run it with the model-router venv (httpx, pydantic, pydantic-settings, pyyaml, fastapi).
 
@@ -40,7 +43,7 @@ import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
 ROUTER_DIR = ROOT / "services" / "model-router"
@@ -261,7 +264,8 @@ class InProcessPomona:
 
     # One reading
 
-    def observe(self, event: Dict[str, Any], *, include_result: bool = False) -> Dict[str, Any]:
+    def observe(self, event: Dict[str, Any], *, include_result: bool = False,
+                capture: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """Run one reading through Core's checks, the pipeline and the alert monitor.
 
         `event` is the sensor packet the device sent (farm_id, zone_id, device_id, timestamp, readings...).
@@ -270,6 +274,11 @@ class InProcessPomona:
         `vetoed_fields`, `card_labels` (labels some advice card matches), `sensor_check_labels`,
         `alert_events` (raised / recovered, with sample times) and `ignored` (the monitor already saw a
         later sample of the stream). `include_result` adds the full pipeline result as `pipeline`.
+
+        `capture` (optional) is called with the exact pipeline input, just before the pipeline runs (nothing else is
+        changed by it): a dict with `farm_context`, `sensor`, `expected_fields` (`[]`), `history`, `stream_baseline`,
+        `device_fields` (the key is absent in a single-device zone) and `now` (a datetime: sample time + 1 s). The
+        objects are the engine's own; copy what you keep. `evaluate_input` runs such an input again.
         """
         try:
             sample = parse_ts(str(event["timestamp"]))
@@ -296,17 +305,13 @@ class InProcessPomona:
                 baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MIN_N, baseline.DEFAULT_MAX_AGE_S or None,
                 baseline.DEFAULT_SCAN_LIMIT)
         reference = tracked.baseline(self._stream_calibrations(stream), sample)
-        pipeline = self._pipeline
-        with PIPELINE_LOCK:
-            original_now = pipeline._now
-            pipeline._now = lambda now=sample + timedelta(seconds=1): now
-            try:
-                extra = {} if device_fields is None else {"device_fields": device_fields}  # absent in a single-device zone
-                result = self._loop.run_until_complete(pipeline.evaluate_pipeline(
-                    farm, sensor, [], {"action_type": "continue_monitoring"}, "core_feed", "rules_only",
-                    "core_feed", history=prior, stream_baseline=reference or None, **extra))
-            finally:
-                pipeline._now = original_now
+        pipeline_input = {"farm_context": farm, "sensor": sensor, "expected_fields": [], "history": prior,
+                          "stream_baseline": reference or None, "now": sample + timedelta(seconds=1)}
+        if device_fields is not None:  # absent in a single-device zone
+            pipeline_input["device_fields"] = device_fields
+        if capture is not None:
+            capture(pipeline_input)
+        result = self._evaluate(pipeline_input, pipeline_input["now"])
         history = self._history.setdefault(stream, [])
         history.append(sensor)
         del history[:-HISTORY_PACKETS]
@@ -322,6 +327,32 @@ class InProcessPomona:
         if include_result:
             out["pipeline"] = result
         return out
+
+    def _evaluate(self, pipeline_input: Dict[str, Any], now: datetime) -> Dict[str, Any]:
+        """The pipeline on one input with its clock set to `now` (set `_now`, evaluate, restore, under PIPELINE_LOCK)."""
+        pipeline = self._pipeline
+        with PIPELINE_LOCK:
+            original_now = pipeline._now
+            pipeline._now = lambda now=now: now
+            try:
+                extra = ({"device_fields": pipeline_input["device_fields"]}
+                         if "device_fields" in pipeline_input else {})  # absent in a single-device zone
+                return self._loop.run_until_complete(pipeline.evaluate_pipeline(
+                    pipeline_input["farm_context"], pipeline_input["sensor"], pipeline_input["expected_fields"],
+                    {"action_type": "continue_monitoring"}, "core_feed", "rules_only", "core_feed",
+                    history=pipeline_input["history"], stream_baseline=pipeline_input["stream_baseline"], **extra))
+            finally:
+                pipeline._now = original_now
+
+    def evaluate_input(self, pipeline_input: Dict[str, Any], now: Any = None) -> Dict[str, Any]:
+        """Run the pipeline again on a recorded input (the dict `observe(capture=...)` gave), with the clock at `now`.
+
+        `now` is a datetime or ISO text; left out, the input's own `now`. Nothing of the engine changes: no history,
+        no trusted reference, no alert monitor, no device bookkeeping. Returns the pipeline result, as
+        `observe(include_result=True)` puts it under `pipeline`. Used to judge the same packet again at a later clock.
+        """
+        stamp = pipeline_input["now"] if now is None else now
+        return self._evaluate(pipeline_input, parse_ts(stamp) if isinstance(stamp, str) else stamp)
 
     def states(self, farm_id: Optional[str] = None, zone_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """The alert monitor's current alert states (open and pending cards)."""

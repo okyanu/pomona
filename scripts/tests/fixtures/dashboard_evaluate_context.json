@@ -1,0 +1,1245 @@
+{
+ "about": "Inputs and expected output of the dashboard's automation_evaluate() context. Rewritten by UPDATE_FIXTURES=1 in scripts/tests/test_eval_abstention.py (all keys) and in services/dashboard/tests/test_evaluate_context.py (`context` only).",
+ "context": {
+  "blocked_actions": [
+   "direct_actuator_control"
+  ],
+  "farm_id": "demo-farm",
+  "history_sha256": "c2f4d3848ff699a8b11db48fab2d4c12938ae49a67dbbe4a9309b52d73d594ff",
+  "history_snapshot": [
+   {
+    "air_temperature_c": 27.23,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.61,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 66.34,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.14,
+    "schema_version": "1.0",
+    "sequence": 29,
+    "soil_moisture_pct": 59.3,
+    "substrate_moisture_pct": 59.3,
+    "substrate_temperature_c": 20.0,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:14:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 27.67,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.62,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 67.97,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.12,
+    "schema_version": "1.0",
+    "sequence": 30,
+    "soil_moisture_pct": 59.4,
+    "substrate_moisture_pct": 59.4,
+    "substrate_temperature_c": 19.75,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:15:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 27.81,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.6,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 65.34,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.09,
+    "schema_version": "1.0",
+    "sequence": 31,
+    "soil_moisture_pct": 60.2,
+    "substrate_moisture_pct": 60.2,
+    "substrate_temperature_c": 19.94,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:15:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 27.98,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.59,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 66.09,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.09,
+    "schema_version": "1.0",
+    "sequence": 32,
+    "soil_moisture_pct": 59.2,
+    "substrate_moisture_pct": 59.2,
+    "substrate_temperature_c": 20.19,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:16:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 28.45,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.6,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 64.05,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.14,
+    "schema_version": "1.0",
+    "sequence": 33,
+    "soil_moisture_pct": 60.1,
+    "substrate_moisture_pct": 60.1,
+    "substrate_temperature_c": 20.0,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:16:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 28.65,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.56,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 65.2,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.06,
+    "schema_version": "1.0",
+    "sequence": 34,
+    "soil_moisture_pct": 59.9,
+    "substrate_moisture_pct": 59.9,
+    "substrate_temperature_c": 19.94,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:17:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 28.96,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.58,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 66.33,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.1,
+    "schema_version": "1.0",
+    "sequence": 35,
+    "soil_moisture_pct": 59.4,
+    "substrate_moisture_pct": 59.4,
+    "substrate_temperature_c": 19.75,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:17:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 29.19,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.57,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 66.8,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.1,
+    "schema_version": "1.0",
+    "sequence": 36,
+    "soil_moisture_pct": 59.5,
+    "substrate_moisture_pct": 59.5,
+    "substrate_temperature_c": 20.06,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:18:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 29.25,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.65,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 65.75,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.1,
+    "schema_version": "1.0",
+    "sequence": 37,
+    "soil_moisture_pct": 59.5,
+    "substrate_moisture_pct": 59.5,
+    "substrate_temperature_c": 20.06,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:18:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 29.64,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.59,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 66.62,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.1,
+    "schema_version": "1.0",
+    "sequence": 38,
+    "soil_moisture_pct": 58.5,
+    "substrate_moisture_pct": 58.5,
+    "substrate_temperature_c": 20.19,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:19:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   {
+    "air_temperature_c": 30.28,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.64,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 65.83,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 6.11,
+    "schema_version": "1.0",
+    "sequence": 39,
+    "soil_moisture_pct": 58.9,
+    "substrate_moisture_pct": 58.9,
+    "substrate_temperature_c": 20.12,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:19:30Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   }
+  ],
+  "missing_fields": [],
+  "pipeline_id": "pipeline-ace63153a71f",
+  "readings": {
+   "air_temperature_c": 30.43,
+   "ec_ms_cm": 2.64,
+   "humidity_pct": 65.12,
+   "ph": 7.56,
+   "soil_moisture_pct": 59.7,
+   "substrate_moisture_pct": 59.7
+  },
+  "reasoner_ids": [
+   "pomona-sensor-quality-reasoner-v0.1",
+   "pomona-water-irrigation-risk-reasoner-v0.1",
+   "pomona-nutrient-ph-ec-reasoner-v0.1"
+  ],
+  "reasoner_snapshot": {
+   "crop_risk": {
+    "blocked_actions": [
+     "direct_actuator_control"
+    ],
+    "human_review_required": true,
+    "missing_data": [],
+    "risk_labels": [
+     "heat_stress"
+    ],
+    "safe_next_checks": [
+     "review greenhouse temperature trend and ventilation state"
+    ],
+    "vpd_kpa": 1.517
+   },
+   "final_decision": {
+    "blocked_actions": [
+     "direct_actuator_control"
+    ],
+    "human_review_required": true,
+    "risk_level": "high",
+    "safe_next_checks": [
+     "verify ph with a meter: 7.56 differs from the trusted level 6.1; if a meter agrees with the reading, it is real: record a calibration for this probe to accept it",
+     "continue routine irrigation monitoring",
+     "continue routine nutrient monitoring",
+     "review greenhouse temperature trend and ventilation state",
+     "Log or display the observation without changing actuators or recipes."
+    ],
+    "trust_verdict": "partial",
+    "vetoed_fields": [
+     "ph"
+    ]
+   },
+   "nutrient_ph_ec": {
+    "backend": "rules",
+    "blocked_actions": [],
+    "fallback_reason": null,
+    "human_review_required": false,
+    "missing_fields": [],
+    "mode": "rules_only",
+    "model_id": "pomona-nutrient-ph-ec-reasoner-v0.1",
+    "nutrient_risk_labels": [],
+    "rationale": "pH/EC telemetry is present and inside the configured operating range.",
+    "safe_next_checks": [
+     "continue routine nutrient monitoring"
+    ],
+    "source": "deterministic_rules"
+   },
+   "sensor_quality": {
+    "data_quality_labels": [
+     "baseline_drift_possible"
+    ],
+    "fallback_reason": null,
+    "human_review_required": true,
+    "missing_fields": [],
+    "mode": "rules_only",
+    "model_id": "pomona-sensor-quality-reasoner-v0.1",
+    "rationale": "Sensor packet needs verification before downstream risk or action reasoning.",
+    "safe_next_checks": [
+     "verify ph with a meter: 7.56 differs from the trusted level 6.1; if a meter agrees with the reading, it is real: record a calibration for this probe to accept it"
+    ],
+    "source": "deterministic_rules",
+    "suspect_fields": [
+     "ph"
+    ]
+   },
+   "trust_gate": {
+    "global_veto": false,
+    "reason": "ph failed the sensor check and were not used",
+    "trust_verdict": "partial",
+    "vetoed_fields": [
+     "ph"
+    ]
+   },
+   "water_irrigation": {
+    "backend": "rules",
+    "blocked_actions": [],
+    "fallback_reason": null,
+    "human_review_required": false,
+    "irrigation_risk_labels": [],
+    "missing_fields": [],
+    "mode": "rules_only",
+    "model_id": "pomona-water-irrigation-risk-reasoner-v0.1",
+    "rationale": "Moisture telemetry is present and inside expected operating range.",
+    "safe_next_checks": [
+     "continue routine irrigation monitoring"
+    ],
+    "source": "deterministic_rules",
+    "suspect_fields": []
+   }
+  },
+  "risk_labels": [
+   "baseline_drift_possible",
+   "heat_stress"
+  ],
+  "sensor_event_id": "277747070ff5b98f50d055f85abe89e7945a17821e6d703df529ad5593c171f7",
+  "sensor_quality_labels": [
+   "baseline_drift_possible"
+  ],
+  "sensor_snapshot": {
+   "air_temperature_c": 30.43,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.64,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 65.12,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 7.56,
+   "received_at": "2026-06-01T08:20:01Z",
+   "schema_version": "1.0",
+   "sequence": 40,
+   "soil_moisture_pct": 59.7,
+   "substrate_moisture_pct": 59.7,
+   "substrate_temperature_c": 20.31,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:20:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  "sensor_timestamp": "2026-06-01T08:20:00Z",
+  "trust_verdict": "partial",
+  "vetoed_fields": [
+   "ph"
+  ],
+  "zone_id": "greenhouse-a"
+ },
+ "event": {
+  "air_temperature_c": 30.43,
+  "boot_id": "boot-bba1c9ff",
+  "crop": "tomato",
+  "crop_kc": 1.15,
+  "device_id": "fake-substrate-01",
+  "ec_ms_cm": 2.64,
+  "farm_id": "demo-farm",
+  "growth_stage": "flowering",
+  "humidity_pct": 65.12,
+  "mqtt_retained": false,
+  "npk_target": {
+   "k_ppm": 200.0,
+   "n_ppm": 150.0,
+   "p_ppm": 50.0,
+   "volume_liters": 100.0
+  },
+  "ph": 7.56,
+  "received_at": "2026-06-01T08:20:01Z",
+  "schema_version": "1.0",
+  "sequence": 40,
+  "soil_moisture_pct": 59.7,
+  "source": "mqtt",
+  "substrate_moisture_pct": 59.7,
+  "substrate_temperature_c": 20.31,
+  "system_type": "greenhouse_substrate",
+  "timestamp": "2026-06-01T08:20:00Z",
+  "weather": {
+   "elevation_m": 300.0,
+   "rh_mean_pct": 62.0,
+   "solar_radiation_mj_m2_day": 17.0,
+   "t_max_c": 27.5,
+   "t_mean_c": 23.5,
+   "t_min_c": 19.5,
+   "wind_speed_2m_ms": 1.5
+  },
+  "zone_area_m2": 20.0,
+  "zone_id": "greenhouse-a"
+ },
+ "history": [
+  {
+   "air_temperature_c": 27.23,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.61,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 66.34,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.14,
+   "received_at": "2026-06-01T08:14:30Z",
+   "schema_version": "1.0",
+   "sequence": 29,
+   "soil_moisture_pct": 59.3,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.3,
+   "substrate_temperature_c": 20.0,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:14:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 27.67,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.62,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 67.97,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.12,
+   "received_at": "2026-06-01T08:15:00Z",
+   "schema_version": "1.0",
+   "sequence": 30,
+   "soil_moisture_pct": 59.4,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.4,
+   "substrate_temperature_c": 19.75,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:15:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 27.81,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.6,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 65.34,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.09,
+   "received_at": "2026-06-01T08:15:30Z",
+   "schema_version": "1.0",
+   "sequence": 31,
+   "soil_moisture_pct": 60.2,
+   "source": "mqtt",
+   "substrate_moisture_pct": 60.2,
+   "substrate_temperature_c": 19.94,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:15:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 27.98,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.59,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 66.09,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.09,
+   "received_at": "2026-06-01T08:16:00Z",
+   "schema_version": "1.0",
+   "sequence": 32,
+   "soil_moisture_pct": 59.2,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.2,
+   "substrate_temperature_c": 20.19,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:16:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 28.45,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.6,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 64.05,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.14,
+   "received_at": "2026-06-01T08:16:30Z",
+   "schema_version": "1.0",
+   "sequence": 33,
+   "soil_moisture_pct": 60.1,
+   "source": "mqtt",
+   "substrate_moisture_pct": 60.1,
+   "substrate_temperature_c": 20.0,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:16:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 28.65,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.56,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 65.2,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.06,
+   "received_at": "2026-06-01T08:17:00Z",
+   "schema_version": "1.0",
+   "sequence": 34,
+   "soil_moisture_pct": 59.9,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.9,
+   "substrate_temperature_c": 19.94,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:17:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 28.96,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.58,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 66.33,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.1,
+   "received_at": "2026-06-01T08:17:30Z",
+   "schema_version": "1.0",
+   "sequence": 35,
+   "soil_moisture_pct": 59.4,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.4,
+   "substrate_temperature_c": 19.75,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:17:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 29.19,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.57,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 66.8,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.1,
+   "received_at": "2026-06-01T08:18:00Z",
+   "schema_version": "1.0",
+   "sequence": 36,
+   "soil_moisture_pct": 59.5,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.5,
+   "substrate_temperature_c": 20.06,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:18:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 29.25,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.65,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 65.75,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.1,
+   "received_at": "2026-06-01T08:18:30Z",
+   "schema_version": "1.0",
+   "sequence": 37,
+   "soil_moisture_pct": 59.5,
+   "source": "mqtt",
+   "substrate_moisture_pct": 59.5,
+   "substrate_temperature_c": 20.06,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:18:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 29.64,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.59,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 66.62,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.1,
+   "received_at": "2026-06-01T08:19:00Z",
+   "schema_version": "1.0",
+   "sequence": 38,
+   "soil_moisture_pct": 58.5,
+   "source": "mqtt",
+   "substrate_moisture_pct": 58.5,
+   "substrate_temperature_c": 20.19,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:19:00Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  },
+  {
+   "air_temperature_c": 30.28,
+   "boot_id": "boot-bba1c9ff",
+   "crop": "tomato",
+   "crop_kc": 1.15,
+   "device_id": "fake-substrate-01",
+   "ec_ms_cm": 2.64,
+   "farm_id": "demo-farm",
+   "growth_stage": "flowering",
+   "humidity_pct": 65.83,
+   "mqtt_retained": false,
+   "npk_target": {
+    "k_ppm": 200.0,
+    "n_ppm": 150.0,
+    "p_ppm": 50.0,
+    "volume_liters": 100.0
+   },
+   "ph": 6.11,
+   "received_at": "2026-06-01T08:19:30Z",
+   "schema_version": "1.0",
+   "sequence": 39,
+   "soil_moisture_pct": 58.9,
+   "source": "mqtt",
+   "substrate_moisture_pct": 58.9,
+   "substrate_temperature_c": 20.12,
+   "system_type": "greenhouse_substrate",
+   "timestamp": "2026-06-01T08:19:30Z",
+   "weather": {
+    "elevation_m": 300.0,
+    "rh_mean_pct": 62.0,
+    "solar_radiation_mj_m2_day": 17.0,
+    "t_max_c": 27.5,
+    "t_mean_c": 23.5,
+    "t_min_c": 19.5,
+    "wind_speed_2m_ms": 1.5
+   },
+   "zone_area_m2": 20.0,
+   "zone_id": "greenhouse-a"
+  }
+ ],
+ "result": {
+  "agronomist": {
+   "backend": "stub",
+   "explanation": "[stub backend] Explain the guarded Pomona software-validation result. Based on available readings (air_temperature_c=30.43, humidity_pct=65.12, ec_ms_cm=2.64, soil_moisture_pct=59.7, crop=tomato, growth_stage=flowering), review 2 risk signal(s) before acting. Use the guarded context as the safety boundary. Blocked actions: direct_actuator_control.",
+   "safety_note": "Advisory only \u2014 not for direct pesticide, fertilizer dosing, or actuator control."
+  },
+  "agronomy_calc": {
+   "fertilizer": {
+    "dap_g": 24.91,
+    "sop_g": 48.19,
+    "urea_g": 22.86
+   },
+   "irrigation": {
+    "crop_et_mm_day": 6.513,
+    "expected_irrigation_liters": 144.72,
+    "reference_et_mm_day": 5.663
+   }
+  },
+  "crop_risk": {
+   "blocked_actions": [
+    "direct_actuator_control"
+   ],
+   "human_review_required": true,
+   "missing_data": [],
+   "risk_labels": [
+    "heat_stress"
+   ],
+   "safe_next_checks": [
+    "review greenhouse temperature trend and ventilation state"
+   ],
+   "vpd_kpa": 1.517
+  },
+  "evaluated_at": "2026-06-01T08:20:01Z",
+  "final_decision": {
+   "blocked_actions": [
+    "direct_actuator_control"
+   ],
+   "human_review_required": true,
+   "risk_level": "high",
+   "safe_next_checks": [
+    "verify ph with a meter: 7.56 differs from the trusted level 6.1; if a meter agrees with the reading, it is real: record a calibration for this probe to accept it",
+    "continue routine irrigation monitoring",
+    "continue routine nutrient monitoring",
+    "review greenhouse temperature trend and ventilation state",
+    "Log or display the observation without changing actuators or recipes."
+   ],
+   "trust_verdict": "partial",
+   "vetoed_fields": [
+    "ph"
+   ]
+  },
+  "input": {
+   "expected_fields": [
+    "air_temperature_c",
+    "humidity_pct",
+    "ph",
+    "ec_ms_cm",
+    "substrate_moisture_pct"
+   ],
+   "farm_context": {
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "system_type": "greenhouse_substrate",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   },
+   "history_frames": 11,
+   "sensor": {
+    "air_temperature_c": 30.43,
+    "boot_id": "boot-bba1c9ff",
+    "crop": "tomato",
+    "crop_kc": 1.15,
+    "device_id": "fake-substrate-01",
+    "ec_ms_cm": 2.64,
+    "farm_id": "demo-farm",
+    "growth_stage": "flowering",
+    "humidity_pct": 65.12,
+    "mqtt_retained": false,
+    "npk_target": {
+     "k_ppm": 200.0,
+     "n_ppm": 150.0,
+     "p_ppm": 50.0,
+     "volume_liters": 100.0
+    },
+    "ph": 7.56,
+    "received_at": "2026-06-01T08:20:01Z",
+    "schema_version": "1.0",
+    "sequence": 40,
+    "soil_moisture_pct": 59.7,
+    "substrate_moisture_pct": 59.7,
+    "substrate_temperature_c": 20.31,
+    "system_type": "greenhouse_substrate",
+    "timestamp": "2026-06-01T08:20:00Z",
+    "weather": {
+     "elevation_m": 300.0,
+     "rh_mean_pct": 62.0,
+     "solar_radiation_mj_m2_day": 17.0,
+     "t_max_c": 27.5,
+     "t_mean_c": 23.5,
+     "t_min_c": 19.5,
+     "wind_speed_2m_ms": 1.5
+    },
+    "zone_area_m2": 20.0,
+    "zone_id": "greenhouse-a"
+   }
+  },
+  "mode": "rules_only",
+  "nutrient_ph_ec": {
+   "backend": "rules",
+   "blocked_actions": [],
+   "fallback_reason": null,
+   "human_review_required": false,
+   "missing_fields": [],
+   "mode": "rules_only",
+   "model_id": "pomona-nutrient-ph-ec-reasoner-v0.1",
+   "nutrient_risk_labels": [],
+   "rationale": "pH/EC telemetry is present and inside the configured operating range.",
+   "safe_next_checks": [
+    "continue routine nutrient monitoring"
+   ],
+   "source": "deterministic_rules"
+  },
+  "pipeline_id": "pipeline-ace63153a71f",
+  "safety": {
+   "blocked_actions": [],
+   "decision": "allowed",
+   "gate_labels": [
+    "safe_observation_only"
+   ],
+   "human_approval_required": false,
+   "rationale": "Default deny: only observation-only commands are allowed. Unknown action types and free text need human approval; direct equipment, fertigation, chemical, diagnosis, or bad-data conditions are blocked or routed to human approval.",
+   "safe_alternatives": [
+    "Log or display the observation without changing actuators or recipes."
+   ]
+  },
+  "safety_triage": {
+   "blocked_actions": [],
+   "fallback_reason": null,
+   "human_review_required": false,
+   "mode": "rules_only",
+   "model_id": "pomona-safety-triage-reasoner-v0.1",
+   "rationale": "Default deny: only observation-only commands are allowed. Unknown action types and free text need human approval; direct equipment, fertigation, chemical, diagnosis, or bad-data conditions are blocked or routed to human approval.",
+   "safe_alternative": "Log or display the observation without changing actuators or recipes.",
+   "safety_labels": [
+    "safe_observation_only"
+   ],
+   "source": "deterministic_safety_rules"
+  },
+  "scenario_id": "core_feed",
+  "sensor_quality": {
+   "data_quality_labels": [
+    "baseline_drift_possible"
+   ],
+   "fallback_reason": null,
+   "human_review_required": true,
+   "missing_fields": [],
+   "mode": "rules_only",
+   "model_id": "pomona-sensor-quality-reasoner-v0.1",
+   "rationale": "Sensor packet needs verification before downstream risk or action reasoning.",
+   "safe_next_checks": [
+    "verify ph with a meter: 7.56 differs from the trusted level 6.1; if a meter agrees with the reading, it is real: record a calibration for this probe to accept it"
+   ],
+   "source": "deterministic_rules",
+   "suspect_fields": [
+    "ph"
+   ]
+  },
+  "source": "deterministic_guarded_pipeline",
+  "trust_gate": {
+   "global_veto": false,
+   "reason": "ph failed the sensor check and were not used",
+   "trust_verdict": "partial",
+   "vetoed_fields": [
+    "ph"
+   ]
+  },
+  "water_irrigation": {
+   "backend": "rules",
+   "blocked_actions": [],
+   "fallback_reason": null,
+   "human_review_required": false,
+   "irrigation_risk_labels": [],
+   "missing_fields": [],
+   "mode": "rules_only",
+   "model_id": "pomona-water-irrigation-risk-reasoner-v0.1",
+   "rationale": "Moisture telemetry is present and inside expected operating range.",
+   "safe_next_checks": [
+    "continue routine irrigation monitoring"
+   ],
+   "source": "deterministic_rules",
+   "suspect_fields": []
+  }
+ },
+ "scope": {}
+}

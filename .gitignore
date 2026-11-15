@@ -186,3 +186,6 @@ spaces/try-to-fool-pomona/tests/node_modules/
 # Local only: Claude Code launch config, and the small-model benchmark (uses private venvs and private outputs)
 .claude/
 scripts/benchmark_small_models.py
+
+# Abstention eval set: the holdout cases are generated on demand and never committed (docs/design/abstention-eval-set.md 4.4);
+datasets/pomona-abstention-eval-v0.1/holdout/
