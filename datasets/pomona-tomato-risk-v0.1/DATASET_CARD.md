@@ -62,10 +62,10 @@ The train/validation/test split files are generated from local processed artifac
 
 The tomato v0.1.7 adapter trained on this dataset learned a template shortcut instead of the thresholds. In the processed train split, the risk examples share one constant background context (for example CO2 600, light PPFD 350, water temperature 21.0) and only the risky reading changes. The adapter learned to key on that background and answered `[]` on 146 of 153 varied-reading benchmark cases. Details: `docs/TOMATO_RISK_REASONER.md`.
 
-What is visible in the files committed to the Pomona GitHub repo:
+What the dataset files show:
 
 - `data/samples.jsonl` (10 hand-written seed rows) and `data/eval_cases.jsonl` (20 hand-written rows) have varied background values. The constant context is not visible there.
-- `data/golden_eval.jsonl` (15 rows) does share it: 13 of 15 rows, including 12 of its 13 risk rows, use CO2 600, PPFD 350 and water temperature 21.0. Scores on this file are therefore weak evidence of threshold learning.
+- `data/golden_eval.jsonl` (15 rows) is a local regression file, not committed (it is listed in `.gitignore`). It does share the context: 13 of 15 rows, including 12 of its 13 risk rows, use CO2 600, PPFD 350 and water temperature 21.0. Scores on this file are therefore weak evidence of threshold learning.
 - The processed train/validation/test split files are not committed (see Splits), so the constant context in the train split could not be re-checked from the repo. That statement rests on the findings in `docs/TOMATO_RISK_REASONER.md`.
 
 A retrain needs varied background readings for risk and normal examples alike. Until then treat the published tomato adapter as research only.
