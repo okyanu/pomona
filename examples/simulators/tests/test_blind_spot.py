@@ -22,6 +22,7 @@ for module_name in list(sys.modules):
 
 import fake_greenhouse as fg
 import score_fake_greenhouse as score
+from sim_helpers import make_clock
 from app.schemas import SensorEvent
 
 A, B = "greenhouse-a", "greenhouse-b"
@@ -29,17 +30,6 @@ BASE = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 RULES = score.parse_rules(score.AUTOMATION_APP.joinpath("rules.yaml").read_text())
 DEFAULTS = (600, 900)
 SCENARIOS = SIM_DIR / "scenarios"
-
-
-def make_clock(step_s: float = 30.0):
-    state = {"now": BASE}
-
-    def clock() -> datetime:
-        now = state["now"]
-        state["now"] = now + timedelta(seconds=step_s)
-        return now
-
-    return clock
 
 
 def run_scenario(path, ticks=None, seed=None):

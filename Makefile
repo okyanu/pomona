@@ -6,7 +6,7 @@ PYTHON ?= python3
 	bootstrap lock check-venvs test test-local local-check fool-space-venv fool-space-build fool-space-check \
 	fool-space-pyodide-check print-pack test-checker test-demo test-ph-checker demo-local fault-replay real-replay \
 	docker-config backup restore backup-local restore-local sim-pip publish-check publish-github publish-github-push \
-	publish-hf
+	publish-hf abstention-eval abstention-eval-regen abstention-eval-holdout
 
 up:
 	./scripts/up.sh
@@ -194,6 +194,25 @@ fault-replay:
 # Real third-party sensor logs (local raw files, see datasets/sources/); skips missing datasets.
 real-replay:
 	services/model-router/.venv/bin/python scripts/benchmark_real_sensor_replay.py
+
+# Abstention + grounding eval (docs/design/abstention-eval-set.md, datasets/pomona-abstention-eval-v0.1/README.md).
+# abstention-eval: offline, on the dev cases (the committed cases file is checked against MANIFEST.json, and rebuilt when missing or wrong, about 30 s);
+# runs pipeline_view (against baseline_report.json), both controls (they must fail) and advisor:stub. Never rewrites a committed
+# file. A candidate: make abstention-eval SUBJECT=reasoner:water BACKEND=ollama MODEL=<name> (or SUBJECT=advisor:ollama).
+abstention-eval:
+	services/model-router/.venv/bin/python scripts/eval_abstention.py run --split dev \
+		$(if $(SUBJECT),--subject $(SUBJECT) $(if $(BACKEND),--backend $(BACKEND)) $(if $(MODEL),--model $(MODEL)))
+
+# Regenerate dev in a scratch folder; fails on any byte difference from MANIFEST.json (then regenerate with
+# `scripts/eval_abstention.py generate` in the same change as the pipeline or simulator change, and update the baseline).
+abstention-eval-regen:
+	services/model-router/.venv/bin/python scripts/eval_abstention.py generate --split dev --verify --quiet
+
+# The release gate: generates the holdout (checked against MANIFEST-holdout.json) and runs it. Counts only, never ids.
+abstention-eval-holdout:
+	services/model-router/.venv/bin/python scripts/eval_abstention.py generate --split holdout --verify --quiet
+	services/model-router/.venv/bin/python scripts/eval_abstention.py run --split holdout \
+		$(if $(SUBJECT),--subject $(SUBJECT) $(if $(BACKEND),--backend $(BACKEND)) $(if $(MODEL),--model $(MODEL)))
 
 demo-local:
 	services/model-router/.venv/bin/python scripts/demo_local.py

@@ -173,6 +173,11 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   (both zones), humid night + humidity probe, and one control (heat spike + the optional substrate
   temperature probe, while the air probe still shows the heat). The scorer grades each under "Blind spots"
   (see [FAKE_GREENHOUSE.md](../../docs/FAKE_GREENHOUSE.md#blind-spots-a-real-fault-and-a-silent-probe)).
+- `scenarios/abstention.json`: 900 ticks (7.5 hours): the cases of the abstention eval set
+  ([design](../../docs/design/abstention-eval-set.md), `scripts/eval_abstention.py generate`). Real events with a silent
+  probe on their deciding field, a probe silent alone, one fault each of `stuck`, `noisy`, `jump`, `drift` and `spike`,
+  and a whole-device `dropout` of 165 ticks per zone. A `probe_dropout` start step may carry a `group` key
+  (`coarse_only` or `silent`, default `silent`): the simulator ignores it, the eval uses it to tell the two families apart.
 - `scenarios/validation.json`: 15 ticks at `--interval 1`, used by `make local-validation`.
 - `scenarios/smoke.json`: 12 ticks, used by the tests.
 
