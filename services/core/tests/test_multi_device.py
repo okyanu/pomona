@@ -316,6 +316,82 @@ def test_a_single_device_request_is_unchanged(clock, calls):
                                            "actor", "mode"]
 
 
+# --- slice 2, 2.6: the alert `detail` the feed sends --------------------------------------------------
+
+CHECK_TEXT = ["inspect humidity_pct: near-zero variance may indicate a stuck or clipped probe",
+              "verify the probe against a handheld reading"]
+
+
+@pytest.fixture
+def check_calls(monkeypatch):
+    """The feed with a router answer that carries safe next checks; the recorder keeps every body."""
+    monkeypatch.setattr(settings, "model_router_url", "http://router.test")
+    monkeypatch.setattr(settings, "automation_engine_url", "http://automation.test")
+    recorded = {"checks": CHECK_TEXT, "calls": []}
+
+    def fake_post(base, path, body):
+        recorded["calls"].append((path, body))
+        if path == "/v1/pipeline/evaluate":
+            return {"sensor_quality": {"data_quality_labels": ["stuck_value"], "safe_next_checks": recorded["checks"]}}
+        return {}
+
+    monkeypatch.setattr(feed_module, "_post", fake_post)
+    return recorded
+
+
+def observations(recorded):
+    return [body for path, body in recorded["calls"] if path == "/v1/automation/alerts/observe"]
+
+
+def test_detail_is_sent_only_in_multi_device_zones(clock, check_calls):
+    feed = OutcomeFeed(event_store, queue_size=5)
+    feed._process(add(packet(clock)))  # one device in the zone: Rule 0, the body is what it always was
+    assert list(observations(check_calls)[0]) == ["farm_id", "zone_id", "device_id", "sample_time", "risk_labels",
+                                                  "data_quality_labels"]
+    clock.now += timedelta(seconds=30)
+    feed._process(add(packet(clock, device="substrate-1", fields=SUBSTRATE)))  # the zone is now multi-device
+    assert observations(check_calls)[1]["detail"] == "; ".join(CHECK_TEXT)
+    assert list(observations(check_calls)[1]) == ["farm_id", "zone_id", "device_id", "sample_time", "risk_labels",
+                                                  "data_quality_labels", "detail"]
+
+
+def test_detail_leaves_out_routine_monitoring_and_is_not_sent_when_empty(clock, check_calls):
+    feed = OutcomeFeed(event_store, queue_size=5)
+    add(packet(clock, device="substrate-1", fields=SUBSTRATE))
+    clock.now += timedelta(seconds=30)
+    feed._process(add(packet(clock)))  # two devices known
+    for checks, expected in ((["continue routine monitoring", CHECK_TEXT[0]], CHECK_TEXT[0]),
+                             ([CHECK_TEXT[0], "continue routine monitoring", CHECK_TEXT[1]], "; ".join(CHECK_TEXT)),
+                             (["continue routine monitoring"], None), ([], None)):
+        check_calls["checks"] = checks
+        clock.now += timedelta(seconds=30)
+        feed._process(add(packet(clock)))
+        body = observations(check_calls)[-1]
+        assert body.get("detail") == expected and ("detail" in body) == (expected is not None), checks
+
+
+def test_detail_is_cut_at_500_characters_ending_in_an_ellipsis(clock, check_calls):
+    feed = OutcomeFeed(event_store, queue_size=5)
+    add(packet(clock, device="substrate-1", fields=SUBSTRATE))
+    clock.now += timedelta(seconds=30)
+    feed._process(add(packet(clock)))
+    for length, cut in ((500, False), (501, True), (3000, True)):
+        check_calls["checks"] = ["c" * length]
+        clock.now += timedelta(seconds=30)
+        feed._process(add(packet(clock)))
+        detail = observations(check_calls)[-1]["detail"]
+        assert len(detail) == 500 and detail.endswith("…") == cut
+        assert detail == ("c" * 499 + "…" if cut else "c" * 500)
+
+
+def test_detail_is_never_sent_to_the_router(clock, check_calls):
+    feed = OutcomeFeed(event_store, queue_size=5)
+    add(packet(clock, device="substrate-1", fields=SUBSTRATE))
+    clock.now += timedelta(seconds=30)
+    feed._process(add(packet(clock)))
+    assert all("detail" not in body for body in evaluations(check_calls["calls"]))
+
+
 # --- 1.5 the device filter and the response keys -------------------------------------------------
 
 @pytest.fixture

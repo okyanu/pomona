@@ -262,6 +262,37 @@ def test_alert_feed_sends_data_quality_labels_for_outcome_confirmation(monkeypat
         "risk_labels": ["stuck_value", "high_ec"], "data_quality_labels": ["stuck_value"]})]
 
 
+def test_alert_feed_sends_detail_only_when_given(monkeypatch):
+    """Slice 2, 2.6: feed_alert_monitor takes an optional sensor check text; without it the body is what it always was
+    (the single-device path never passes it)."""
+    event = {"farm_id": "f", "zone_id": "z", "device_id": "node", "timestamp": "2026-07-20T10:00:00Z"}
+    result = {"sensor_quality": {"data_quality_labels": ["stuck_value"]}}
+    sent = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path, json):
+            sent.append(json)
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    for detail in (None, "", "inspect humidity_pct: near-zero variance"):
+        asyncio.run(dashboard_main.feed_alert_monitor(event, result, detail))
+    asyncio.run(dashboard_main.feed_alert_monitor(event, result))
+    assert [list(body) for body in sent] == [["farm_id", "zone_id", "device_id", "sample_time", "risk_labels",
+                                              "data_quality_labels"]] * 2 + [
+        ["farm_id", "zone_id", "device_id", "sample_time", "risk_labels", "data_quality_labels", "detail"]] + [
+        ["farm_id", "zone_id", "device_id", "sample_time", "risk_labels", "data_quality_labels"]]
+    assert sent[2]["detail"] == "inspect humidity_pct: near-zero variance"
+
+
 def test_pipeline_proxy_forwards_agronomy_calc_context(monkeypatch):
     event = {
         "farm_id": "demo-farm",
@@ -782,93 +813,711 @@ def test_evaluate_context_carries_missing_fields(monkeypatch):
     assert sent["context"]["readings"] == {"ec_ms_cm": None}
 
 
-# --- Multi-device zones, slice 1 (docs/design/multi-device-zones.md 1.6) ---------------------------------------
+# --- Multi-device zones: slice 1 (docs/design/multi-device-zones.md 1.6) and slice 2 (multi-device-zones-slice2.md) ---
+#
+# A path-aware fake of every service the dashboard talks to: each outgoing request is recorded with the service it went
+# to, and Core answers the zone listing, a device's own listing and the zone snapshot differently.
 
-def _two_device_pipeline(monkeypatch, overview_fields, core_events):
-    """Run /api/pipeline against fakes: returns (what the dashboard asked Core, what it posted to the router)."""
-    event = {"farm_id": "f", "zone_id": "z", "device_id": "substrate-1", "timestamp": "2026-07-20T10:00:00Z",
-             "ph": 6.0, "ec_ms_cm": 2.0, "soil_moisture_pct": 40.0, "source": "mqtt"}
-    sent = {"core": [], "router": []}
+import hashlib
+import json as jsonlib
+from datetime import datetime, timezone
 
-    async def fake_overview():
-        return dashboard_main.OverviewResponse(core_available=True, latest_event=event, recent_events=[event],
-                                               **overview_fields)
+import pytest
 
-    class FakeResponse:
-        def __init__(self, body): self.body = body
-        def raise_for_status(self): return None
-        def json(self): return self.body
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def get(self, path, params=None):
-            sent["core"].append((path, dict(params or {})))
-            return FakeResponse({"events": core_events})
-        async def post(self, path, json):
-            sent["router"].append((path, json))
-            return FakeResponse({"pipeline_id": "p"})
-
-    monkeypatch.setattr(dashboard_main, "overview", fake_overview)
-    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
-    assert client.get("/api/pipeline").json()["available"]  # unscoped request: no farm_id or zone_id in the query
-    return sent
+STAMP = "2026-07-20T10:00:00Z"
+NOW = datetime(2026, 7, 20, 10, 0, 30, tzinfo=timezone.utc)
+CLEAN = {"pipeline_id": "p", "sensor_quality": {"data_quality_labels": [], "safe_next_checks": ["continue routine monitoring"]},
+         "trust_gate": {"trust_verdict": "trusted", "vetoed_fields": []}, "final_decision": {"blocked_actions": []}}
 
 
-def _packet(stamp, ph=6.0, **extra):
-    return {"farm_id": "f", "zone_id": "z", "device_id": "substrate-1", "timestamp": stamp, "ph": ph,
+class Clock:
+    now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture(autouse=True)
+def zone_caches(monkeypatch):
+    """Every test starts with empty zone caches and the dashboard's own clock under test control."""
+    dashboard_main.reset_zone_caches()
+    value = Clock()
+    monkeypatch.setattr(dashboard_main, "_clock", value)
+    monkeypatch.setattr(dashboard_main, "utc_now", lambda: NOW)
+    yield value
+    dashboard_main.reset_zone_caches()
+
+
+def judged(vetoed=(), labels=(), checks=None, verdict="trusted"):
+    """A Core event_trust row; `labels=None` is a row written before the labels were kept."""
+    return {"status": "judged", "trust_verdict": verdict, "vetoed_fields": list(vetoed),
+            "data_quality_labels": None if labels is None else list(labels),
+            "safe_next_checks": None if labels is None else (["continue routine monitoring"] if checks is None else list(checks))}
+
+
+PENDING = {"status": "pending"}
+READINGS = ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c",
+            "substrate_moisture_pct")
+
+
+def device(device_id, values, trust=None, stale=False, stamp=STAMP, retained=False, **extra):
+    event = {"device_id": device_id, "farm_id": "f", "zone_id": "z", "crop": "tomato", "growth_stage": "flowering",
+             "system_type": "greenhouse_substrate", "timestamp": stamp, "received_at": stamp, "mqtt_retained": retained,
+             **values}
+    return {"device_id": device_id, "event": event, "sample_time": stamp, "received_at": stamp, "age_s": 30.0,
+            "interval_s": 30.0, "stale_limit_s": 600, "stale": stale, "device_fields": sorted(values), "supplied": [],
+            "trust": judged() if trust is None else trust, **extra}
+
+
+def snapshot_of(*devices):
+    """Core's zone snapshot for these devices: each field from the first live device that has it and does not veto it."""
+    fields, sources = {}, {}
+    live = [d for d in devices if not d["stale"]]
+    for name in READINGS:
+        candidates = [d for d in live if d["event"].get(name) is not None]
+        vetoes = lambda d: d["trust"]["status"] == "judged" and name in d["trust"]["vetoed_fields"]
+        if candidates:
+            chosen = next((d for d in candidates if not vetoes(d)), candidates[0])
+            fields[name] = {"value": chosen["event"][name], "device_id": chosen["device_id"], "sample_time": chosen["sample_time"],
+                            "age_s": 30.0, "others": [{"device_id": d["device_id"], "value": d["event"][name],
+                                                       "sample_time": d["sample_time"], "vetoed": vetoes(d)}
+                                                      for d in candidates if d is not chosen]}
+            sources[name] = [chosen["device_id"]]
+        elif any(name in d["device_fields"] for d in devices):
+            sources[name] = [d["device_id"] for d in devices if name in d["device_fields"]]
+    for d in devices:
+        d["supplied"] = [n for n, f in fields.items() if f["device_id"] == d["device_id"]]
+    sensor = None
+    if fields:
+        sensor = {"farm_id": "f", "zone_id": "z", "crop": "tomato", "growth_stage": "flowering",
+                  "system_type": "greenhouse_substrate", **{n: f["value"] for n, f in fields.items()}, "timestamp": STAMP}
+    return {"multi_device": True, "farm_id": "f", "zone_id": "z", "stale_after_s": 600, "devices": list(devices),
+            "fields": fields, "sensor": sensor, "sources": sources,
+            "zone_device_fields": sorted({f for d in devices for f in d["device_fields"]}),
+            "context": {}, "context_source": {}, "context_conflicts": [],
+            "newest_age_s": min((d["age_s"] for d in devices), default=None)}
+
+
+CLIMATE = {"air_temperature_c": 24.0, "humidity_pct": 60.0}
+SUBSTRATE = {"ph": 6.0, "ec_ms_cm": 2.0, "substrate_moisture_pct": 40.0}
+
+
+def two_devices(climate_trust=None, substrate_trust=None, **kw):
+    return snapshot_of(device("climate-1", dict(CLIMATE), climate_trust, **kw), device("substrate-1", dict(SUBSTRATE), substrate_trust))
+
+
+def packet(stamp, ph=6.0, device_id="substrate-1", **extra):
+    return {"farm_id": "f", "zone_id": "z", "device_id": device_id, "timestamp": stamp, "ph": ph,
             "source": "mqtt", "received_at": "2026-07-20T11:00:00Z", "mqtt_retained": False, **extra}
+
+
+class Stack:
+    """The fake services. `snapshot` is a dict, None (the zone is single-device: Core says so), or an exception to raise.
+    `zone_events` is what Core's zone listing returns, oldest first; `device_events` maps a device to its own listing.
+    `router_results[device_id]` is what the router answers a device check with."""
+    URLS = {"core_url": "core", "model_router_url": "router", "automation_engine_url": "automation",
+            "digital_twin_url": "twin", "safety_checker_url": "safety"}
+
+    def __init__(self, monkeypatch, snapshot=None, zone_events=None, device_events=None, multi=True, latest_fields=None):
+        self.requests = []
+        self.snapshot = snapshot
+        self.zone_events = zone_events
+        self.device_events = device_events or {}
+        self.multi = multi
+        self.latest_fields = latest_fields
+        self.router_results = {}
+        self.failing = set()  # services whose every call raises
+        self.fail_device_checks = False
+        stack = self
+        names = {getattr(dashboard_main.settings, attr): name for attr, name in self.URLS.items()}
+
+        class FakeClient:
+            def __init__(self, base_url="", **kwargs):
+                self.service = names.get(base_url, base_url)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def get(self, path, params=None):
+                return stack.answer(self.service, "GET", path, dict(params or {}), None)
+
+            async def post(self, path, json=None):
+                return stack.answer(self.service, "POST", path, {}, json)
+
+        monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+
+    def answer(self, service, method, path, params, body):
+        self.requests.append({"service": service, "method": method, "path": path, "params": params, "json": body})
+        if service in self.failing:
+            raise dashboard_main.httpx.ConnectError(f"{service} is down")
+        reply = self.respond(service, method, path, params, body)
+        return dashboard_main.httpx.Response(200, json=reply, request=dashboard_main.httpx.Request(method, f"http://{service}{path}"))
+
+    def respond(self, service, method, path, params, body):
+        if service == "core" and path == "/v1/sensors/events":
+            if params.get("device_id"):
+                return {"events": self.device_events.get(params["device_id"], [])[-params.get("limit", 50):]}
+            events = self.zone_events or []
+            return {"events": events, "latest_event": events[-1] if events else None, "zone_multi_device": self.multi,
+                    "latest_device_fields": self.latest_fields}
+        if service == "core" and path == "/v1/sensors/zone-snapshot":
+            if isinstance(self.snapshot, Exception):
+                raise self.snapshot
+            return self.snapshot if self.snapshot is not None else {"multi_device": False}
+        if service == "router" and path == "/v1/pipeline/evaluate":
+            if body["actor"] == "dashboard" and body.get("scenario_id") == "dashboard-device-check":
+                if self.fail_device_checks:
+                    raise dashboard_main.httpx.ConnectError("router is down")
+                return self.router_results.get(body["sensor"]["device_id"], CLEAN)
+            return CLEAN
+        if service == "router" and path == "/v1/reasoners/shared-chain":
+            return {"final_decision": {}, "quality": {}}
+        if service == "router" and path == "/v1/advisor/explain":
+            return {"text": "ok"}
+        if service == "router":
+            return {}
+        if service == "twin":
+            return {"mode": "forecast_only", "trajectory": [{"step": 1, "minutes_from_now": 15, **body["state"]}]}
+        if service == "safety" or service == "automation":
+            return {"suggestions": [], "events": [], "alerts": []}
+        raise AssertionError(f"unexpected request {service} {method} {path}")
+
+    def to(self, service, path=None):
+        return [r for r in self.requests if r["service"] == service and (path is None or r["path"] == path)]
+
+    def bodies(self, service, path):
+        return [r["json"] for r in self.to(service, path)]
+
+
+def zone_stack(monkeypatch, snap=None, **kw):
+    snap = snap if snap is not None else two_devices()
+    events = [packet(STAMP, device_id="substrate-1", **{k: v for k, v in SUBSTRATE.items()})]
+    return Stack(monkeypatch, snapshot=snap, zone_events=events, latest_fields=["ec_ms_cm", "ph", "substrate_moisture_pct"], **kw)
+
+
+def sha(value):
+    return hashlib.sha256(jsonlib.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+# --- the zone view: one snapshot per refresh, trends only in /api/overview ---------------------------------------
+
+def test_overview_in_a_multi_device_zone_carries_the_snapshot_and_each_devices_trend(monkeypatch):
+    snap = two_devices()
+    snap["newest_age_s"] = 12.0
+    stack = zone_stack(monkeypatch, snap, )
+    stack.device_events = {"climate-1": [packet("2026-07-20T09:59:30Z", device_id="climate-1"), packet("2026-07-20T09:58:00Z", device_id="climate-1")],
+                           "substrate-1": [packet(STAMP)]}
+    body = client.get("/api/overview").json()
+    assert body["zone_multi_device"] is True and body["zone_snapshot"]["sensor"] == snap["sensor"]
+    assert body["zone_snapshot_error"] is None
+    assert body["latest_age_s"] == 12.0  # the freshest device, so "no reading from this zone" needs every device quiet
+    assert body["latest_event"]["device_id"] == "substrate-1"  # the newest packet, for old clients
+    assert list(body["device_events"]) == ["climate-1", "substrate-1"]
+    assert [e["timestamp"] for e in body["device_events"]["climate-1"]] == ["2026-07-20T09:58:00Z", "2026-07-20T09:59:30Z"]
+    trend_calls = [r["params"] for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")]
+    assert trend_calls == [{"farm_id": "f", "zone_id": "z", "device_id": d, "limit": 120} for d in ("climate-1", "substrate-1")]
+    assert len(stack.to("core", "/v1/sensors/zone-snapshot")) == 1
+    assert stack.to("core", "/v1/sensors/zone-snapshot")[0]["params"] == {"farm_id": "f", "zone_id": "z", "stale_after_s": 600}
+    assert not stack.to("router")  # the overview never waits on the router, even for a pending device
+
+
+def test_overview_with_a_pending_device_makes_no_router_call(monkeypatch):
+    stack = zone_stack(monkeypatch, two_devices(substrate_trust=PENDING))
+    assert client.get("/api/overview").json()["zone_snapshot"]["devices"][1]["trust"] == {"status": "pending"}
+    assert not stack.to("router") and not stack.to("automation")
+
+
+def test_trends_are_fetched_for_at_most_8_devices_in_device_id_order(monkeypatch):
+    devices = [device(f"node-{n}", {"ph": 6.0 + n / 100}) for n in (9, 3, 1, 8, 2, 7, 4, 6, 5, 0)]
+    stack = zone_stack(monkeypatch, snapshot_of(*devices))
+    body = client.get("/api/overview").json()
+    assert list(body["device_events"]) == [f"node-{n}" for n in range(8)]
+    assert [r["params"]["device_id"] for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")] == list(body["device_events"])
+
+
+def test_only_the_overview_fetches_trends_and_the_views_share_one_snapshot_call(monkeypatch, zone_caches):
+    stack = zone_stack(monkeypatch)
+    for path in ("/api/pipeline", "/api/risk", "/api/safety", "/api/digital-twin", "/api/explanation"):
+        assert client.get(path).json()["available"], path
+    assert not [r for r in stack.to("core", "/v1/sensors/events") if r["params"].get("limit") == 120]
+    assert len(stack.to("core", "/v1/sensors/zone-snapshot")) == 1  # one snapshot call per (farm, zone) within 5 s
+    zone_caches.now += 5.5
+    client.get("/api/risk")
+    assert len(stack.to("core", "/v1/sensors/zone-snapshot")) == 2  # the cache expired with the injected clock
+    zone_caches.now += 1.0
+    client.get("/api/risk")
+    assert len(stack.to("core", "/v1/sensors/zone-snapshot")) == 2
+
+
+def test_snapshot_cache_is_per_farm_and_zone(monkeypatch):
+    stack = zone_stack(monkeypatch)
+    for zone in ("z", "z", "other", "z"):
+        client.get("/api/risk", params={"farm_id": "f", "zone_id": zone})
+    assert [r["params"]["zone_id"] for r in stack.to("core", "/v1/sensors/zone-snapshot")] == ["z", "other"]
+
+
+def test_unscoped_dashboard_takes_the_snapshot_of_the_newest_events_zone(monkeypatch):
+    stack = zone_stack(monkeypatch)
+    client.get("/api/risk")
+    assert stack.to("core", "/v1/sensors/zone-snapshot")[0]["params"]["farm_id"] == "f"
+    assert stack.to("core", "/v1/sensors/zone-snapshot")[0]["params"]["zone_id"] == "z"
+
+
+# --- each view on the zone-view path ---------------------------------------------------------------------------
+
+def vetoing_ec_snapshot():
+    substrate = device("substrate-1", dict(SUBSTRATE), judged(["ec_ms_cm"], ["stuck_value"], ["inspect ec_ms_cm: near-zero variance"]))
+    return snapshot_of(device("climate-1", dict(CLIMATE)), substrate)
+
+
+def test_zone_view_pipeline_sends_the_snapshot_and_the_devices_checks_and_does_not_post_alerts(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    body = client.get("/api/pipeline").json()
+    assert body["available"]
+    (sent,) = stack.bodies("router", "/v1/pipeline/evaluate")
+    sensor = snap["sensor"]
+    assert sent["sensor"] == sensor and "device_id" not in sent["sensor"] and "source" not in sent["sensor"]
+    assert sent["history"] == [] and "expected_fields" not in sent
+    assert sent["device_fields"] == snap["zone_device_fields"]
+    assert sent["known_vetoed_fields"] == ["ec_ms_cm"] and sent["known_data_quality_labels"] == ["stuck_value"]
+    assert sent["known_safe_next_checks"] == ["inspect ec_ms_cm: near-zero variance"]  # "continue routine monitoring" is not carried
+    assert (sent["mode"], sent["actor"], sent["scenario_id"]) == ("hybrid_guarded", "dashboard", "dashboard-latest-event")
+    assert sent["farm_context"]["crop"] == "tomato" and sent["farm_context"]["zone_id"] == "z"
+    assert not stack.to("automation")  # alerts stay per device
+    assert body["sources"] == snap["sources"] and body["dashboard_judged"] == []
+    assert body["sensor_snapshot"] == sensor and body["history_snapshot"] == []
+    assert body["sensor_event_id"] == sha({"sensor": sensor, "sources": snap["sources"]})
+    assert body["sensor_timestamp"] == STAMP
+    assert not [r for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")]  # no history fetch
+
+
+def test_zone_view_sends_zone_device_fields_so_a_zone_without_moisture_has_none_missing(monkeypatch):
+    stack = zone_stack(monkeypatch, snapshot_of(device("climate-1", dict(CLIMATE)),
+                                                device("substrate-1", {"ph": 6.0, "ec_ms_cm": 2.0})))
+    client.get("/api/pipeline")
+    client.get("/api/risk")
+    for sent in (stack.bodies("router", "/v1/pipeline/evaluate")[0], stack.bodies("router", "/v1/reasoners/shared-chain")[0]):
+        assert sent["device_fields"] == ["air_temperature_c", "ec_ms_cm", "humidity_pct", "ph"]
+        assert not [f for f in sent["device_fields"] if "moisture" in f]
+
+
+def test_zone_view_risk_sends_the_snapshot_device_fields_and_the_three_known_keys(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    assert client.get("/api/risk").json()["available"]
+    (sent,) = stack.bodies("router", "/v1/reasoners/shared-chain")
+    assert sent["sensor"] == snap["sensor"] and sent["farm_context"] == {"farm_id": "f", "crop": "tomato",
+                                                                         "system_type": "greenhouse_substrate", "zone_id": "z"}
+    assert sent["device_fields"] == snap["zone_device_fields"] and "expected_fields" not in sent
+    assert sent["known_vetoed_fields"] == ["ec_ms_cm"] and sent["known_data_quality_labels"] == ["stuck_value"]
+    assert (sent["actor"], sent["mode"], sent["proposed_command"]) == ("dashboard", "hybrid_guarded", {"action_type": "continue_monitoring"})
+
+
+def test_zone_view_safety_sends_the_unmasked_reading_without_a_device(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    assert client.get("/api/safety").json()["available"]
+    (sent,) = stack.bodies("router", "/v1/reasoners/safety-triage")
+    assert sent["input"]["sensor"] == snap["sensor"] and "device_id" not in sent["input"]["sensor"]
+    assert "ec_ms_cm" in sent["input"]["sensor"]  # unmasked
+    assert "sensor_quality" not in sent["input"]
+    assert not stack.to("core", "/v1/sensors/events") or all(not r["params"].get("device_id") for r in stack.to("core", "/v1/sensors/events"))
+
+
+def test_zone_view_twin_simulates_the_masked_reading_and_asks_the_guard_without_expected_fields(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    assert client.get("/api/digital-twin").json()["available"]
+    (simulated,) = stack.bodies("twin", "/v1/digital-twin/scenarios/simulate")
+    assert "ec_ms_cm" not in simulated["state"] and simulated["state"]["ph"] == 6.0  # masked: the vetoed EC is out
+    (guard,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-digital-twin-preview"]
+    assert "expected_fields" not in guard and guard["device_fields"] == snap["zone_device_fields"]
+    assert guard["known_vetoed_fields"] == ["ec_ms_cm"] and guard["known_data_quality_labels"] == ["stuck_value"]
+    assert guard["actor"] == "dashboard_digital_twin_preview"
+
+
+def test_zone_view_explanation_uses_the_masked_reading_and_the_zone_risk_result(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    assert client.get("/api/explanation").json()["available"]
+    (sent,) = stack.bodies("router", "/v1/advisor/explain")
+    assert "ec_ms_cm" not in sent["sensor"] and sent["sensor"]["ph"] == 6.0 and "device_id" not in sent["sensor"]
+    assert sent["guarded_context"] == {"final_decision": {}, "quality": {}}  # the shared-chain answer
+    assert len(stack.bodies("router", "/v1/reasoners/shared-chain")) == 1
+
+
+def test_evaluate_on_the_zone_view_carries_sources_and_the_sensor_check_labels(monkeypatch):
+    snap = vetoing_ec_snapshot()
+    stack = zone_stack(monkeypatch, snap)
+    stack.router_results = {}
+    original = stack.respond
+
+    def respond(service, method, path, params, body):
+        if service == "router" and path == "/v1/pipeline/evaluate":
+            return {**CLEAN, "sensor_quality": {"data_quality_labels": ["stuck_value"], "missing_fields": [],
+                                                "safe_next_checks": ["inspect ec_ms_cm"]},
+                    "trust_gate": {"trust_verdict": "partial", "vetoed_fields": ["ec_ms_cm"]},
+                    "final_decision": {"trust_verdict": "partial", "vetoed_fields": ["ec_ms_cm"], "blocked_actions": []}}
+        return original(service, method, path, params, body)
+
+    stack.respond = respond
+    assert client.post("/api/automation/evaluate").json()["available"]
+    (sent,) = stack.bodies("automation", "/v1/automation/evaluate")
+    assert "stuck_value" in sent["risk_labels"]
+    assert sent["context"]["sources"] == snap["sources"]
+    assert sent["context"]["sensor_snapshot"] == snap["sensor"] and "device_id" not in sent["context"]["sensor_snapshot"]
+    assert sent["context"]["vetoed_fields"] == ["ec_ms_cm"]
+    assert sent["event_id"] == sha({"sensor": snap["sensor"], "sources": snap["sources"]})
+
+
+# --- device checks ---------------------------------------------------------------------------------------------
+
+def checks_of(snap):
+    out = asyncio.run(dashboard_main.device_checks(snap))
+    return out.vetoed, out.labels, out.checks, out.dashboard_judged
+
+
+def test_a_judged_device_carries_only_the_vetoes_of_fields_it_supplies(monkeypatch):
+    Stack(monkeypatch)
+    # climate-2 also carries humidity but climate-1 supplies it; climate-2's own humidity veto is not carried.
+    climate_1 = device("climate-1", {"air_temperature_c": 24.0, "humidity_pct": 60.0}, judged())
+    climate_2 = device("climate-2", {"humidity_pct": 61.0}, judged(["humidity_pct"], ["stuck_value"], ["inspect humidity_pct"]))
+    assert checks_of(snapshot_of(climate_1, climate_2)) == ([], [], [], [])
+
+
+def test_a_flagged_probe_outside_the_zone_view_puts_no_label_on_the_zone(monkeypatch):
+    Stack(monkeypatch)
+    # substrate-1's EC probe is stuck and climate-2's good EC reading is used instead; substrate-1 still supplies pH.
+    substrate = device("substrate-1", {"ph": 6.0, "ec_ms_cm": 2.0}, judged(["ec_ms_cm"], ["stuck_value"], ["inspect ec_ms_cm"]))
+    other = device("climate-2", {"ec_ms_cm": 2.1})
+    vetoed, labels, checks, _ = checks_of(snapshot_of(substrate, other))
+    assert vetoed == [] and labels == [] and checks == []
+
+
+def test_a_device_that_vetoed_nothing_carries_its_labels(monkeypatch):
+    Stack(monkeypatch)
+    node = device("substrate-1", {"ph": 6.0}, judged([], ["flatline_possible"], ["watch ph"]))
+    assert checks_of(snapshot_of(node)) == ([], ["flatline_possible"], ["watch ph"], [])
+
+
+def test_a_global_veto_label_vetoes_everything_the_device_supplies(monkeypatch):
+    Stack(monkeypatch)
+    node = device("climate-1", dict(CLIMATE), judged(["humidity_pct"], ["stale_reading"], ["check the clock"]))
+    snap = snapshot_of(node, device("substrate-1", dict(SUBSTRATE)))
+    vetoed, labels, checks, _ = checks_of(snap)
+    assert vetoed == ["air_temperature_c", "humidity_pct"] and labels == ["stale_reading"] and checks == ["check the clock"]
+
+
+def test_a_row_from_before_the_labels_were_kept_carries_its_vetoes_only(monkeypatch):
+    Stack(monkeypatch)
+    node = device("climate-1", dict(CLIMATE), judged(["humidity_pct"], labels=None))
+    assert checks_of(snapshot_of(node)) == (["humidity_pct"], [], [], [])
+
+
+def test_a_stale_device_supplies_nothing_and_counts_for_nothing(monkeypatch):
+    stack = Stack(monkeypatch)
+    quiet = device("climate-1", dict(CLIMATE), PENDING, stale=True)
+    live = device("substrate-1", dict(SUBSTRATE))
+    assert checks_of(snapshot_of(quiet, live)) == ([], [], [], [])
+    assert not stack.requests  # a stale pending device is not judged
+
+
+def test_checks_of_several_devices_are_merged_without_repeats(monkeypatch):
+    Stack(monkeypatch)
+    a = device("a", {"ph": 6.0}, judged(["ph"], ["stuck_value"], ["inspect ph"]))
+    b = device("b", {"ec_ms_cm": 2.0}, judged(["ec_ms_cm"], ["stuck_value"], ["inspect ec", "inspect ph"]))
+    assert checks_of(snapshot_of(a, b)) == (["ph", "ec_ms_cm"], ["stuck_value"], ["inspect ph", "inspect ec"], [])
+
+
+# --- the dashboard judges a pending device itself --------------------------------------------------------------
+
+def stuck_result(vetoed, label="stuck_value", check="inspect humidity_pct: near-zero variance may indicate a stuck or clipped probe"):
+    return {**CLEAN, "sensor_quality": {"data_quality_labels": [label], "safe_next_checks": [check, "continue routine monitoring"]},
+            "trust_gate": {"trust_verdict": "partial", "vetoed_fields": vetoed}}
+
+
+def pending_stack(monkeypatch, **kw):
+    snap = two_devices(climate_trust=PENDING)
+    history = [packet("2026-07-20T09:58:30Z", device_id="climate-1", air_temperature_c=23.5),
+               packet("2026-07-20T09:59:00Z", device_id="climate-1", air_temperature_c=23.8),
+               packet("2026-07-20T10:00:30Z", device_id="climate-1", air_temperature_c=24.3),  # sampled after the packet
+               packet(STAMP, device_id="climate-1", air_temperature_c=24.0)]
+    stack = zone_stack(monkeypatch, snap, **kw)
+    stack.device_events["climate-1"] = history
+    stack.router_results["climate-1"] = stuck_result(["humidity_pct"])
+    return stack, snap
+
+
+def test_a_pending_device_is_judged_by_the_dashboard_rules_only_with_its_own_history(monkeypatch):
+    stack, snap = pending_stack(monkeypatch)
+    body = client.get("/api/pipeline").json()
+    (check,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-device-check"]
+    assert check["mode"] == "rules_only" and check["actor"] == "dashboard"
+    assert check["sensor"]["device_id"] == "climate-1" and "source" not in check["sensor"]
+    assert check["device_fields"] == ["air_temperature_c", "humidity_pct"]
+    assert [h["air_temperature_c"] for h in check["history"]] == [23.5, 23.8]  # strictly earlier samples, oldest first
+    assert not {"source", "received_at", "mqtt_retained"} & set(check["history"][0])
+    (history_call,) = [r for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")]
+    assert history_call["params"] == {"limit": 24, "farm_id": "f", "zone_id": "z", "device_id": "climate-1"}
+    # its result is carried into the zone view
+    (zone,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-latest-event"]
+    assert zone["known_vetoed_fields"] == ["humidity_pct"] and zone["known_data_quality_labels"] == ["stuck_value"]
+    assert zone["known_safe_next_checks"] == ["inspect humidity_pct: near-zero variance may indicate a stuck or clipped probe"]
+    assert body["dashboard_judged"] == ["climate-1"]
+
+
+def test_the_pending_device_check_is_posted_to_alerts_once_per_packet_with_its_detail(monkeypatch):
+    stack, snap = pending_stack(monkeypatch)
+    for path in ("/api/pipeline", "/api/risk", "/api/pipeline", "/api/digital-twin", "/api/explanation"):
+        client.get(path)
+    checks = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-device-check"]
+    assert len(checks) == 1  # the result is cached by (farm, zone, device, sample time)
+    (posted,) = stack.bodies("automation", "/v1/automation/alerts/observe")
+    assert posted["device_id"] == "climate-1" and posted["sample_time"] == STAMP
+    assert posted["data_quality_labels"] == ["stuck_value"]
+    assert posted["detail"] == "inspect humidity_pct: near-zero variance may indicate a stuck or clipped probe"
+    # a new packet is judged again
+    stack.snapshot = snapshot_of(device("climate-1", dict(CLIMATE), PENDING, stamp="2026-07-20T10:00:30Z"),
+                                 device("substrate-1", dict(SUBSTRATE)))
+    dashboard_main._snapshot_cache.clear()
+    client.get("/api/pipeline")
+    assert len(stack.bodies("automation", "/v1/automation/alerts/observe")) == 2
+
+
+def test_a_retained_packet_is_judged_for_the_view_but_not_posted(monkeypatch):
+    snap = two_devices(climate_trust=PENDING)
+    snap["devices"][0]["event"]["mqtt_retained"] = True
+    stack = zone_stack(monkeypatch, snap)
+    stack.router_results["climate-1"] = stuck_result(["humidity_pct"])
+    body = client.get("/api/pipeline").json()
+    assert [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-device-check"]
+    assert body["dashboard_judged"] == ["climate-1"]
+    assert not stack.to("automation")
+
+
+def test_a_clean_pending_device_posts_no_detail_and_carries_nothing(monkeypatch):
+    stack = zone_stack(monkeypatch, two_devices(climate_trust=PENDING))
+    body = client.get("/api/pipeline").json()
+    (posted,) = stack.bodies("automation", "/v1/automation/alerts/observe")
+    assert "detail" not in posted  # only "continue routine monitoring": nothing to say
+    (zone,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-latest-event"]
+    assert (zone["known_vetoed_fields"], zone["known_data_quality_labels"], zone["known_safe_next_checks"]) == ([], [], [])
+    assert body["dashboard_judged"] == ["climate-1"]
+
+
+def test_a_failed_device_check_vetoes_everything_it_supplies_and_is_retried_after_5_s(monkeypatch, zone_caches):
+    stack = zone_stack(monkeypatch, two_devices(climate_trust=PENDING))
+    stack.fail_device_checks = True
+    body = client.get("/api/pipeline").json()
+    (zone,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate") if b["scenario_id"] == "dashboard-latest-event"]
+    assert zone["known_vetoed_fields"] == ["air_temperature_c", "humidity_pct"]
+    assert zone["known_safe_next_checks"] == ["sensor check for climate-1 could not run; verify its readings"]
+    assert body["dashboard_judged"] == []
+    assert not stack.to("automation")
+    attempts = lambda: len([r for r in stack.to("router", "/v1/pipeline/evaluate")
+                            if r["json"]["scenario_id"] == "dashboard-device-check"])
+    assert attempts() == 1
+    client.get("/api/risk")
+    assert attempts() == 1  # kept for 5 s: no retry in the same refresh
+    zone_caches.now += 6
+    stack.fail_device_checks = False
+    body = client.get("/api/risk").json()
+    assert attempts() == 2  # retried after 5 s ...
+    zone_caches.now += 600
+    client.get("/api/risk")
+    assert attempts() == 2  # ... and a success is kept
+    assert len(stack.bodies("automation", "/v1/automation/alerts/observe")) == 1
+
+
+def test_the_result_cache_holds_at_most_256_packets(monkeypatch):
+    stack = zone_stack(monkeypatch, two_devices())
+    for n in range(300):
+        node = device("climate-1", dict(CLIMATE), PENDING, stamp=f"2026-07-20T10:{n // 60:02d}:{n % 60:02d}Z")
+        asyncio.run(dashboard_main._device_judgment("f", "z", node))
+    assert len(dashboard_main._judged_cache) == 256
+    assert ("f", "z", "climate-1", "2026-07-20T10:00:00Z") not in dashboard_main._judged_cache
+    assert ("f", "z", "climate-1", "2026-07-20T10:04:59Z") in dashboard_main._judged_cache
+
+
+def test_concurrent_views_share_one_device_check(monkeypatch):
+    stack = zone_stack(monkeypatch, two_devices(climate_trust=PENDING))
+
+    async def refresh():
+        return await asyncio.gather(dashboard_main.pipeline(), dashboard_main.risk(), dashboard_main.explanation())
+
+    assert all(r.available for r in asyncio.run(refresh()))
+    assert len([r for r in stack.to("router", "/v1/pipeline/evaluate") if r["json"]["scenario_id"] == "dashboard-device-check"]) == 1
+
+
+# --- the other paths of the table in 2.4 -----------------------------------------------------------------------
+
+def stale_snapshot():
+    snap = two_devices()
+    for d in snap["devices"]:
+        d["stale"], d["supplied"] = True, []
+    snap.update(fields={}, sensor=None, sources={"air_temperature_c": ["climate-1"]}, newest_age_s=1200.0)
+    return snap
+
+
+def newest_packet_path(stack, history_calls):
+    """What slice 1's multi-device path did: the newest packet, that device's own history, its device_fields."""
+    body = client.get("/api/pipeline").json()
+    assert body["available"] and body["sources"] is None and body["dashboard_judged"] is None
+    (sent,) = stack.bodies("router", "/v1/pipeline/evaluate")
+    assert sent["sensor"]["device_id"] == "substrate-1" and sent["device_fields"] == ["ec_ms_cm", "ph", "substrate_moisture_pct"]
+    assert "known_vetoed_fields" not in sent
+    assert [r["params"] for r in history_calls(stack)] == [{"limit": 24, "farm_id": "f", "zone_id": "z", "device_id": "substrate-1"}]
+    assert not stack.to("router", "/v1/reasoners/shared-chain")
+    return body
+
+
+def own_history(stack):
+    return [r for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")]
+
+
+def test_when_every_device_is_stale_the_newest_packet_path_runs(monkeypatch):
+    stack = zone_stack(monkeypatch, stale_snapshot())
+    body = client.get("/api/overview").json()
+    assert body["zone_snapshot"]["sensor"] is None and body["latest_age_s"] == 1200.0 and body["zone_snapshot_error"] is None
+    stack.requests.clear()
+    newest_packet_path(stack, own_history)
+    assert not stack.to("automation") or stack.bodies("automation", "/v1/automation/alerts/observe")[0]["device_id"] == "substrate-1"
+
+
+def test_when_the_snapshot_call_fails_the_newest_packet_path_runs_and_the_error_is_named(monkeypatch, caplog):
+    stack = zone_stack(monkeypatch, RuntimeError("boom"))
+    with caplog.at_level("WARNING"):
+        body = client.get("/api/overview").json()
+    assert body["zone_snapshot"] is None and body["device_events"] is None
+    assert body["zone_snapshot_error"].startswith("Zone snapshot unavailable") and "boom" not in body["zone_snapshot_error"]
+    assert "boom" in caplog.text  # the detail stays in the log
+    assert body["zone_multi_device"] is True and body["latest_event"]["device_id"] == "substrate-1"
+    stack.requests.clear()
+    newest_packet_path(stack, own_history)
+
+
+def test_a_failed_snapshot_is_not_cached(monkeypatch):
+    stack = zone_stack(monkeypatch, RuntimeError("boom"))
+    client.get("/api/risk")
+    stack.snapshot = two_devices()
+    client.get("/api/risk")
+    assert len(stack.to("core", "/v1/sensors/zone-snapshot")) == 2
+    assert len(stack.to("router", "/v1/reasoners/shared-chain")) == 2
+    assert "known_vetoed_fields" not in stack.bodies("router", "/v1/reasoners/shared-chain")[0]
+    assert "known_vetoed_fields" in stack.bodies("router", "/v1/reasoners/shared-chain")[1]
+
+
+def test_a_zone_that_just_turned_single_device_takes_todays_path(monkeypatch):
+    events = [packet("2026-07-20T09:59:00Z", 6.1), packet(STAMP, 6.0)]
+    stack = Stack(monkeypatch, snapshot=None, zone_events=events, latest_fields=["ph"])  # Core: multi_device false
+    body = client.get("/api/overview").json()
+    assert body["zone_multi_device"] is False and body["latest_device_fields"] is None and body["zone_snapshot"] is None
+    stack.requests.clear()
+    assert client.get("/api/pipeline").json()["available"]
+    assert [r["params"] for r in stack.to("core", "/v1/sensors/events")] == [{"limit": 20}, {"limit": 12}]  # no device filter
+    (sent,) = stack.bodies("router", "/v1/pipeline/evaluate")
+    assert "device_fields" not in sent and [h["ph"] for h in sent["history"]] == [6.1]
+
+
+# --- slice 1's newest-packet path (rewritten on the path-aware fake) ---------------------------------------------
+
+def newest_packet_stack(monkeypatch, events, latest_fields):
+    """The slice-1 situation: a multi-device zone whose zone view is not available, so the newest packet is judged."""
+    return Stack(monkeypatch, snapshot=RuntimeError("no zone view"), zone_events=[events[-1]] if events else [],
+                 device_events={"substrate-1": events}, latest_fields=latest_fields)
 
 
 def test_multi_device_pipeline_uses_the_devices_own_history_and_its_fields(monkeypatch):
     # Core answers oldest first. The evaluated packet (10:00:00) is among them, a late packet (10:00:30, sampled after it)
     # arrived before it, and an older packet (09:58:30) arrived after it.
-    events = [_packet("2026-07-20T09:59:00Z", 6.1), _packet("2026-07-20T10:00:30Z", 6.9),
-              _packet("2026-07-20T10:00:00Z", 6.0), _packet("2026-07-20T09:58:30Z", 6.2),
-              _packet("2026-07-20T09:59:00Z", 6.15)]
-    sent = _two_device_pipeline(monkeypatch, {"zone_multi_device": True, "latest_device_fields": ["ec_ms_cm", "ph"]}, events)
-    assert sent["core"] == [("/v1/sensors/events", {"limit": 24, "farm_id": "f", "zone_id": "z", "device_id": "substrate-1"})]
-    _, body = sent["router"][0]
+    events = [packet("2026-07-20T09:59:00Z", 6.1), packet("2026-07-20T10:00:30Z", 6.9),
+              packet("2026-07-20T10:00:00Z", 6.0), packet("2026-07-20T09:58:30Z", 6.2),
+              packet("2026-07-20T09:59:00Z", 6.15)]
+    stack = Stack(monkeypatch, snapshot=RuntimeError("no zone view"), zone_events=[events[2]],
+                  device_events={"substrate-1": events}, latest_fields=["ec_ms_cm", "ph"])
+    assert client.get("/api/pipeline").json()["available"]  # unscoped request: no farm_id or zone_id in the query
+    history_params = [r["params"] for r in stack.to("core", "/v1/sensors/events") if r["params"].get("device_id")]
+    assert history_params == [{"limit": 24, "farm_id": "f", "zone_id": "z", "device_id": "substrate-1"}]
+    (body,) = stack.bodies("router", "/v1/pipeline/evaluate")
     assert body["device_fields"] == ["ec_ms_cm", "ph"]
     # strictly earlier than the evaluated sample, in sample-time order, API order breaking the tie at 09:59:00
     assert [(h["timestamp"], h["ph"]) for h in body["history"]] == [
         ("2026-07-20T09:58:30Z", 6.2), ("2026-07-20T09:59:00Z", 6.1), ("2026-07-20T09:59:00Z", 6.15)]
     assert not {"source", "received_at", "mqtt_retained"} & set(body["history"][0])
+    assert [b["device_id"] for b in stack.bodies("automation", "/v1/automation/alerts/observe")] == ["substrate-1"]
 
 
 def test_multi_device_history_keeps_the_newest_11(monkeypatch):
-    events = [_packet(f"2026-07-20T09:{minute:02d}:00Z", 6.0 + minute / 100) for minute in range(20, 60)]
-    sent = _two_device_pipeline(monkeypatch, {"zone_multi_device": True, "latest_device_fields": ["ph"]}, events)
-    stamps = [h["timestamp"] for h in sent["router"][0][1]["history"]]
+    events = [packet(f"2026-07-20T09:{minute:02d}:00Z", 6.0 + minute / 100) for minute in range(20, 60)]
+    events.append(packet(STAMP, 6.0))
+    stack = Stack(monkeypatch, snapshot=RuntimeError("no zone view"), zone_events=[events[-1]],
+                  device_events={"substrate-1": events}, latest_fields=["ph"])
+    client.get("/api/pipeline")
+    (body,) = stack.bodies("router", "/v1/pipeline/evaluate")
+    stamps = [h["timestamp"] for h in body["history"]]
     assert len(stamps) == 11 and stamps[0] == "2026-07-20T09:49:00Z" and stamps[-1] == "2026-07-20T09:59:00Z"
 
 
-def test_single_device_pipeline_request_is_unchanged(monkeypatch):
-    events = [_packet("2026-07-20T09:59:00Z", 6.1), _packet("2026-07-20T10:00:00Z", 6.0)]
-    sent = _two_device_pipeline(monkeypatch, {}, events)
-    assert sent["core"] == [("/v1/sensors/events", {"limit": 12})]  # no device filter, no farm and zone from the event
-    _, body = sent["router"][0]
-    assert "device_fields" not in body
-    assert [h["ph"] for h in body["history"]] == [6.1]  # the existing "drop the last by arrival" rule
-
-
 def test_overview_passes_the_two_core_keys_on(monkeypatch):
-    class FakeResponse:
-        def raise_for_status(self): return None
-        def json(self):
-            return {"events": [], "latest_event": {"timestamp": "2026-07-20T10:00:00Z"},
-                    "zone_multi_device": True, "latest_device_fields": ["ph"]}
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def get(self, path, params=None): return FakeResponse()
-
-    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", FakeClient)
+    stack = Stack(monkeypatch, snapshot=RuntimeError("no zone view"), zone_events=[packet(STAMP)], latest_fields=["ph"])
     body = client.get("/api/overview").json()
     assert body["zone_multi_device"] is True and body["latest_device_fields"] == ["ph"]
+
+
+# --- Rule 0: a single-device zone ------------------------------------------------------------------------------
+
+def single_stack(monkeypatch):
+    events = [packet("2026-07-20T09:59:00Z", 6.1, air_temperature_c=24.0), packet(STAMP, 6.0, air_temperature_c=24.5)]
+    return Stack(monkeypatch, snapshot=None, zone_events=events, multi=False)
+
+
+def test_single_device_pipeline_request_is_unchanged(monkeypatch):
+    stack = single_stack(monkeypatch)
+    body = client.get("/api/pipeline").json()
+    assert [r["params"] for r in stack.to("core", "/v1/sensors/events")] == [{"limit": 20}, {"limit": 12}]
+    assert not stack.to("core", "/v1/sensors/zone-snapshot")  # no extra request in a single-device zone
+    (sent,) = stack.bodies("router", "/v1/pipeline/evaluate")
+    event = {k: v for k, v in packet(STAMP, 6.0, air_temperature_c=24.5).items() if k != "source"}
+    assert sent == {
+        "scenario_id": "dashboard-latest-event",
+        "farm_context": {"crop": "tomato", "system_type": "greenhouse_substrate", "zone_id": "z", "weather": None,
+                         "zone_area_m2": None, "crop_kc": None, "npk_target": None},
+        "sensor": event, "history": [{k: v for k, v in packet("2026-07-20T09:59:00Z", 6.1, air_temperature_c=24.0).items()
+                                      if k not in ("source", "received_at", "mqtt_retained")}],
+        "proposed_command": {"action_type": "continue_monitoring"}, "actor": "dashboard", "mode": "hybrid_guarded"}
+    assert body["sources"] is None and body["dashboard_judged"] is None
+    (posted,) = stack.bodies("automation", "/v1/automation/alerts/observe")
+    assert list(posted) == ["farm_id", "zone_id", "device_id", "sample_time", "risk_labels", "data_quality_labels"]
+
+
+def test_single_device_views_send_what_they_always_sent(monkeypatch):
+    stack = single_stack(monkeypatch)
+    for path in ("/api/risk", "/api/safety", "/api/digital-twin", "/api/explanation"):
+        assert client.get(path).json()["available"], path
+    assert not stack.to("core", "/v1/sensors/zone-snapshot")
+    event = {k: v for k, v in packet(STAMP, 6.0, air_temperature_c=24.5).items() if k != "source"}
+    chain = stack.bodies("router", "/v1/reasoners/shared-chain")
+    assert chain[0] == {"farm_context": {"farm_id": "f", "crop": "tomato", "system_type": "greenhouse_substrate", "zone_id": "z"},
+                        "sensor": event, "proposed_command": {"action_type": "continue_monitoring"}, "actor": "dashboard",
+                        "mode": "hybrid_guarded"}
+    (triage,) = stack.bodies("router", "/v1/reasoners/safety-triage")
+    assert triage["input"]["sensor"] == {**event, "source": "mqtt"}  # the safety view has always sent the packet as stored
+    (guard,) = [b for b in stack.bodies("router", "/v1/pipeline/evaluate")]
+    assert guard["expected_fields"] == ["air_temperature_c", "ph"] and not {"device_fields", "known_vetoed_fields"} & set(guard)
+    (explained,) = stack.bodies("router", "/v1/advisor/explain")
+    assert explained["sensor"] == {**event, "source": "mqtt"}
+
+
+def test_single_device_evaluate_context_has_no_sources(monkeypatch):
+    stack = single_stack(monkeypatch)
+    assert client.post("/api/automation/evaluate").json()["available"]
+    (sent,) = stack.bodies("automation", "/v1/automation/evaluate")
+    assert "sources" not in sent["context"]
+    assert client.get("/api/overview").json()["zone_snapshot"] is None
 
 
 def test_failed_service_calls_do_not_leak_internal_text_to_the_browser(monkeypatch, caplog):

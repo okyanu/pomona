@@ -19,10 +19,65 @@ COMPANION_GROUPS = (
 WATER_MODEL_ID = "pomona-water-irrigation-risk-reasoner-v0.1"
 NUTRIENT_MODEL_ID = "pomona-nutrient-ph-ec-reasoner-v0.1"
 VETO_CHECK = "resolve the sensor-quality flags before domain reasoning"
+ROUTINE_CHECK = "continue routine monitoring"
+NEEDS_VERIFICATION = "Sensor packet needs verification before downstream risk or action reasoning."
 
 
 def _mask(packet: Any, vetoed: set) -> Any:
     return {key: value for key, value in packet.items() if key not in vetoed} if isinstance(packet, dict) else packet
+
+
+def merge_known_checks(
+    quality: Dict[str, Any],
+    sensor: Dict[str, Any],
+    vetoed: Optional[List[str]] = None,
+    labels: Optional[List[str]] = None,
+    checks: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Merge the sensor-check results of other devices of a zone into `quality`, before `apply_sensor_veto`
+    (multi-device zones, docs/design/multi-device-zones-slice2.md 2.3). Returns a new dict; `quality` is not changed.
+
+    - Labels are added, except `GLOBAL_VETO_LABELS` (a stale packet of one device must not veto the whole zone) and
+      `missing_*` (the router decides missing fields on the snapshot itself).
+    - A known vetoed field becomes a suspect field only when `sensor` holds a value for it.
+    - Known safe next checks not already present are appended; "continue routine monitoring" goes when any other is there.
+    - Anything added makes human review required; labels added to a clean result give the "needs verification" rationale.
+    - `from_device_checks` lists what was added; the key is absent when nothing was.
+    """
+    merged = dict(quality)
+    merged_labels = list(quality.get("data_quality_labels") or [])
+    merged_suspects = list(quality.get("suspect_fields") or [])
+    merged_checks = list(quality.get("safe_next_checks") or [])
+    added_labels: List[str] = []
+    added_fields: List[str] = []
+    added_checks: List[str] = []
+    for label in labels or []:
+        if label in GLOBAL_VETO_LABELS or label.startswith("missing_") or label in merged_labels:
+            continue
+        merged_labels.append(label)
+        added_labels.append(label)
+    for field in vetoed or []:
+        if sensor.get(field) is None or field in merged_suspects:
+            continue
+        merged_suspects.append(field)
+        added_fields.append(field)
+    for check in checks or []:
+        if check not in merged_checks:
+            merged_checks.append(check)
+            added_checks.append(check)
+    if not (added_labels or added_fields or added_checks):
+        return merged
+    if len(merged_checks) > 1:
+        merged_checks = [check for check in merged_checks if check != ROUTINE_CHECK]
+    was_clean = not (quality.get("data_quality_labels") or [])
+    merged["data_quality_labels"] = merged_labels
+    merged["suspect_fields"] = merged_suspects
+    merged["safe_next_checks"] = merged_checks
+    merged["human_review_required"] = True
+    if added_labels and was_clean:
+        merged["rationale"] = NEEDS_VERIFICATION
+    merged["from_device_checks"] = {"data_quality_labels": added_labels, "vetoed_fields": added_fields}
+    return merged
 
 
 def apply_sensor_veto(

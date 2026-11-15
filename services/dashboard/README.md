@@ -31,12 +31,34 @@ fixed timestamps). Above it, the "Sensor trust" line reads "Can't confirm: no re
 last reading at that time. A probe that did not report reads "EC not reported in the latest reading"; a reading
 that was there but not trusted reads "EC not used"; a `null` reading shows as an en dash in history and cards.
 
-Multi-device zones (two or more devices reporting for one zone; `docs/design/multi-device-zones.md`, slice 1): Core
-judges each device on its own history and expected fields, and `/api/pipeline` ("Evaluate current risk") does the same for
-the device of the latest packet (its own history, and `device_fields` from Core). The zone views are not zone-aware yet
-(slice 2): the overview, tiles, sensor-trust line and "Evaluate current risk" show the zone's newest packet, which flips
-between devices, so tiles from the other device show an en dash. `/api/overview` passes on Core's `zone_multi_device` and
-`latest_device_fields`.
+Multi-device zones (two or more devices reporting for one zone; `docs/design/multi-device-zones.md` slice 1,
+`docs/design/multi-device-zones-slice2.md` slice 2): Core judges each device on its own history and expected fields,
+and the dashboard builds one zone view from Core's `GET /v1/sensors/zone-snapshot` (cached 5 s per farm and zone), so
+nothing flips between devices any more.
+- **Tiles:** each value comes from one device; a line under it names the device and the reading's age. A second device
+  with the same field shows as `also <device>: <value>` (`(not used)` when its own check failed); VPD says
+  `air <device>, humidity <device>` when the two come from different devices.
+- **Sensor trends:** one line per device against sample time (the last 60 min before the newest point, one shared
+  scale), a legend of device ids with each line's dash pattern, and `<device>: not enough data` or `not plotted` (more
+  than 8 devices) when a device has no line. `/api/overview` fetches each device's last 120 events for this.
+- **Sensor trust line:** describes the zone, for example `All readings passed the sensor check (2 devices)` or
+  `Can't confirm: humidity (climate-1) not used; air temperature not reported: no reading from climate-1 for 15 min`.
+  Probes nobody reported read `EC not reported by any device in this zone`. A device the dashboard had to judge itself
+  is marked `(checked by the dashboard)`; that check has no persistent stuck-value history, so it is weaker than
+  Core's. A device is left out of the zone view only after the larger of `ZONE_STALE_AFTER_S` and 3 times its own
+  reporting interval; the whole-zone "no reading from this zone" line appears only when every device is quiet.
+- **Views:** `/api/pipeline`, `/api/risk`, `/api/safety`, the Digital Twin preview, `/api/explanation` and "Evaluate
+  current risk" all reason on the zone view. They carry each device's own sensor-check result, so a stuck probe on one
+  device shows on the badge and creates the `sensor_check` suggestion. `/api/overview` never calls the router; the
+  views that need it judge a device Core has not judged yet.
+- **Alerts:** a Device column (also in the Alerts "Recent:" line as `(<device>)` and in Recent sensor events), and a
+  grey line under a sensor-check alert with the router's check text. Both appear in multi-device zones only.
+- If the snapshot call fails, or every device is quiet, the page shows the newest packet as before (slice 1) and says
+  `Zone view unavailable: showing the newest packet (<device>)` when the call failed. Context that devices disagree on
+  is listed under the tiles.
+- Known limits: alerts are still evaluated per device (a risk that needs fields from two devices is not raised as an
+  alert); two probes of one field are not averaged or compared (see `docs/design/slow-drift-pair-check.md`);
+  `/api/overview` passes on Core's `zone_multi_device` and `latest_device_fields`.
 
 Core outages visibly mark recommendations unavailable and block review clicks.
 Refresh cycles do not overlap, and selecting a zone reloads all panels. No

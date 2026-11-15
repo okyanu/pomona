@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -247,7 +248,63 @@ class NutrientPhEcReasonerResponse(BaseModel):
     fallback_reason: Optional[str] = None
 
 
-class SharedReasonerChainRequest(BaseModel):
+LABEL_PATTERN = re.compile(r"^[a-z_]{1,64}$")
+MAX_KNOWN_LABELS, MAX_KNOWN_CHECKS, MAX_KNOWN_CHECK_CHARS = 50, 20, 300
+
+
+class DeviceZoneKeys(BaseModel):
+    """The optional multi-device zone keys shared by the pipeline and the shared chain (docs/design/multi-device-zones.md
+    1.3, multi-device-zones-slice2.md 2.3). Absent by default; absent keys change nothing."""
+
+    device_fields: Optional[List[str]] = Field(
+        default=None,
+        description=("Multi-device zones: the reading fields the sensor's device has reported lately. Without an explicit "
+                     "expected_fields, only those of the system type's fields are expected. Unknown names are dropped."),
+    )
+    known_vetoed_fields: Optional[List[str]] = Field(
+        default=None,
+        description=("Multi-device zones: fields a device's own sensor check did not trust. Names not in the known sensor "
+                     "fields are dropped; a field the sensor holds no value for is the router's own missing-field call."),
+    )
+    known_data_quality_labels: Optional[List[str]] = Field(
+        default=None,
+        description=("Multi-device zones: data-quality labels from a device's own check, merged into the sensor quality "
+                     "before the gate. At most 50 strings matching ^[a-z_]{1,64}$; others are dropped."),
+    )
+    known_safe_next_checks: Optional[List[str]] = Field(
+        default=None,
+        description="Multi-device zones: the matching safe next checks. At most 20 strings of at most 300 characters; others are dropped.",
+    )
+
+    @field_validator("device_fields", "known_vetoed_fields", mode="before")
+    @classmethod
+    def keep_known_device_fields(cls, value, info):
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError(f"{info.field_name} must be a list of field names")
+        return [name for name in value if isinstance(name, str) and name in KNOWN_SENSOR_FIELDS]
+
+    @field_validator("known_data_quality_labels", mode="before")
+    @classmethod
+    def keep_label_strings(cls, value):
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError("known_data_quality_labels must be a list of labels")
+        return [label for label in value if isinstance(label, str) and LABEL_PATTERN.match(label)][:MAX_KNOWN_LABELS]
+
+    @field_validator("known_safe_next_checks", mode="before")
+    @classmethod
+    def keep_check_strings(cls, value):
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError("known_safe_next_checks must be a list of strings")
+        return [check for check in value if isinstance(check, str) and len(check) <= MAX_KNOWN_CHECK_CHARS][:MAX_KNOWN_CHECKS]
+
+
+class SharedReasonerChainRequest(DeviceZoneKeys):
     farm_context: Dict[str, Any] = Field(..., description="Farm, crop, system, and zone context.")
     sensor: Dict[str, Any] = Field(..., description="Latest normalized sensor packet.")
     expected_fields: List[str] = Field(default_factory=list)
@@ -268,7 +325,7 @@ class SharedReasonerChainResponse(BaseModel):
     fallback_reason: Optional[str] = None
 
 
-class PipelineEvaluateRequest(BaseModel):
+class PipelineEvaluateRequest(DeviceZoneKeys):
     farm_context: Dict[str, Any] = Field(..., description="Farm, crop, system, and zone context.")
     sensor: Dict[str, Any] = Field(..., description="Latest normalized sensor packet.")
     expected_fields: List[str] = Field(default_factory=list)
@@ -281,24 +338,10 @@ class PipelineEvaluateRequest(BaseModel):
         description=("Core's sticky trusted reference per field: {median, n, window_s, last_change_at}, optionally "
                      "{spread, spread_lag, last_value, last_at, change_share, change_steps, longest_run_s}."),
     )
-    device_fields: Optional[List[str]] = Field(
-        default=None,
-        description=("Multi-device zones: the reading fields the sensor's device has reported lately. Without an explicit "
-                     "expected_fields, only those of the system type's fields are expected. Unknown names are dropped."),
-    )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
     mode: Literal["rules_only", "hybrid_guarded"] = "hybrid_guarded"
     scenario_id: Optional[str] = None
-
-    @field_validator("device_fields", mode="before")
-    @classmethod
-    def keep_known_device_fields(cls, value):
-        if value is None:
-            return value
-        if not isinstance(value, list):
-            raise ValueError("device_fields must be a list of field names")
-        return [name for name in value if isinstance(name, str) and name in KNOWN_SENSOR_FIELDS]
 
     @field_validator("stream_baseline")
     @classmethod
@@ -648,6 +691,10 @@ def shared_reasoner_chain(request: SharedReasonerChainRequest) -> SharedReasoner
         request.proposed_command,
         request.actor,
         request.mode,
+        device_fields=request.device_fields,
+        known_vetoed_fields=request.known_vetoed_fields,
+        known_data_quality_labels=request.known_data_quality_labels,
+        known_safe_next_checks=request.known_safe_next_checks,
     )
     logger.info(
         "shared chain mode=%s quality_labels=%s water_labels=%s safety_decision=%s review=%s",
@@ -673,6 +720,9 @@ async def evaluate_pomona_pipeline(request: PipelineEvaluateRequest) -> Pipeline
         history=request.history,
         stream_baseline=request.stream_baseline,
         device_fields=request.device_fields,
+        known_vetoed_fields=request.known_vetoed_fields,
+        known_data_quality_labels=request.known_data_quality_labels,
+        known_safe_next_checks=request.known_safe_next_checks,
         future_slack_s=settings.future_slack_s,
     )
     logger.info(

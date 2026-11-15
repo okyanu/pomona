@@ -28,9 +28,23 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+
+DETAIL_MAX_CHARS = 500
+
+
+def clean_detail(text: Optional[str]) -> Optional[str]:
+    """Free text from a client (the router's sensor check text): no control characters (Unicode category Cc), at most
+    DETAIL_MAX_CHARS characters including a trailing "…". Empty text is None. It is stored and returned on alerts only."""
+    if not isinstance(text, str):
+        return None
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cc")
+    if len(text) > DETAIL_MAX_CHARS:
+        text = text[:DETAIL_MAX_CHARS - 1] + "…"
+    return text or None
 
 
 class AlertMonitor:
@@ -49,15 +63,20 @@ class AlertMonitor:
         with self._db:
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_states (
                 stream TEXT NOT NULL, rule_id TEXT NOT NULL, state TEXT NOT NULL,
-                since TEXT NOT NULL, raised_at TEXT, recovering_since TEXT, consecutive INTEGER,
+                since TEXT NOT NULL, raised_at TEXT, recovering_since TEXT, consecutive INTEGER, detail TEXT,
                 PRIMARY KEY (stream, rule_id))""")
-            if "consecutive" not in {r["name"] for r in self._db.execute("PRAGMA table_info(alert_states)")}:
+            state_columns = {r["name"] for r in self._db.execute("PRAGMA table_info(alert_states)")}
+            if "consecutive" not in state_columns:
                 self._db.execute("ALTER TABLE alert_states ADD COLUMN consecutive INTEGER")  # DBs from before it existed
+            if "detail" not in state_columns:
+                self._db.execute("ALTER TABLE alert_states ADD COLUMN detail TEXT")
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_stream_samples (
                 stream TEXT PRIMARY KEY, last_sample TEXT NOT NULL)""")
             self._db.execute("""CREATE TABLE IF NOT EXISTS alert_events (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, stream TEXT NOT NULL, rule_id TEXT NOT NULL,
-                event TEXT NOT NULL, sample_time TEXT NOT NULL)""")
+                event TEXT NOT NULL, sample_time TEXT NOT NULL, detail TEXT)""")
+            if "detail" not in {r["name"] for r in self._db.execute("PRAGMA table_info(alert_events)")}:
+                self._db.execute("ALTER TABLE alert_events ADD COLUMN detail TEXT")
 
     def _windows(self, rule: Dict[str, Any]) -> tuple[timedelta, timedelta]:
         raise_after = rule.get("raise_after_seconds", self._raise_after)
@@ -69,13 +88,19 @@ class AlertMonitor:
         return json.dumps([farm_id, zone_id, device_id])
 
     def observe(self, farm_id: str, zone_id: str, device_id: Optional[str], sample_time: datetime,
-                risk_labels: Iterable[str]) -> Dict[str, Any]:
-        """Advance every rule's alert for one reading. Returns {"ignored", "events"}."""
+                risk_labels: Iterable[str], detail: Optional[str] = None,
+                data_quality_labels: Iterable[str] = ()) -> Dict[str, Any]:
+        """Advance every rule's alert for one reading. Returns {"ignored", "events"}.
+
+        `detail` (a sensor check text, free text from a client) is kept only for a rule that matched on this reading
+        through one of `data_quality_labels`; a condition alert never gets it. It rides along every transition."""
         if sample_time.tzinfo is None:
             raise ValueError("sample_time must include a timezone")
         t = sample_time.astimezone(timezone.utc)
         stream = self.stream_key(farm_id, zone_id, device_id)
         labels = set(risk_labels)
+        quality_labels = set(data_quality_labels)
+        detail = clean_detail(detail)
         events: List[Dict[str, Any]] = []
         with self._lock, self._db:
             last = self._db.execute("SELECT last_sample FROM alert_stream_samples WHERE stream=?", (stream,)).fetchone()
@@ -91,9 +116,13 @@ class AlertMonitor:
                 row = self._db.execute("SELECT * FROM alert_states WHERE stream=? AND rule_id=?",
                                        (stream, rule["id"])).fetchone()
                 state = row["state"] if row else "normal"
+                stored = row["detail"] if row else None
+                # A new non-empty text replaces the stored one; otherwise the stored text is carried forward.
+                text = detail if matched and quality_labels & set(rule["match_any_labels"]) else None
+                carried = text or stored
                 if matched:
                     if state == "normal":
-                        self._set(stream, rule["id"], "pending", since=t, consecutive=1)
+                        self._set(stream, rule["id"], "pending", since=t, consecutive=1, detail=carried)
                         state, row = "pending", {"since": t.isoformat(), "consecutive": 1}
                     elif state == "pending":
                         row = dict(row)
@@ -104,21 +133,25 @@ class AlertMonitor:
                     samples = rule.get("raise_after_samples")
                     if state == "pending" and (t - datetime.fromisoformat(row["since"]) >= raise_after
                                                or (samples and row["consecutive"] >= samples)):
-                        self._set(stream, rule["id"], "active", since=datetime.fromisoformat(row["since"]), raised_at=t)
-                        events.append(self._event(stream, rule["id"], "raised", t))
+                        self._set(stream, rule["id"], "active", since=datetime.fromisoformat(row["since"]), raised_at=t,
+                                  detail=carried)
+                        events.append(self._event(stream, rule["id"], "raised", t, detail=carried))
                     elif state == "pending":
                         self._set(stream, rule["id"], "pending", since=datetime.fromisoformat(row["since"]),
-                                  consecutive=row["consecutive"])
+                                  consecutive=row["consecutive"], detail=carried)
                     elif state == "recovering":
                         self._set(stream, rule["id"], "active", since=datetime.fromisoformat(row["since"]),
-                                  raised_at=datetime.fromisoformat(row["raised_at"]))
+                                  raised_at=datetime.fromisoformat(row["raised_at"]), detail=carried)
+                    elif state == "active" and text and text != stored:
+                        self._db.execute("UPDATE alert_states SET detail=? WHERE stream=? AND rule_id=?",
+                                         (text, stream, rule["id"]))
                 else:
                     if state == "pending":
                         self._db.execute("DELETE FROM alert_states WHERE stream=? AND rule_id=?", (stream, rule["id"]))
                         continue
                     if state == "active":
                         self._set(stream, rule["id"], "recovering", since=datetime.fromisoformat(row["since"]),
-                                  raised_at=datetime.fromisoformat(row["raised_at"]), recovering_since=t)
+                                  raised_at=datetime.fromisoformat(row["raised_at"]), recovering_since=t, detail=stored)
                         state, recovering_since = "recovering", t
                     elif state == "recovering":
                         recovering_since = datetime.fromisoformat(row["recovering_since"])
@@ -130,21 +163,26 @@ class AlertMonitor:
         return {"ignored": False, "events": events}
 
     def _set(self, stream: str, rule_id: str, state: str, since: datetime, raised_at: Optional[datetime] = None,
-             recovering_since: Optional[datetime] = None, consecutive: Optional[int] = None) -> None:
-        self._db.execute("""INSERT INTO alert_states (stream, rule_id, state, since, raised_at, recovering_since, consecutive)
-            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(stream, rule_id) DO UPDATE SET state=excluded.state,
+             recovering_since: Optional[datetime] = None, consecutive: Optional[int] = None,
+             detail: Optional[str] = None) -> None:
+        self._db.execute("""INSERT INTO alert_states (stream, rule_id, state, since, raised_at, recovering_since, consecutive,
+            detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(stream, rule_id) DO UPDATE SET state=excluded.state,
             since=excluded.since, raised_at=excluded.raised_at, recovering_since=excluded.recovering_since,
-            consecutive=excluded.consecutive""",
+            consecutive=excluded.consecutive, detail=excluded.detail""",
             (stream, rule_id, state, since.isoformat(), raised_at.isoformat() if raised_at else None,
-             recovering_since.isoformat() if recovering_since else None, consecutive))
+             recovering_since.isoformat() if recovering_since else None, consecutive, detail))
 
-    def _event(self, stream: str, rule_id: str, event: str, t: datetime) -> Dict[str, Any]:
-        self._db.execute("INSERT INTO alert_events (stream, rule_id, event, sample_time) VALUES (?, ?, ?, ?)",
-                         (stream, rule_id, event, t.isoformat()))
-        return self._decorate({"stream": stream, "rule_id": rule_id, "event": event, "sample_time": t.isoformat()})
+    def _event(self, stream: str, rule_id: str, event: str, t: datetime, detail: Optional[str] = None) -> Dict[str, Any]:
+        self._db.execute("INSERT INTO alert_events (stream, rule_id, event, sample_time, detail) VALUES (?, ?, ?, ?, ?)",
+                         (stream, rule_id, event, t.isoformat(), detail))
+        return self._decorate({"stream": stream, "rule_id": rule_id, "event": event, "sample_time": t.isoformat(),
+                               "detail": detail})
 
     def _decorate(self, item: Dict[str, Any]) -> Dict[str, Any]:
         farm_id, zone_id, device_id = json.loads(item.pop("stream"))
+        if item.get("detail") is None:
+            item.pop("detail", None)  # absent, not null: in-process users (the simulator, the Space) see what they always saw;
+            # the HTTP models (AlertState, AlertEvent) add the additive `detail: null`
         rule = next((r for r in self._rules if r["id"] == item["rule_id"]), None)
         return {"farm_id": farm_id, "zone_id": zone_id, "device_id": device_id, **item,
                 "action": rule["action"] if rule else None, "message": rule["message"] if rule else None}
@@ -160,7 +198,7 @@ class AlertMonitor:
 
     def events(self, farm_id: Optional[str] = None, zone_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
-            rows = self._db.execute("SELECT stream, rule_id, event, sample_time FROM alert_events ORDER BY seq DESC").fetchall()
+            rows = self._db.execute("SELECT stream, rule_id, event, sample_time, detail FROM alert_events ORDER BY seq DESC").fetchall()
         items = [self._decorate(dict(row)) for row in rows]
         return [item for item in items if self._in_scope(item, farm_id, zone_id)][:limit]
 

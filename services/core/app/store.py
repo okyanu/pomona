@@ -3,6 +3,7 @@ import json
 import hashlib
 import math
 import sqlite3
+import statistics
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -16,6 +17,11 @@ from app.schemas import READING_FIELDS, SensorEvent, SensorObservation, Calibrat
 CLEANUP_INTERVAL = timedelta(minutes=1)  # the age-based deletes run at most this often per database and table
 STORED = {"stored": True}  # validation context: rows already in the database skip the sample-time floor
 PACKET_FIELD = "__packet__"  # device_fields pseudo-field: the device's live full packets (the multi-device test)
+# The packet fields that are context, not readings (docs/design/multi-device-zones-slice2.md 2.1), and how many of a
+# device's latest live packets give its reporting interval.
+CONTEXT_FIELDS = ("crop", "growth_stage", "system_type", "weather", "zone_area_m2", "crop_kc", "npk_target")
+INTERVAL_PACKETS = 6
+ZONE_STALE_CAP_S = 3600  # router flags packets older than 60 min as stale_reading (global veto)
 
 
 class IdConflict(ValueError):
@@ -37,6 +43,19 @@ def finite_reading_fields(packet) -> list:
     get = packet.get if isinstance(packet, dict) else (lambda name: getattr(packet, name, None))
     return [name for name in READING_FIELDS
             if isinstance(get(name), (int, float)) and not isinstance(get(name), bool) and math.isfinite(get(name))]
+
+
+_LATEST = datetime.max.replace(tzinfo=timezone.utc)  # sorts a missing first_seen last
+
+
+def _parse_time(text: str) -> datetime:
+    value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _canonical(value) -> str:
+    """A context value as comparable text (weather and npk_target compare as JSON with sorted keys)."""
+    return json.dumps(value, sort_keys=True)
 
 
 class SensorEventStore:
@@ -83,7 +102,14 @@ class SensorEventStore:
             db.execute("""CREATE TABLE IF NOT EXISTS event_trust (
                 farm_id TEXT NOT NULL, zone_id TEXT NOT NULL, device_id TEXT NOT NULL, sample_time TEXT NOT NULL,
                 trust_verdict TEXT NOT NULL, vetoed_fields TEXT NOT NULL, created_at TEXT NOT NULL,
+                data_quality_labels TEXT, safe_next_checks TEXT,
                 PRIMARY KEY (farm_id, zone_id, device_id, sample_time))""")
+            # The sensor-check result the verdict came from (JSON lists), so the zone snapshot can carry it
+            # (docs/design/multi-device-zones-slice2.md 2.2). A table from before keeps NULL in its old rows.
+            trust_columns = {r[1] for r in db.execute("PRAGMA table_info(event_trust)")}
+            for column in ("data_quality_labels", "safe_next_checks"):
+                if column not in trust_columns:
+                    db.execute(f"ALTER TABLE event_trust ADD COLUMN {column} TEXT")
             # Which fields each device has sent in a live full packet, and when (first and last `received_at`): the
             # multi-device test and each device's expected fields (docs/design/multi-device-zones.md 1.3).
             created = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='device_fields'").fetchone() is None
@@ -474,17 +500,159 @@ class SensorEventStore:
             return None
         return sorted(row["field"] for row in counting if row["device_id"] == event.device_id and row["field"] != PACKET_FIELD)
 
-    def add_trust(self, event: SensorEvent, trust_verdict: str, vetoed_fields: list) -> None:
-        """Record the pipeline's trust verdict for a stored reading (replaces an earlier verdict for it)."""
+    def add_trust(self, event: SensorEvent, trust_verdict: str, vetoed_fields: list,
+                  labels: Optional[list] = None, checks: Optional[list] = None) -> None:
+        """Record the pipeline's trust verdict, and the data-quality labels and safe next checks behind it, for a stored
+        reading (replaces an earlier verdict for it). `labels` / `checks` None store NULL: not recorded."""
         created = utc_now()
         cutoff = (created - timedelta(days=settings.retention_days)).isoformat()
         with self._lock, self._connect() as db:
-            db.execute("""INSERT INTO event_trust VALUES (?,?,?,?,?,?,?)
+            db.execute("""INSERT INTO event_trust (farm_id, zone_id, device_id, sample_time, trust_verdict, vetoed_fields,
+                created_at, data_quality_labels, safe_next_checks) VALUES (?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(farm_id, zone_id, device_id, sample_time) DO UPDATE SET
-                trust_verdict=excluded.trust_verdict, vetoed_fields=excluded.vetoed_fields""",
+                trust_verdict=excluded.trust_verdict, vetoed_fields=excluded.vetoed_fields,
+                data_quality_labels=excluded.data_quality_labels, safe_next_checks=excluded.safe_next_checks""",
                        (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat(), trust_verdict,
-                        json.dumps(sorted(vetoed_fields)), created.isoformat()))
+                        json.dumps(sorted(vetoed_fields)), created.isoformat(),
+                        None if labels is None else json.dumps(list(labels)),
+                        None if checks is None else json.dumps(list(checks))))
             db.execute("DELETE FROM event_trust WHERE created_at < ?", (cutoff,))
+
+    def zone_snapshot(self, farm_id: str, zone_id: str, stale_after_s: int = 0) -> dict:
+        """One view of a multi-device zone (docs/design/multi-device-zones-slice2.md 2.1): each reading field from one
+        device, each device's own sensor-check result, and the zone's context. `{"multi_device": False}` when the zone
+        is not multi-device for its latest event (the slice-1 test), or has no event."""
+        latest_in_zone = self.latest_event(farm_id, zone_id)
+        if latest_in_zone is None or self.device_fields_for(latest_in_zone) is None:
+            return {"multi_device": False}
+        now = utc_now()
+        retention = timedelta(days=settings.retention_days)
+        with self._lock, self._connect() as db:
+            field_rows = db.execute("SELECT device_id, field, first_seen, last_seen FROM device_fields WHERE farm_id=? AND zone_id=?",
+                                    (farm_id, zone_id)).fetchall()
+        first_seen = {(r["device_id"], r["field"]): _parse_time(r["first_seen"]) for r in field_rows}
+        last_seen = {(r["device_id"], r["field"]): _parse_time(r["last_seen"]) for r in field_rows}
+        device_ids = sorted({r["device_id"] for r in field_rows
+                             if r["field"] == PACKET_FIELD and last_seen[(r["device_id"], PACKET_FIELD)] >= now - retention})
+        latest = {}
+        for device_id in device_ids:
+            event = self.latest_event(farm_id, zone_id, device_id)
+            if event is not None:
+                latest[device_id] = event
+        devices = []
+        for device_id, event in latest.items():
+            dump = event.model_dump(mode="json", exclude={"source"})
+            sampled = event.timestamp
+            age_s = max(0.0, (now - sampled).total_seconds())
+            interval_s = self._interval_s(farm_id, zone_id, device_id)
+            if not stale_after_s:
+                limit_s = 0
+            else:
+                limit_s = min(ZONE_STALE_CAP_S, max(stale_after_s, 3 * interval_s)) if interval_s is not None else min(ZONE_STALE_CAP_S, stale_after_s)
+            received = event.received_at or now
+            expected = sorted(f for (d, f), seen in first_seen.items()
+                              if d == device_id and f != PACKET_FIELD and seen <= received
+                              and last_seen[(d, f)] >= received - retention)
+            devices.append({
+                "device_id": device_id, "event": dump, "sample_time": dump["timestamp"], "received_at": dump["received_at"],
+                "age_s": age_s, "interval_s": interval_s, "stale_limit_s": limit_s,
+                "stale": limit_s > 0 and age_s > limit_s, "device_fields": expected, "supplied": [],
+                "trust": self._device_trust(farm_id, zone_id, device_id, event),
+                "_sampled": sampled, "_present": finite_reading_fields(event)})
+
+        fields = {}
+        live = [d for d in devices if not d["stale"]]
+        for name in READING_FIELDS:
+            candidates = sorted((d for d in live if name in d["_present"]),
+                                key=lambda d: (first_seen.get((d["device_id"], name), _LATEST), d["device_id"]))
+            if not candidates:
+                continue
+
+            def vetoes(device):
+                trust = device["trust"]
+                return trust["status"] == "judged" and name in trust["vetoed_fields"]
+
+            chosen = next((d for d in candidates if not vetoes(d)), candidates[0])
+            fields[name] = {
+                "value": getattr(latest[chosen["device_id"]], name), "device_id": chosen["device_id"],
+                "sample_time": chosen["sample_time"], "age_s": chosen["age_s"],
+                "others": [{"device_id": d["device_id"], "value": getattr(latest[d["device_id"]], name),
+                            "sample_time": d["sample_time"], "vetoed": vetoes(d)}
+                           for d in candidates if d is not chosen]}
+        for device in devices:
+            device["supplied"] = [name for name, field in fields.items() if field["device_id"] == device["device_id"]]
+
+        context, context_source, conflicts = self._zone_context(devices, latest)
+        supplying = [d for d in devices if d["supplied"]]
+        sensor = None
+        if fields:
+            newest = max(supplying, key=lambda d: d["_sampled"])
+            sensor = {"farm_id": farm_id, "zone_id": zone_id, **context, **{n: f["value"] for n, f in fields.items()},
+                      "timestamp": newest["sample_time"]}
+        sources = {}
+        for name in READING_FIELDS:
+            if name in fields:
+                sources[name] = [fields[name]["device_id"]]
+            elif any(name in d["device_fields"] for d in devices):
+                sources[name] = [d["device_id"] for d in devices if name in d["device_fields"]]
+        for device in devices:
+            device.pop("_sampled"), device.pop("_present")
+        return {"multi_device": True, "farm_id": farm_id, "zone_id": zone_id, "stale_after_s": stale_after_s,
+                "devices": devices, "fields": fields, "sensor": sensor, "sources": sources,
+                "zone_device_fields": sorted({f for d in devices for f in d["device_fields"]}),
+                "context": context, "context_source": context_source, "context_conflicts": conflicts,
+                "newest_age_s": min((d["age_s"] for d in devices), default=None)}
+
+    def _interval_s(self, farm_id, zone_id, device_id) -> Optional[float]:
+        """The median gap between the sample times of the device's last `INTERVAL_PACKETS` live packets; None below 2."""
+        with self._lock, self._connect() as db:
+            rows = db.execute("""SELECT payload FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=? AND current_eligible=1
+                ORDER BY julianday(timestamp) DESC, id DESC LIMIT ?""", (farm_id, zone_id, device_id, INTERVAL_PACKETS * 2)).fetchall()
+        times = []
+        for row in rows:
+            payload = json.loads(row["payload"])
+            if not payload.get("mqtt_retained"):
+                times.append(_parse_time(payload["timestamp"]))
+        times = sorted(set(times[:INTERVAL_PACKETS]))
+        if len(times) < 2:
+            return None
+        return statistics.median((b - a).total_seconds() for a, b in zip(times, times[1:]))
+
+    def _device_trust(self, farm_id, zone_id, device_id, event: SensorEvent) -> dict:
+        """The event_trust row of the device's latest packet as `judged`, or `pending` when Core has recorded none."""
+        with self._lock, self._connect() as db:
+            row = db.execute("""SELECT trust_verdict, vetoed_fields, data_quality_labels, safe_next_checks FROM event_trust
+                WHERE farm_id=? AND zone_id=? AND device_id=? AND sample_time=?""",
+                             (farm_id, zone_id, device_id, event.timestamp.isoformat())).fetchone()
+        if row is None:
+            return {"status": "pending"}
+        def listed(text):
+            return json.loads(text) if text is not None else None
+        return {"status": "judged", "trust_verdict": row["trust_verdict"], "vetoed_fields": listed(row["vetoed_fields"]) or [],
+                "data_quality_labels": listed(row["data_quality_labels"]), "safe_next_checks": listed(row["safe_next_checks"])}
+
+    @staticmethod
+    def _zone_context(devices: list, latest: dict):
+        """The zone's context fields by one rule (2.1): from the non-stale devices (every device when none is non-stale),
+        null dropped, the schema default dropped when any candidate differs, then the newest sample time wins."""
+        pool = [d for d in devices if not d["stale"]] or devices
+        context, source, conflicts = {}, {}, []
+        for name in CONTEXT_FIELDS:
+            default = SensorEvent.model_fields[name].default
+            found = []
+            for device in pool:
+                value = device["event"].get(name)
+                if value is not None:
+                    found.append((device, value))
+            if any(_canonical(value) != _canonical(default) for _, value in found):
+                found = [(d, v) for d, v in found if _canonical(v) != _canonical(default)]
+            if not found:
+                continue
+            winner = min(found, key=lambda item: (-item[0]["_sampled"].timestamp(), item[0]["device_id"]))
+            context[name], source[name] = winner[1], winner[0]["device_id"]
+            if len({_canonical(v) for _, v in found}) > 1:
+                conflicts.append(name)
+        return context, source, sorted(conflicts)
 
     def stream_history(self, event: SensorEvent, limit: int) -> list[dict]:
         """Up to `limit` stored readings of the event's own stream (farm, zone, device) sampled before it, oldest

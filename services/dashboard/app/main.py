@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -71,6 +74,12 @@ class OverviewResponse(BaseModel):
     # 1.5). False/None in a single-device zone: nothing then changes.
     zone_multi_device: bool = False
     latest_device_fields: Optional[List[str]] = None
+    # Multi-device zones only (docs/design/multi-device-zones-slice2.md 2.4); all three are null in a single-device zone.
+    # zone_snapshot: Core's zone view as it answered (not judged further here); device_events: device id to that device's
+    # last events, oldest first (trends); zone_snapshot_error: set when the snapshot call failed.
+    zone_snapshot: Optional[Dict[str, Any]] = None
+    device_events: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    zone_snapshot_error: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -88,6 +97,10 @@ class PipelineResponse(BaseModel):
     sensor_timestamp: Optional[str] = None
     sensor_event_id: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+    # Zone-view path only (multi-device zones, slice 2 2.4/2.5); null otherwise. sources: field to the devices that
+    # supplied (or should have supplied) it; dashboard_judged: devices whose sensor check the dashboard ran itself.
+    sources: Optional[Dict[str, List[str]]] = None
+    dashboard_judged: Optional[List[str]] = None
     error: Optional[str] = None
 
 
@@ -267,8 +280,282 @@ def reading_age_s(event: Optional[Dict[str, Any]]) -> Optional[float]:
     return max((utc_now() - sampled).total_seconds(), 0.0)
 
 
+# --- Multi-device zones, slice 2: the zone view (docs/design/multi-device-zones-slice2.md 2.4) ------------------------
+
+SNAPSHOT_CACHE_S = 5.0  # one zone view per cache life; also how long a failed device check is kept
+JUDGED_CACHE_MAX = 256
+TREND_DEVICES = 8
+TREND_LIMIT = 120  # an hour at 30 s
+# The router's GLOBAL_VETO_LABELS (services/model-router/app/trust_gate.py): a device carrying one of these has all the
+# fields it supplies vetoed, because the router does not take them as labels from another device.
+GLOBAL_VETO_LABELS = frozenset({"stale_reading", "insufficient_context", "unit_mismatch"})
+ROUTINE_CHECK = "continue routine monitoring"
+DETAIL_MAX_CHARS = 500
+_clock = time.monotonic  # tests replace this to move the caches' time
+_snapshot_cache: Dict[tuple, tuple] = {}  # (farm, zone) -> (expires, snapshot)
+_judged_cache: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()  # (farm, zone, device, sample time) -> judgment
+_judging: Dict[tuple, "asyncio.Future"] = {}  # judgments in flight, so concurrent views make one router call
+
+
+def reset_zone_caches() -> None:
+    _snapshot_cache.clear()
+    _judged_cache.clear()
+    _judging.clear()
+
+
+async def _zone_snapshot(farm_id: str, zone_id: str) -> Dict[str, Any]:
+    """Core's zone snapshot for (farm, zone), cached for SNAPSHOT_CACHE_S. Never changed by callers."""
+    key = (farm_id, zone_id)
+    hit = _snapshot_cache.get(key)
+    now = _clock()
+    if hit and hit[0] > now:
+        return hit[1]
+    async with httpx.AsyncClient(base_url=settings.core_url, timeout=3.0) as client:
+        response = await client.get("/v1/sensors/zone-snapshot", params={
+            "farm_id": farm_id, "zone_id": zone_id, "stale_after_s": max(settings.zone_stale_after_s, 0)})
+        response.raise_for_status()
+        snapshot = response.json()
+    if not isinstance(snapshot, dict):
+        raise ValueError("zone snapshot is not an object")
+    _snapshot_cache[key] = (_clock() + SNAPSHOT_CACHE_S, snapshot)
+    return snapshot
+
+
+async def _device_trend(farm_id: str, zone_id: str, device_id: str) -> List[Dict[str, Any]]:
+    try:
+        async with httpx.AsyncClient(base_url=settings.core_url, timeout=3.0) as client:
+            response = await client.get("/v1/sensors/events", params={
+                "farm_id": farm_id, "zone_id": zone_id, "device_id": device_id, "limit": TREND_LIMIT})
+            response.raise_for_status()
+        events = [dict(item) for item in response.json().get("events") or []]
+    except Exception:
+        return []
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    events.sort(key=lambda item: sample_time(item) or floor)  # oldest first by sample time; arrival order breaks ties
+    return events
+
+
+async def _attach_zone_snapshot(data: OverviewResponse, trends: bool) -> OverviewResponse:
+    """Multi-device zone: add Core's zone snapshot to the overview. A failed call leaves the slice-1 newest-packet path
+    and sets zone_snapshot_error; a snapshot that says the zone is not multi-device turns the overview single-device."""
+    scope = request_scope.get()
+    event = data.latest_event or {}
+    farm_id = scope.get("farm_id") or event.get("farm_id")
+    zone_id = scope.get("zone_id") or event.get("zone_id")
+    if not (farm_id and zone_id):
+        return data
+    try:
+        snapshot = await _zone_snapshot(farm_id, zone_id)
+    except Exception as exc:
+        return data.model_copy(update={"zone_snapshot_error": service_unavailable("Zone snapshot", exc)})
+    if not snapshot.get("multi_device"):
+        return data.model_copy(update={"zone_multi_device": False, "latest_device_fields": None})
+    update: Dict[str, Any] = {"zone_snapshot": snapshot}
+    if snapshot.get("newest_age_s") is not None:
+        update["latest_age_s"] = snapshot["newest_age_s"]
+    if trends:
+        ids = sorted(d["device_id"] for d in snapshot.get("devices") or [] if d.get("device_id"))[:TREND_DEVICES]
+        series = await asyncio.gather(*(_device_trend(farm_id, zone_id, device_id) for device_id in ids))
+        update["device_events"] = dict(zip(ids, series))
+    return data.model_copy(update=update)
+
+
+class ZoneView:
+    """What every view reasons on. `sensor` is the snapshot's zone reading (S) on the zone-view path, else None and the
+    view takes today's path (or slice 1's newest-packet path in a multi-device zone)."""
+
+    def __init__(self, data: OverviewResponse) -> None:
+        self.overview = data
+        snapshot = data.zone_snapshot
+        self.snapshot: Optional[Dict[str, Any]] = snapshot if isinstance(snapshot, dict) and snapshot.get("sensor") else None
+
+    @property
+    def sensor(self) -> Optional[Dict[str, Any]]:
+        return dict(self.snapshot["sensor"]) if self.snapshot else None
+
+    @property
+    def sources(self) -> Dict[str, List[str]]:
+        return {name: list(ids) for name, ids in ((self.snapshot or {}).get("sources") or {}).items()}
+
+    @property
+    def device_fields(self) -> List[str]:
+        return list((self.snapshot or {}).get("zone_device_fields") or [])
+
+
+async def _zone_view() -> ZoneView:
+    """One zone view for a refresh (docs 2.4): the events call as today and, in a multi-device zone, the cached snapshot.
+    No trend fetches (those are /api/overview's). Single-device zones: nothing but the events call."""
+    return ZoneView(await overview())
+
+
+def alert_detail(result: Dict[str, Any]) -> Optional[str]:
+    """The router's sensor check text for one reading, as Core's feed builds it: its safe next checks without
+    "continue routine monitoring", joined with "; ", cut to 500 characters ending in "…". None when empty."""
+    checks = [c for c in (result.get("sensor_quality") or {}).get("safe_next_checks") or []
+              if isinstance(c, str) and c and c != ROUTINE_CHECK]
+    text = "; ".join(checks)
+    if len(text) > DETAIL_MAX_CHARS:
+        text = text[:DETAIL_MAX_CHARS - 1] + "…"
+    return text or None
+
+
+class DeviceChecks:
+    """The devices' own sensor-check results as the router wants them (docs 2.4), and which devices the dashboard judged."""
+
+    def __init__(self) -> None:
+        self.vetoed: List[str] = []
+        self.labels: List[str] = []
+        self.checks: List[str] = []
+        self.dashboard_judged: List[str] = []
+
+    def keys(self) -> Dict[str, List[str]]:
+        return {"known_vetoed_fields": list(self.vetoed), "known_data_quality_labels": list(self.labels),
+                "known_safe_next_checks": list(self.checks)}
+
+    def mask(self, sensor: Dict[str, Any]) -> Dict[str, Any]:
+        vetoed = set(self.vetoed)
+        return {key: value for key, value in sensor.items() if key not in vetoed}
+
+
+def _add_unique(target: List[str], items: Any) -> None:
+    for item in items or []:
+        if item not in target:
+            target.append(item)
+
+
+async def _judge_pending_device(farm_id: str, zone_id: str, device: Dict[str, Any]) -> Dict[str, Any]:
+    """Judge one device's latest packet here, as Core's feed would have (rules_only, the device's own history and its
+    device_fields). Never raises: a failure is returned as {"failed": True}."""
+    event = dict(device.get("event") or {})
+    event.pop("source", None)
+    device_id = device["device_id"]
+    history: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(base_url=settings.core_url, timeout=5.0) as client:
+            response = await client.get("/v1/sensors/events", params={
+                "limit": 24, "farm_id": farm_id, "zone_id": zone_id, "device_id": device_id})
+            response.raise_for_status()
+        for item in earlier_samples(response.json().get("events") or [], event.get("timestamp")):
+            packet = dict(item)
+            for name in ("source", "received_at", "mqtt_retained"):
+                packet.pop(name, None)
+            history.append(packet)
+    except Exception:
+        history = []
+    try:
+        async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=10.0) as client:
+            response = await client.post("/v1/pipeline/evaluate", json={
+                "scenario_id": "dashboard-device-check",
+                "farm_context": {
+                    "crop": event.get("crop", "tomato"),
+                    "system_type": event.get("system_type", "greenhouse_substrate"),
+                    "zone_id": event.get("zone_id", "unknown"),
+                    "weather": event.get("weather"),
+                    "zone_area_m2": event.get("zone_area_m2"),
+                    "crop_kc": event.get("crop_kc"),
+                    "npk_target": event.get("npk_target"),
+                },
+                "sensor": event,
+                "history": history,
+                "proposed_command": {"action_type": "continue_monitoring"},
+                "actor": "dashboard",
+                "mode": "rules_only",
+                "device_fields": list(device.get("device_fields") or []),
+            })
+            response.raise_for_status()
+        result = response.json()
+    except Exception:
+        return {"failed": True}
+    quality = result.get("sensor_quality") or {}
+    gate = result.get("trust_gate") or {}
+    judgment = {
+        "failed": False,
+        "vetoed_fields": list(gate.get("vetoed_fields") or (result.get("final_decision") or {}).get("vetoed_fields") or []),
+        "data_quality_labels": list(quality.get("data_quality_labels") or []),
+        "safe_next_checks": list(quality.get("safe_next_checks") or []),
+    }
+    # Core's feed never judges a retained packet (retained state never proves live availability): such a device is
+    # judged here for the view only, and not given to the alert monitor.
+    if not event.get("mqtt_retained"):
+        await feed_alert_monitor(event, result, alert_detail(result))
+    return judgment
+
+
+async def _device_judgment(farm_id: str, zone_id: str, device: Dict[str, Any]) -> Dict[str, Any]:
+    """The dashboard's own check of a pending device, cached by (farm, zone, device, sample time): a success until
+    evicted (256 entries), a failure for SNAPSHOT_CACHE_S. Concurrent views share one call."""
+    key = (farm_id, zone_id, device["device_id"], device.get("sample_time"))
+    hit = _judged_cache.get(key)
+    if hit and (hit["until"] is None or hit["until"] > _clock()):
+        return hit["judgment"]
+    loop = asyncio.get_running_loop()
+    running = _judging.get(key)
+    if running is not None and running.get_loop() is loop:
+        try:
+            return await asyncio.shield(running)
+        except asyncio.CancelledError:
+            if not running.cancelled():
+                raise
+    future = loop.create_future()
+    _judging[key] = future
+    try:
+        judgment = await _judge_pending_device(farm_id, zone_id, device)
+        _judged_cache[key] = {"judgment": judgment, "until": _clock() + SNAPSHOT_CACHE_S if judgment["failed"] else None}
+        _judged_cache.move_to_end(key)
+        while len(_judged_cache) > JUDGED_CACHE_MAX:
+            _judged_cache.popitem(last=False)
+        future.set_result(judgment)
+        return judgment
+    except BaseException:
+        future.cancel()
+        raise
+    finally:
+        _judging.pop(key, None)
+
+
+async def device_checks(snapshot: Dict[str, Any]) -> DeviceChecks:
+    """Turn each device that supplies a field into the router's `known_*` inputs (docs 2.4). A judged device's row comes
+    from Core; a pending one is judged here. A stale device supplies nothing and so counts for nothing."""
+    farm_id, zone_id = snapshot.get("farm_id"), snapshot.get("zone_id")
+    devices = sorted((d for d in snapshot.get("devices") or [] if d.get("supplied")), key=lambda d: d["device_id"])
+    pending = [d for d in devices if (d.get("trust") or {}).get("status") != "judged"]
+    judgments = dict(zip((d["device_id"] for d in pending),
+                         await asyncio.gather(*(_device_judgment(farm_id, zone_id, d) for d in pending))))
+    out = DeviceChecks()
+    for device in devices:
+        supplied = list(device["supplied"])
+        trust = device.get("trust") or {}
+        if trust.get("status") == "judged":
+            row = trust
+        else:
+            row = judgments[device["device_id"]]
+            if row["failed"]:
+                _add_unique(out.vetoed, supplied)
+                _add_unique(out.checks, [f"sensor check for {device['device_id']} could not run; verify its readings"])
+                continue
+            out.dashboard_judged.append(device["device_id"])
+            row = {"vetoed_fields": row["vetoed_fields"], "data_quality_labels": row["data_quality_labels"],
+                   "safe_next_checks": row["safe_next_checks"]}
+        own_vetoed = list(row.get("vetoed_fields") or [])
+        labels = list(row.get("data_quality_labels") or [])  # null in a row from before the labels were kept
+        flagged = [f for f in supplied if f in own_vetoed]
+        if GLOBAL_VETO_LABELS & set(labels):
+            flagged = supplied
+        _add_unique(out.vetoed, flagged)
+        if flagged or not own_vetoed:  # a flagged probe outside the zone view puts nothing on the zone's badge
+            _add_unique(out.labels, labels)
+            _add_unique(out.checks, [c for c in row.get("safe_next_checks") or [] if c != ROUTINE_CHECK])
+    return out
+
+
 @app.get("/api/overview", response_model=OverviewResponse)
-async def overview() -> OverviewResponse:
+async def overview_page() -> OverviewResponse:
+    return await overview(trends=True)
+
+
+async def overview(trends: bool = False) -> OverviewResponse:
+    """The overview. `trends` (only /api/overview asks) adds each device's recent events in a multi-device zone; the
+    other views take the same zone view without them. Pending devices are not judged here (it never waits on the router)."""
     try:
         async with httpx.AsyncClient(base_url=settings.core_url, timeout=3.0) as client:
             response = await client.get("/v1/sensors/events", params={"limit": 20, **request_scope.get()})
@@ -276,7 +563,7 @@ async def overview() -> OverviewResponse:
             payload = response.json()
         events = payload.get("events") or []
         latest = payload.get("latest_event", events[-1] if events else None)
-        return OverviewResponse(
+        data = OverviewResponse(
             core_available=True,
             latest_event=latest,
             recent_events=list(reversed(events)),
@@ -287,17 +574,30 @@ async def overview() -> OverviewResponse:
         )
     except Exception as exc:
         return OverviewResponse(core_available=False, error=service_unavailable("Core", exc))
+    if data.zone_multi_device and data.latest_event:
+        data = await _attach_zone_snapshot(data, trends)
+    return data
 
 
 @app.get("/api/risk", response_model=RiskResponse)
 async def risk() -> RiskResponse:
-    overview_data = await overview()
+    view = await _zone_view()
+    overview_data = view.overview
     if not overview_data.core_available or not overview_data.latest_event:
         return RiskResponse(available=False, error="No persisted sensor event is available.")
 
-    event = overview_data.latest_event
-    sensor = dict(event)
-    sensor.pop("source", None)
+    zone_keys: Dict[str, Any] = {}
+    if view.snapshot:
+        # Zone-view path (slice 2 2.5): the zone's reading, the devices' own check results, and the fields the zone's
+        # devices carry, so the risk panel and the trust line agree on what is missing.
+        sensor = view.sensor
+        checks = await device_checks(view.snapshot)
+        zone_keys = {"device_fields": view.device_fields, **checks.keys()}
+        event = sensor
+    else:
+        event = overview_data.latest_event
+        sensor = dict(event)
+        sensor.pop("source", None)
     try:
         async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=5.0) as client:
             response = await client.post(
@@ -313,6 +613,7 @@ async def risk() -> RiskResponse:
                     "proposed_command": {"action_type": "continue_monitoring"},
                     "actor": "dashboard",
                     "mode": "hybrid_guarded",
+                    **zone_keys,
                 },
             )
             response.raise_for_status()
@@ -346,10 +647,14 @@ def earlier_samples(events: List[Dict[str, Any]], timestamp: Any, keep: int = 11
 
 @app.get("/api/pipeline", response_model=PipelineResponse)
 async def pipeline() -> PipelineResponse:
-    """Return the unified guarded pipeline for the latest persisted event."""
-    overview_data = await overview()
+    """Return the unified guarded pipeline for the latest persisted event (or, in a multi-device zone whose devices are
+    live, for the zone view: docs/design/multi-device-zones-slice2.md 2.5)."""
+    view = await _zone_view()
+    overview_data = view.overview
     if not overview_data.core_available or not overview_data.latest_event:
         return PipelineResponse(available=False, error="No persisted sensor event is available.")
+    if view.snapshot:
+        return await _zone_pipeline(view)
 
     event = dict(overview_data.latest_event)
     event.pop("source", None)
@@ -422,6 +727,48 @@ async def pipeline() -> PipelineResponse:
         return PipelineResponse(available=False, error=service_unavailable("Integrated pipeline", exc))
 
 
+async def _zone_pipeline(view: ZoneView) -> PipelineResponse:
+    """The pipeline on the zone view: the snapshot's reading, no history, the zone's device_fields, the devices' own
+    check results. It does not post to the alert monitor: alerts stay per device (Core's feed, or the fallback in
+    device_checks)."""
+    event = view.sensor
+    sources = view.sources
+    try:
+        checks = await device_checks(view.snapshot)
+        async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=10.0) as client:
+            response = await client.post(
+                "/v1/pipeline/evaluate",
+                json={
+                    "scenario_id": "dashboard-latest-event",
+                    "farm_context": {
+                        "crop": event.get("crop", "tomato"),
+                        "system_type": event.get("system_type", "greenhouse_substrate"),
+                        "zone_id": event.get("zone_id", "unknown"),
+                        "weather": event.get("weather"),
+                        "zone_area_m2": event.get("zone_area_m2"),
+                        "crop_kc": event.get("crop_kc"),
+                        "npk_target": event.get("npk_target"),
+                    },
+                    "sensor": event,
+                    "history": [],
+                    "proposed_command": {"action_type": "continue_monitoring"},
+                    "actor": "dashboard",
+                    "mode": "hybrid_guarded",
+                    "device_fields": view.device_fields,
+                    **checks.keys(),
+                },
+            )
+            response.raise_for_status()
+        result = response.json()
+        event_id = hashlib.sha256(json.dumps({"sensor": event, "sources": sources}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return PipelineResponse(available=True, result=result, sensor_event_id=event_id, sensor_timestamp=event.get("timestamp"),
+                                sensor_snapshot=event, history_snapshot=[],
+                                history_sha256=hashlib.sha256(b"[]").hexdigest(),
+                                sources=sources, dashboard_judged=list(checks.dashboard_judged))
+    except Exception as exc:
+        return PipelineResponse(available=False, error=service_unavailable("Integrated pipeline", exc))
+
+
 def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys([
         *(result.get("sensor_quality") or {}).get("data_quality_labels", []),
@@ -431,9 +778,11 @@ def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
     ]))
 
 
-async def feed_alert_monitor(event: Dict[str, Any], result: Dict[str, Any]) -> None:
+async def feed_alert_monitor(event: Dict[str, Any], result: Dict[str, Any], detail: Optional[str] = None) -> None:
     """Give this reading's risk labels to the alert monitor. Failure-isolated: an alert-service
-    outage never hides the pipeline result. Repeated readings are ignored by the monitor."""
+    outage never hides the pipeline result. Repeated readings are ignored by the monitor.
+    `detail` is the sensor check text for multi-device zones (docs/design/multi-device-zones-slice2.md 2.6); the
+    single-device path never passes it and the request body stays as it was."""
     if not (event.get("farm_id") and event.get("zone_id") and event.get("timestamp")):
         return
     try:
@@ -441,7 +790,8 @@ async def feed_alert_monitor(event: Dict[str, Any], result: Dict[str, Any]) -> N
             await client.post("/v1/automation/alerts/observe", json={
                 "farm_id": event["farm_id"], "zone_id": event["zone_id"], "device_id": event.get("device_id"),
                 "sample_time": event["timestamp"], "risk_labels": pipeline_risk_labels(result),
-                "data_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", [])})
+                "data_quality_labels": (result.get("sensor_quality") or {}).get("data_quality_labels", []),
+                **({"detail": detail} if detail else {})})
     except Exception:
         pass
 
@@ -543,6 +893,9 @@ async def automation_evaluate() -> AutomationResponse:
                             if isinstance(part := result.get(name), dict) and part.get("model_id"))),
                         "reasoner_snapshot": {name: result.get(name) for name in (
                             "sensor_quality", "water_irrigation", "nutrient_ph_ec", "crop_risk", "trust_gate", "final_decision")},
+                        # Zone-view suggestions name who supplied each field, so outcomes follow those devices
+                        # (multi-device zones only; a single-device context is unchanged).
+                        **({"sources": pipeline_data.sources} if pipeline_data.sources else {}),
                         **request_scope.get(),
                     },
                 },
@@ -594,11 +947,15 @@ async def audit() -> AuditResponse:
 
 @app.get("/api/safety", response_model=SafetyResponse)
 async def safety() -> SafetyResponse:
-    overview_data = await overview()
+    view = await _zone_view()
+    overview_data = view.overview
     if not overview_data.core_available or not overview_data.latest_event:
         return SafetyResponse(available=False, error="No persisted sensor event is available.")
 
-    event = overview_data.latest_event
+    # Zone-view path: the zone's reading, unmasked. The triage gate reads only sensor_quality and the command, and
+    # this call sends no sensor_quality, so the reading never changes its answer; it is sent so the request names no
+    # single device.
+    event = view.sensor if view.snapshot else overview_data.latest_event
     try:
         async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=5.0) as client:
             response = await client.post(
@@ -658,12 +1015,23 @@ async def runtime_status() -> RuntimeStatusResponse:
 
 async def _digital_twin_preview(request: DigitalTwinScenarioRequest) -> DigitalTwinResponse:
     """Run a bounded forecast and validate its endpoint against guarded rules."""
-    overview_data = await overview()
+    view = await _zone_view()
+    overview_data = view.overview
     if not overview_data.core_available or not overview_data.latest_event:
         return DigitalTwinResponse(available=False, error="No persisted sensor event is available.")
 
-    event = dict(overview_data.latest_event)
-    event.pop("source", None)
+    zone_keys: Dict[str, Any] = {}
+    if view.snapshot:
+        # Zone-view path (slice 2 2.5): the state is the zone's reading with the carried vetoes removed, and the guarded
+        # call names the zone's device_fields and sends no expected_fields, so a field missing from the snapshot is
+        # reported missing instead of silently dropped. The twin needs air, humidity or moisture: a masked reading
+        # with none of them gets its 422, as a single-device packet without them does.
+        checks = await device_checks(view.snapshot)
+        event = checks.mask(view.sensor)
+        zone_keys = {"device_fields": view.device_fields, **checks.keys()}
+    else:
+        event = dict(overview_data.latest_event)
+        event.pop("source", None)
     try:
         async with httpx.AsyncClient(base_url=settings.digital_twin_url, timeout=5.0) as client:
             response = await client.post(
@@ -698,6 +1066,7 @@ async def _digital_twin_preview(request: DigitalTwinScenarioRequest) -> DigitalT
                 "water_temperature_c",
             ) if field in final_state
         ]
+        guard_fields = zone_keys or {"expected_fields": expected_fields}
         async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=10.0) as client:
             guarded = await client.post(
                 "/v1/pipeline/evaluate",
@@ -709,7 +1078,7 @@ async def _digital_twin_preview(request: DigitalTwinScenarioRequest) -> DigitalT
                         "zone_id": event.get("zone_id", "unknown"),
                     },
                     "sensor": final_state,
-                    "expected_fields": expected_fields,
+                    **guard_fields,
                     "proposed_command": {"action_type": "continue_monitoring"},
                     "actor": "dashboard_digital_twin_preview",
                     "mode": "hybrid_guarded",
@@ -735,12 +1104,16 @@ async def digital_twin_scenario(request: DigitalTwinScenarioRequest) -> DigitalT
 
 @app.get("/api/explanation", response_model=ExplanationResponse)
 async def explanation() -> ExplanationResponse:
-    overview_data = await overview()
+    view = await _zone_view()
+    overview_data = view.overview
     if not overview_data.core_available or not overview_data.latest_event:
         return ExplanationResponse(available=False, error="No persisted sensor event is available.")
     risk_data = await risk()
     if not risk_data.available:
         return ExplanationResponse(available=False, error=risk_data.error or "Guarded risk result unavailable.")
+    sensor = overview_data.latest_event
+    if view.snapshot:  # zone-view path: the zone's reading with the carried vetoes removed
+        sensor = (await device_checks(view.snapshot)).mask(view.sensor)
     try:
         async with httpx.AsyncClient(base_url=settings.model_router_url, timeout=30.0) as client:
             response = await client.post(
@@ -751,7 +1124,7 @@ async def explanation() -> ExplanationResponse:
                         "Give safe next checks only. Do not issue pesticide dosage, fertigation changes, "
                         "actuator commands, or definitive disease diagnoses."
                     ),
-                    "sensor": overview_data.latest_event,
+                    "sensor": sensor,
                     "guarded_context": risk_data.result,
                     "backend": "stub",
                 },
@@ -820,6 +1193,9 @@ DASHBOARD_HTML = r"""<!doctype html>
     .accent-ph { border-left-color: #a371f7; }
     .accent-ec { border-left-color: #3fb950; }
     .accent-vpd { border-left-color: #2bb3c0; }
+    .tile-src { font-size: 12px; font-weight: 400; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .trend-card svg.swatch { width: 28px; height: 8px; display: inline-block; margin: 0 4px 0 0; vertical-align: middle; }
+    .legend-item { display: inline-block; margin-right: 10px; white-space: nowrap; }
     @media (max-width: 720px) { .grid, .trend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } .status { display: block; margin-top: 8px; } }
   </style>
 </head>
@@ -845,6 +1221,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div class="metric accent-ec"><div class="label">⚡ EC</div><div class="value" id="ec">--</div></div>
     <div class="metric accent-vpd" title="Vapour-pressure deficit from air temperature and humidity. Tomato: below 0.4 kPa leaves stay wet (mould risk); above 1.6 kPa plants close stomata."><div class="label">🌫️ VPD</div><div class="value" id="vpd">--</div></div>
   </div>
+  <div id="zone-notes"></div>
   <section><h2>Sensor trends</h2><div id="trends" class="empty">Loading...</div></section>
   <section><h2>Integrated guarded pipeline</h2><div id="pipeline" class="empty">Loading...</div></section>
   <section><h2>Specialist results</h2><div id="specialists" class="empty">Loading...</div></section>
@@ -911,8 +1288,72 @@ const trustFields = new Map([['ph', 'pH'], ['previous_ph', 'pH'], ['ec_ms_cm', '
 // quality block's missing_fields) are probes that did not report in the latest reading; `fields` (vetoed_fields) are
 // readings that were there but not trusted. A field in both is said once, as not reported.
 const fieldNames = (fields) => [...new Set((fields || []).map(field => trustFields.get(field) || field))];
-const trustLine = (verdict, fields, missing) => {
+// Multi-device zones (docs/design/multi-device-zones-slice2.md 2.8): `zone` is the zone snapshot, or just {sources} for an
+// advice card. `sources` maps a field to the device(s) that supplied it (or should have); `devices` carries each device's
+// age_s, stale flag and supplied fields; `dashboard_judged` names devices the dashboard checked itself (PipelineResponse).
+// Parts: fields not used (with their device), then probes of a quiet device, then probes no device reported.
+const zoneTrustLine = (verdict, fields, missing, zone) => {
+  const sources = zone.sources && typeof zone.sources === 'object' ? zone.sources : {};
+  const devices = Array.isArray(zone.devices) ? zone.devices : null;
+  const judged = Array.isArray(zone.dashboard_judged) ? zone.dashboard_judged : [];
+  const byId = new Map((devices || []).map(device => [device.device_id, device]));
+  const owners = (field) => {
+    if (Object.prototype.hasOwnProperty.call(sources, field) && Array.isArray(sources[field])) return sources[field];
+    const name = trustFields.get(field);
+    const found = [];
+    if (name) for (const key of Object.keys(sources)) {
+      if (trustFields.get(key) === name && Array.isArray(sources[key])) sources[key].forEach(id => { if (!found.includes(id)) found.push(id); });
+    }
+    return found;
+  };
+  const named = (list, pick) => {  // field name -> devices, in the order the fields came
+    const byName = new Map();
+    for (const field of list || []) {
+      const name = trustFields.get(field) || field;
+      if (!byName.has(name)) byName.set(name, []);
+      pick(field).forEach(id => { if (!byName.get(name).includes(id)) byName.get(name).push(id); });
+    }
+    return byName;
+  };
+  const missingNames = fieldNames(missing);
+  const checked = (id) => (judged.includes(id) ? ' (checked by the dashboard)' : '');
+  let text = 'All readings passed the sensor check';
+  if (verdict === 'trusted') {
+    if (devices) {
+      const supplying = devices.filter(device => (device.supplied || []).length);
+      if (supplying.length) {
+        const noun = supplying.length === 1 ? 'device' : 'devices';
+        const dashboard = supplying.filter(device => judged.includes(device.device_id)).map(device => `${device.device_id}${checked(device.device_id)}`);
+        text += ` (${[`${supplying.length} ${noun}`, ...dashboard].join(', ')})`;
+      }
+    }
+  } else {
+    const parts = [];
+    for (const [name, ids] of named((fields || []).filter(field => !missingNames.includes(trustFields.get(field) || field)), owners)) {
+      parts.push(`${name}${ids.length ? ` (${ids[0]})${checked(ids[0])}` : ''} not used`);
+    }
+    const quiet = new Map();  // devices that are stale -> the probe names they were expected to supply
+    const unreported = [];
+    for (const [name, ids] of named(missing, owners)) {
+      const stale = ids.filter(id => byId.has(id) && byId.get(id).stale === true);
+      if (!stale.length) { unreported.push(name); continue; }
+      const key = stale.join('\u0000');
+      if (!quiet.has(key)) quiet.set(key, {ids: stale, names: []});
+      quiet.get(key).names.push(name);
+    }
+    for (const {ids, names} of quiet.values()) {
+      const since = ids.map(id => `${id} for ${typeof byId.get(id).age_s === 'number' ? ageText(byId.get(id).age_s) : 'an unknown time'}`);
+      parts.push(`${names.join(', ')} not reported: no reading from ${since.join(', ')}`);
+    }
+    if (unreported.length) parts.push(`${unreported.join(', ')} not reported by any device in this zone`);
+    if (!parts.length) parts.push('some readings not used');
+    text = `Can't confirm: ${parts.join('; ')}`;
+  }
+  return `${badge(String(verdict).replace(/_/g, ' '), trustTone.get(verdict) || 'neutral')} ${escapeHtml(text)}`;
+};
+const trustLine = (verdict, fields, missing, zone) => {
   if (!verdict) return 'not reported';
+  if (zone) return zoneTrustLine(verdict, fields, missing, zone);
   const notReported = fieldNames(missing);
   const notUsed = fieldNames(fields).filter(name => !notReported.includes(name));
   let text = 'All readings passed the sensor check';
@@ -987,7 +1428,41 @@ async function loadFarmTime() {
 }
 const listSeverity = (list) => (list && list.length ? 'warning' : 'success');
 const boolSeverity = (flag) => (flag ? 'warning' : 'success');
-const sparkline = (values, color) => {
+// sparkline(series, color): series is a list of {label, points: [{t, v}], dash}. One series with no times is drawn by index,
+// exactly as before (the single-device page). With times (multi-device zones): one line per series on a shared y scale, x
+// = sample time over the 60 minutes before the newest plotted point, a legend of device ids with each dash pattern.
+const dashPatterns = ['', '6 3', '2 3', '8 3 2 3'];
+const dashAttr = (n) => (dashPatterns[n % dashPatterns.length] ? ` stroke-dasharray="${dashPatterns[n % dashPatterns.length]}"` : '');
+const sparklineTimed = (series, color) => {
+  const windowMs = 3600000;
+  const usable = series.map((s, i) => ({label: s.label, dash: s.dash === undefined ? i : s.dash,
+    points: s.points.filter((p) => Number.isFinite(p.t) && typeof p.v === 'number' && Number.isFinite(p.v))}));
+  const newest = Math.max(...usable.flatMap((s) => s.points.map((p) => p.t)));
+  const shown = usable.map((s) => ({...s, points: s.points.filter((p) => p.t >= newest - windowMs && p.t <= newest).sort((a, b) => a.t - b.t)}));
+  const drawn = shown.filter((s) => s.points.length >= 2);
+  const legend = shown.length ? `<p class="status">${shown.map((s) => `<span class="legend-item"><svg class="swatch" viewBox="0 0 28 8"><line x1="1" y1="4" x2="27" y2="4" stroke="${color}" stroke-width="2"${dashAttr(s.dash)}/></svg>${escapeHtml(s.label)}${s.points.length < 2 ? ': not enough data' : ''}</span>`).join('')}</p>` : '';
+  if (!drawn.length) return `<p class="status">Not enough data yet</p>${legend}`;
+  const w = 280, h = 56, pad = 4;
+  const all = drawn.flatMap((s) => s.points.map((p) => p.v));
+  const min = Math.min(...all), max = Math.max(...all);
+  const range = max - min || 1;
+  const lines = drawn.map((s) => {
+    const points = s.points.map((p) => {
+      const x = pad + ((p.t - (newest - windowMs)) / windowMs) * (w - pad * 2);
+      const y = h - pad - ((p.v - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${dashAttr(s.dash)}/>`;
+  }).join('');
+  const stats = drawn.map((s) => {
+    const v = s.points.map((p) => p.v);
+    return `<p class="status">${escapeHtml(s.label)}: min ${Math.min(...v).toFixed(1)} · max ${Math.max(...v).toFixed(1)} · latest ${v[v.length - 1].toFixed(1)}</p>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${lines}</svg>${legend}${stats}`;
+};
+const sparkline = (series, color) => {
+  if (series.some((s) => s.points.some((p) => p.t !== undefined))) return sparklineTimed(series, color);
+  const values = series.length ? series[0].points.map((p) => p.v) : [];
   const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v));
   if (nums.length < 2) return '<p class="status">Not enough data yet</p>';
   const w = 280, h = 56, pad = 4;
@@ -1036,9 +1511,18 @@ async function renderHistory() {
 }
 let automationBusy = false;
 let telemetryUnavailable = true;
+// Multi-device zones only (slice 2): Device columns and alert detail lines; and the status lines under the tiles.
+let zoneMulti = false;
+let zoneNotesShown = false;
+const setZoneNotes = (lines) => {
+  if (!lines.length && !zoneNotesShown) return;  // a single-device zone never touches the element
+  $('zone-notes').innerHTML = lines.map((line) => `<p class="status">${escapeHtml(line)}</p>`).join('');
+  zoneNotesShown = lines.length > 0;
+};
 const markUnavailable = (message) => {
   telemetryUnavailable = true;
   twinPreview = null;
+  setZoneNotes([]);
   $('status').textContent = `STALE / unavailable: ${message}`;
   ['air', 'humidity', 'ph', 'ec', 'vpd', 'alerts', 'pipeline', 'risk', 'safety', 'explanation', 'digital-twin', 'advice-cards'].forEach(id => { $(id).textContent = 'Unavailable — refresh required'; });
   setAutomationBusy(automationBusy);
@@ -1064,10 +1548,10 @@ async function renderAlerts() {
   const tone = { active: 'danger', pending: 'warning', recovering: 'neutral' };
   const label = { active: 'active', pending: 'waiting', recovering: 'recovering' };
   const table = items.length
-    ? `<table><thead><tr><th scope="col">State</th><th scope="col">Rule</th><th scope="col">Message</th><th scope="col">First seen</th><th scope="col">Raised</th><th scope="col">Clear since</th></tr></thead><tbody>${items.map(a => `<tr><td>${badge(label[a.state] || a.state, tone[a.state] || 'neutral')}</td><td>${escapeHtml(a.rule_id)}</td><td>${escapeHtml(a.message || '')}</td><td>${timeCell(a.since)}</td><td>${timeCell(a.raised_at || '--')}</td><td>${timeCell(a.recovering_since || '--')}</td></tr>`).join('')}</tbody></table>`
+    ? `<table><thead><tr><th scope="col">State</th>${zoneMulti ? '<th scope="col">Device</th>' : ''}<th scope="col">Rule</th><th scope="col">Message</th><th scope="col">First seen</th><th scope="col">Raised</th><th scope="col">Clear since</th></tr></thead><tbody>${items.map(a => `<tr><td>${badge(label[a.state] || a.state, tone[a.state] || 'neutral')}</td>${zoneMulti ? `<td>${escapeHtml(a.device_id || '--')}</td>` : ''}<td>${escapeHtml(a.rule_id)}</td><td>${escapeHtml(a.message || '')}${zoneMulti && a.detail ? `<div class="status">${escapeHtml(a.detail)}</div>` : ''}</td><td>${timeCell(a.since)}</td><td>${timeCell(a.raised_at || '--')}</td><td>${timeCell(a.recovering_since || '--')}</td></tr>`).join('')}</tbody></table>`
     : '<p class="status">No open alerts.</p>';
   const history = recent.length
-    ? `<p class="status">Recent: ${recent.map(e => `${escapeHtml(e.rule_id)} ${escapeHtml(e.event)} at ${timeCell(e.sample_time)}`).join(' · ')}</p>`
+    ? `<p class="status">Recent: ${recent.map(e => `${escapeHtml(e.rule_id)}${zoneMulti && e.device_id ? ` (${escapeHtml(e.device_id)})` : ''} ${escapeHtml(e.event)} at ${timeCell(e.sample_time)}`).join(' · ')}</p>`
     : '';
   $('alerts').innerHTML = table + history;
 }
@@ -1103,7 +1587,7 @@ async function renderAdviceCards() {
       <div class="label">${escapeHtml(card.opportunity || 'operations')} · ${badge(card.severity || 'warn', card.severity === 'info' ? 'neutral' : 'warning')}</div>
       <div class="value" style="font-size:1.05rem">${escapeHtml(card.title || card.summary || '--')}</div>
       <p class="status">${escapeHtml(card.summary || '')}</p>
-      <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields, (card.evidence || {}).missing_fields)}</p>
+      <p class="status">Sensor trust: ${trustLine((card.evidence || {}).trust_verdict, (card.evidence || {}).vetoed_fields, (card.evidence || {}).missing_fields, (card.evidence || {}).sources ? {sources: card.evidence.sources} : undefined)}</p>
       <p class="status">Checks: ${escapeHtml((card.safe_next_checks || []).join('; ') || 'none')}</p>
       <p class="status">Sample: ${timeCell((card.evidence || {}).sample_time || 'unknown')} · Evidence: ${escapeHtml((card.evidence || {}).provenance_status || 'legacy_missing_snapshot')}</p>
       <p class="status">Readings: ${escapeHtml(Object.entries((card.evidence || {}).readings || {}).map(([key, value]) => value === null || value === undefined ? `${key}: –` : `${key}: ${value} ${((card.evidence || {}).units || {})[key] || ''}`).join('; ') || 'not recorded')}</p>
@@ -1156,11 +1640,49 @@ async function refreshData() {
   const event = data.latest_event;
   // No reading from the zone for too long: say so instead of the trust line of the last stored reading.
   const age = typeof data.latest_age_s === 'number' ? data.latest_age_s : null;
-  const stale = Number(data.stale_after_s) > 0 && age !== null && age > Number(data.stale_after_s);
+  let stale = Number(data.stale_after_s) > 0 && age !== null && age > Number(data.stale_after_s);
+  // Multi-device zone: latest_age_s is the newest device's age, but a slow device is live for 3x its own interval, so the
+  // zone-wide line is for a zone view with no reading at all: every device stale by the snapshot's own per-device flags.
+  const snapshot = data.zone_snapshot || null;
+  if (snapshot && stale) stale = !snapshot.sensor && (snapshot.devices || []).every((device) => device.stale === true);
+  const zoneView = snapshot && snapshot.sensor ? snapshot : null;  // the zone-view path; else today's newest-packet path
+  let zoneTrust = zoneView ? {sources: zoneView.sources || {}, devices: zoneView.devices || [], dashboard_judged: []} : undefined;
+  zoneMulti = data.zone_multi_device === true;
   const trustFor = (verdict, vetoed, missing) => stale
     ? `${badge('cannot confirm', 'danger')} ${escapeHtml(`Can't confirm: no reading from this zone for ${ageText(age)} (last ${readingTime(event.timestamp, age >= 43200)})`)}`
-    : trustLine(verdict, vetoed, missing);
-  if (event) {
+    : trustLine(verdict, vetoed, missing, zoneTrust);
+  const notes = [];
+  if (data.zone_snapshot_error) notes.push(`Zone view unavailable: showing the newest packet (${event.device_id || 'unknown device'})`);
+  if (zoneView) {
+    for (const name of zoneView.context_conflicts || []) {
+      const used = (zoneView.context || {})[name];
+      notes.push(`Devices disagree on ${name} (using ${used !== null && typeof used === 'object' ? JSON.stringify(used) : used} from ${(zoneView.context_source || {})[name]})`);
+    }
+  }
+  setZoneNotes(notes);
+  if (zoneView) {
+    const fields = zoneView.fields || {};
+    const tile = (id, name, format) => {
+      const f = fields[name];
+      if (!f) { $(id).textContent = '--'; return; }
+      const lines = [typeof f.age_s === 'number' ? `${f.device_id} · ${ageText(f.age_s)}` : `${f.device_id}`,
+        ...(f.others || []).map((o) => `also ${o.device_id}: ${format(o.value)}${o.vetoed ? ' (not used)' : ''}`)];
+      $(id).innerHTML = `${escapeHtml(format(f.value))}${lines.map((line) => `<div class="tile-src">${escapeHtml(line)}</div>`).join('')}`;
+    };
+    tile('air', 'air_temperature_c', (v) => value(v, ' °C'));
+    tile('humidity', 'humidity_pct', (v) => value(v, ' %'));
+    tile('ph', 'ph', (v) => value(v));
+    tile('ec', 'ec_ms_cm', (v) => value(v, ' mS/cm'));
+    const air = fields.air_temperature_c, humid = fields.humidity_pct;
+    const vpd = air && humid ? vpdKpa(air.value, humid.value) : null;
+    if (vpd === null) $('vpd').textContent = '--';
+    else {
+      const from = air.device_id === humid.device_id
+        ? `${air.device_id}${typeof air.age_s === 'number' && typeof humid.age_s === 'number' ? ` · ${ageText(Math.max(air.age_s, humid.age_s))}` : ''}`
+        : `air ${air.device_id}, humidity ${humid.device_id}`;
+      $('vpd').innerHTML = `${escapeHtml(`${vpd.toFixed(2)} kPa${vpd < 0.4 ? ' · low' : vpd >= 1.6 ? ' · high' : ''}`)}<div class="tile-src">${escapeHtml(from)}</div>`;
+    }
+  } else if (event) {
     $('air').textContent = value(event.air_temperature_c, ' °C');
     $('humidity').textContent = value(event.humidity_pct, ' %');
     $('ph').textContent = value(event.ph);
@@ -1169,12 +1691,28 @@ async function refreshData() {
     $('vpd').textContent = vpd === null ? '--' : `${vpd.toFixed(2)} kPa${vpd < 0.4 ? ' · low' : vpd >= 1.6 ? ' · high' : ''}`;
   }
   const chronological = [...data.recent_events].reverse();
-  $('trends').innerHTML = `<div class="trend-grid">
-    <div class="trend-card accent-temp"><div class="label">🌡️ Air temperature (°C)</div>${sparkline(chronological.map((e) => e.air_temperature_c), '#f0883e')}</div>
-    <div class="trend-card accent-humidity"><div class="label">💧 Humidity (%)</div>${sparkline(chronological.map((e) => e.humidity_pct), '#58a6ff')}</div>
-    <div class="trend-card accent-ph"><div class="label">⚗️ pH</div>${sparkline(chronological.map((e) => e.ph), '#a371f7')}</div>
-    <div class="trend-card accent-ec"><div class="label">⚡ EC (mS/cm)</div>${sparkline(chronological.map((e) => e.ec_ms_cm), '#3fb950')}</div>
-    <div class="trend-card accent-vpd"><div class="label">🌫️ VPD (kPa)</div>${sparkline(chronological.map((e) => vpdKpa(e.air_temperature_c, e.humidity_pct)), '#2bb3c0')}</div>
+  const single = (pick) => [{label: '', points: chronological.map((e) => ({v: pick(e)}))}];
+  if (snapshot && data.device_events) {
+    // One line per device that carries the field, against sample time (docs 2.8); device n keeps dash pattern n in every card.
+    const deviceIds = Object.keys(data.device_events).sort();
+    const perDevice = (pick) => deviceIds.map((id, n) => ({label: id, dash: n,
+      points: (data.device_events[id] || []).map((e) => ({t: Date.parse(e.timestamp), v: pick(e)}))}))
+      .filter((s) => s.points.some((p) => typeof p.v === 'number' && Number.isFinite(p.v)));
+    const vpdSeries = perDevice((e) => vpdKpa(e.air_temperature_c, e.humidity_pct));
+    const unplotted = (snapshot.devices || []).map((d) => d.device_id).filter((id) => !deviceIds.includes(id)).sort();
+    $('trends').innerHTML = `<div class="trend-grid">
+    <div class="trend-card accent-temp"><div class="label">🌡️ Air temperature (°C)</div>${sparkline(perDevice((e) => e.air_temperature_c), '#f0883e')}</div>
+    <div class="trend-card accent-humidity"><div class="label">💧 Humidity (%)</div>${sparkline(perDevice((e) => e.humidity_pct), '#58a6ff')}</div>
+    <div class="trend-card accent-ph"><div class="label">⚗️ pH</div>${sparkline(perDevice((e) => e.ph), '#a371f7')}</div>
+    <div class="trend-card accent-ec"><div class="label">⚡ EC (mS/cm)</div>${sparkline(perDevice((e) => e.ec_ms_cm), '#3fb950')}</div>
+    <div class="trend-card accent-vpd"><div class="label">🌫️ VPD (kPa)</div>${vpdSeries.length ? sparkline(vpdSeries, '#2bb3c0') : '<p class="status">No device carries both air temperature and humidity</p>'}</div>
+  </div>${unplotted.length ? `<p class="status">${unplotted.map((id) => `${escapeHtml(id)}: not plotted`).join(' · ')}</p>` : ''}`;
+  } else $('trends').innerHTML = `<div class="trend-grid">
+    <div class="trend-card accent-temp"><div class="label">🌡️ Air temperature (°C)</div>${sparkline(single((e) => e.air_temperature_c), '#f0883e')}</div>
+    <div class="trend-card accent-humidity"><div class="label">💧 Humidity (%)</div>${sparkline(single((e) => e.humidity_pct), '#58a6ff')}</div>
+    <div class="trend-card accent-ph"><div class="label">⚗️ pH</div>${sparkline(single((e) => e.ph), '#a371f7')}</div>
+    <div class="trend-card accent-ec"><div class="label">⚡ EC (mS/cm)</div>${sparkline(single((e) => e.ec_ms_cm), '#3fb950')}</div>
+    <div class="trend-card accent-vpd"><div class="label">🌫️ VPD (kPa)</div>${sparkline(single((e) => vpdKpa(e.air_temperature_c, e.humidity_pct)), '#2bb3c0')}</div>
   </div>`;
   const pipelineResponse = await scopedFetch('/api/pipeline');
   const pipeline = await pipelineResponse.json();
@@ -1182,6 +1720,7 @@ async function refreshData() {
     $('pipeline').textContent = pipeline.error || 'Integrated pipeline unavailable';
   } else {
     const result = pipeline.result;
+    if (zoneTrust) zoneTrust = {...zoneTrust, sources: pipeline.sources || zoneTrust.sources, dashboard_judged: pipeline.dashboard_judged || []};
     const decision = result.final_decision || {};
     const quality = result.sensor_quality || {};
     const water = result.water_irrigation || {};
@@ -1247,7 +1786,7 @@ async function refreshData() {
   await renderAlerts();
   await renderAutomation();
   if (!data.recent_events.length) { $('events').textContent = 'No sensor events recorded yet.'; return; }
-  $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th><th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${timeCell(e.timestamp)}</td><td>${escapeHtml(e.farm_id)}</td><td>${escapeHtml(e.zone_id)}</td><td>${escapeHtml(e.crop)}</td><td>${escapeHtml(value(e.air_temperature_c, ' °C'))}</td><td>${escapeHtml(value(e.humidity_pct, ' %'))}</td></tr>`).join('')}</tbody></table>`;
+  $('events').innerHTML = `<table><thead><tr><th scope="col">Time</th>${zoneMulti ? '<th scope="col">Device</th>' : ''}<th scope="col">Farm</th><th scope="col">Zone</th><th scope="col">Crop</th><th scope="col">Temperature</th><th scope="col">Humidity</th></tr></thead><tbody>${data.recent_events.map(e => `<tr><td>${timeCell(e.timestamp)}</td>${zoneMulti ? `<td>${escapeHtml(e.device_id)}</td>` : ''}<td>${escapeHtml(e.farm_id)}</td><td>${escapeHtml(e.zone_id)}</td><td>${escapeHtml(e.crop)}</td><td>${escapeHtml(value(e.air_temperature_c, ' °C'))}</td><td>${escapeHtml(value(e.humidity_pct, ' %'))}</td></tr>`).join('')}</tbody></table>`;
   const services = await (await scopedFetch('/api/services')).json();
   $('services').innerHTML = `<table><thead><tr><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead><tbody>${Object.entries(services.services).map(([name, item]) => `<tr><td>${escapeHtml(name)}</td><td>${badge(item.available ? 'online' : 'offline', item.available ? 'success' : 'danger')}</td><td>${escapeHtml(item.available ? (item.health.service || '') : (item.error || ''))}</td></tr>`).join('')}</tbody></table>`;
   const runtimes = await (await scopedFetch('/api/runtimes')).json();

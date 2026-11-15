@@ -48,6 +48,8 @@ def suggestion_to_advice_card(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             "vetoed_fields": context.get("vetoed_fields") or [],
             "missing_fields": context.get("missing_fields") or [],
             "sensor_event_id": context.get("sensor_event_id"),
+            # Multi-device zones: which device supplied each field (only when the suggestion has it).
+            **({"sources": context["sources"]} if context.get("sources") else {}),
             "sensor_snapshot": context.get("sensor_snapshot") or {},
             "history_sha256": context.get("history_sha256"),
             "history_snapshot": context.get("history_snapshot") or [],

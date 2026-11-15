@@ -86,10 +86,31 @@ reading (`missing_ec`, ...) instead of showing a calm zone: the dashboard's sens
   - `MULTI_DEVICE_ZONES=0` turns this off (every zone is judged as single-device).
   - A fast device in a shared zone shortens how far back a slow device's stored history reaches (retention is per
     zone).
-  - **Known limits until slice 2:** the dashboard overview, tiles, trust line and "Evaluate current risk" show the
-    zone's newest packet, which flips between devices (tiles from the other device show "--"). A risk that needs fields
-    from two devices (heat on the climate node together with low moisture on the substrate node) is not raised
-    automatically: each device is evaluated alone.
+  - **The zone view** (slice 2, `docs/design/multi-device-zones-slice2.md`): the dashboard builds one view of the zone
+    from every device instead of showing the newest packet.
+    - Each reading field comes from one device. Core's `GET /v1/sensors/zone-snapshot` uses only each device's latest
+      packet, never an older one, so a probe that stopped reporting looks missing instead of showing an old value.
+      Send every probe in each packet, because a packet that carries one probe leaves the device's others missing until
+      they come round again.
+    - **Pair tiles:** when two devices carry the same field (for example two air temperature probes), the tile shows
+      one stable device (the one that first sent the field, skipping one whose own sensor check failed) and an
+      `also <device>: <value>` line for the other, with `(not used)` when that probe failed its check.
+    - **Staleness is per device.** A device leaves the zone view after the larger of `ZONE_STALE_AFTER_S` (default 10
+      min) and 3 times its own reporting interval (the median gap of its last 6 live packets), so a substrate node that
+      reports every 15 min stays in until 45 min. A device that left is named in the trust line ("no reading from
+      climate-1 for 15 min"). "No reading from this zone" appears only when every device is quiet. The dashboard's
+      `ZONE_STALE_AFTER_S=0` (demos, replays) turns the filter off.
+    - **Each device's own sensor check is carried in.** Core keeps the data-quality labels and safe next checks behind
+      each verdict, so a probe that is stuck on `climate-1`'s own history shows as `stuck_value` and "not used" in the
+      zone view. A device Core has not judged yet is judged by the dashboard (the trust line says "checked by the
+      dashboard"; that check has no persistent stuck check).
+    - **Context** (`crop`, `growth_stage`, `system_type`, `weather`, ...): the newest live device wins, schema defaults
+      are dropped when another device sets a real value, and a disagreement is shown ("Devices disagree on
+      growth_stage"). Send `system_type` and `crop` from every device that is not meant to use the defaults.
+    - Alerts stay per device and gain a Device column and, for sensor-check alerts, the router's check text. A risk that
+      needs fields from two devices (heat on the climate node together with low moisture on the substrate node) now
+      reaches "Evaluate current risk" and the risk panels, but is still not raised as an alert: Core's feed evaluates
+      each device alone.
   - Core's `/v1/sensors/events`, `/v1/sensors/events/latest`, `/v1/sensors/export.csv` and `/v1/sensors/observations`
     take an optional `device_id` filter; `/v1/sensors/events` also returns `zone_multi_device` and
     `latest_device_fields`.

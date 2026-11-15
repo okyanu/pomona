@@ -278,9 +278,12 @@ alerts Core no longer raises. In a multi-device zone (`zone_multi_device` true):
 - [x] **Gates:** all make gates pass: `test-local`, `local-validation`, `fool-space-check`, `fool-space-pyodide-check`,
       `test-checker`, `test-demo`, `fault-replay`, `real-replay`.
 
-## Slice 2 (outline: needs its own design section, review and owner OK)
+## Slice 2 (designed in `docs/design/multi-device-zones-slice2.md`)
 
-Zone views for multi-device zones. The v1 reviews found these points; the slice-2 design must answer each one.
+**The full design is `docs/design/multi-device-zones-slice2.md`** (approved 2026-11-14); it answers each bullet below
+(its "Outline answers" section maps them). The list is kept as the outline the design started from.
+
+Zone views for multi-device zones. The v1 reviews found these points; the slice-2 design had to answer each one.
 
 - **A zone snapshot (Core):** per field, the newest packet that carries the field from a device that is not stale.
   - Trust per device comes from `event_trust`.
