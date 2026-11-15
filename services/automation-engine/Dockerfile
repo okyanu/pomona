@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt constraints.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 COPY app ./app
 
 # Run as an unprivileged user; writable state lives only in /data (a named volume).

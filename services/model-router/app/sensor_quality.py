@@ -553,7 +553,10 @@ def derive_sensor_quality(
     now: Optional[datetime] = None,
     history: Optional[List[Dict[str, Any]]] = None,
     stream_baseline: Optional[Dict[str, Dict[str, Any]]] = None,
+    future_slack_s: float = 60,
 ) -> Dict[str, Any]:
+    # future_slack_s: how far ahead of `now` a sample time may be before the device clock is doubted. The default stays 60
+    # because the browser demos mirror it; the service passes Settings.future_slack_s (Core's own MAX_FUTURE_SAMPLE_S).
     labels: List[str] = []
     missing_fields: List[str] = []
     suspect_fields: List[str] = []
@@ -601,10 +604,10 @@ def derive_sensor_quality(
         add_unique(labels, "insufficient_context")
         add_unique(suspect_fields, "timestamp")
         checks.append("provide a valid timezone-aware sample timestamp")
-    elif now is not None and (sampled - now.replace(tzinfo=now.tzinfo or timezone.utc)).total_seconds() > 60:
+    elif now is not None and (sampled - now.replace(tzinfo=now.tzinfo or timezone.utc)).total_seconds() > future_slack_s:
         add_unique(labels, "insufficient_context")
         add_unique(suspect_fields, "timestamp")
-        checks.append("verify device clock: sample timestamp is more than 60 seconds in the future")
+        checks.append(f"verify device clock: sample timestamp is more than {future_slack_s:g} seconds in the future")
 
     ph = numeric(sensor.get("ph"))
     previous_ph = numeric(sensor.get("previous_ph"))
@@ -695,6 +698,7 @@ def route_sensor_quality_reasoner(
     model_id: str,
     *,
     now: Optional[datetime] = None,
+    future_slack_s: float = 60,
 ) -> Dict[str, Any]:
     selected = mode.strip().lower()
 
@@ -709,6 +713,7 @@ def route_sensor_quality_reasoner(
         now=now or datetime.now(timezone.utc),
         history=history if isinstance(history, list) else None,
         stream_baseline=input_data.get("stream_baseline"),
+        future_slack_s=future_slack_s,
     )
     result["model_id"] = model_id
     result["mode"] = "rules_only" if selected == "rules_only" else "hybrid_guarded"

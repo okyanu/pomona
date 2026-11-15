@@ -2,10 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pomona.ag/schemas/sensor-event.schema.json",
   "title": "Pomona Sensor Event",
-  "description": "Canonical sensor packet accepted by pomona-core HTTP and MQTT ingestion. A probe that did not report is absent or null; a packet needs at least one non-null reading (anyOf).",
+  "description": "Sensor packet accepted by pomona-core HTTP and MQTT ingestion (services/core/app/schemas.py SensorEvent; services/core/tests/test_sensor_event_schema.py keeps the two in line). A probe that did not report is absent or null; a packet needs at least one non-null reading (anyOf). crop, growth_stage and system_type are optional: Core fills the defaults shown. Unknown properties are ignored by Core, so they are allowed here. Not expressible in JSON Schema and checked by Core only: a timestamp before MIN_SAMPLE_TIME (default 2020-01-01T00:00:00Z) or more than MAX_FUTURE_SAMPLE_S (default 300 s) ahead of Core's clock is rejected, and NaN or Infinity are refused.",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["device_id", "farm_id", "zone_id", "crop", "growth_stage", "system_type", "timestamp"],
+  "required": ["device_id", "farm_id", "zone_id", "timestamp"],
   "anyOf": [
     {"required": ["air_temperature_c"], "properties": {"air_temperature_c": {"type": "number"}}},
     {"required": ["humidity_pct"], "properties": {"humidity_pct": {"type": "number"}}},
@@ -29,9 +28,45 @@
     "soil_moisture_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
     "substrate_temperature_c": {"type": ["number", "null"], "minimum": -40, "maximum": 80},
     "substrate_moisture_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "weather": {
+      "type": ["object", "null"],
+      "description": "Optional daily weather aggregates for the FAO-56 ET calculation; not a reading.",
+      "required": ["t_mean_c", "t_min_c", "t_max_c", "rh_mean_pct", "wind_speed_2m_ms", "solar_radiation_mj_m2_day"],
+      "properties": {
+        "t_mean_c": {"type": "number", "minimum": -40, "maximum": 60},
+        "t_min_c": {"type": "number", "minimum": -40, "maximum": 60},
+        "t_max_c": {"type": "number", "minimum": -40, "maximum": 60},
+        "rh_mean_pct": {"type": "number", "minimum": 0, "maximum": 100},
+        "wind_speed_2m_ms": {"type": "number", "minimum": 0, "maximum": 60},
+        "solar_radiation_mj_m2_day": {"type": "number", "minimum": 0, "maximum": 45},
+        "elevation_m": {"type": "number", "minimum": -500, "maximum": 6000, "default": 0}
+      }
+    },
+    "zone_area_m2": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1000000,
+      "description": "Optional zone context for the model-router's FAO-56/NPK calculator; not a reading."},
+    "crop_kc": {"type": ["number", "null"], "minimum": 0, "maximum": 3,
+      "description": "Optional crop coefficient for the ET calculation; not a reading."},
+    "npk_target": {
+      "type": ["object", "null"],
+      "description": "Optional target nutrient concentration for fertigation dosing; not a reading.",
+      "required": ["n_ppm", "p_ppm", "k_ppm", "volume_liters"],
+      "properties": {
+        "n_ppm": {"type": "number", "minimum": 0, "maximum": 1000},
+        "p_ppm": {"type": "number", "minimum": 0, "maximum": 1000},
+        "k_ppm": {"type": "number", "minimum": 0, "maximum": 1000},
+        "volume_liters": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}
+      }
+    },
     "timestamp": {"type": "string", "format": "date-time",
-      "description": "Sample time, required and timezone-aware; Core rejects times before MIN_SAMPLE_TIME (default 2020-01-01T00:00:00Z)."},
+      "description": "Sample time, required and timezone-aware (a trailing Z or an offset such as +04:00); Core never invents one."},
     "source": {"type": ["string", "null"], "maxLength": 64},
+    "received_at": {"type": ["string", "null"], "format": "date-time",
+      "description": "Set by Core on receipt; a value sent by the device is ignored."},
+    "sequence": {"type": ["integer", "null"], "minimum": 0,
+      "description": "Per-boot packet counter, used with boot_id to drop duplicates and stale packets."},
+    "boot_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "mqtt_retained": {"type": "boolean",
+      "description": "Set by the transport (the MQTT retain flag); a value sent by the device is ignored."},
     "schema_version": {"type": "string", "pattern": "^1\\.[0-9]{1,3}$", "default": "1.0",
       "description": "Payload contract version MAJOR.MINOR; omitted means 1.0. Core rejects other majors."}
   }

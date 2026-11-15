@@ -47,6 +47,7 @@ PAYLOADS = {
 }
 IDENTIFIER_MAX = 128
 REVIEWER_MAX = 80
+LABEL_MAX = 80  # evaluate refuses a longer risk label (422); the payload texts are cut to fit
 EVENT_ID_MAX = 256
 LEDGER = {}
 
@@ -191,18 +192,19 @@ def test_context_keys_that_look_like_instructions_do_not_create_or_change_sugges
 
 @pytest.mark.parametrize("name", PAYLOADS)
 def test_injected_labels_match_no_rule_and_do_not_hide_real_ones(client, name):
-    labels = [PAYLOADS[name], PAYLOADS[name].upper(), "", " high_ec", "high_ec ", "HIGH_EC"]
+    payload = PAYLOADS[name][:LABEL_MAX]
+    labels = [payload, payload.upper(), "", " high_ec", "high_ec ", "HIGH_EC"]
     assert client.post("/v1/automation/evaluate", json={"risk_labels": labels}).json()["suggestions"] == []
-    response = client.post("/v1/automation/evaluate", json={"risk_labels": [PAYLOADS[name], "high_ec"]})
+    response = client.post("/v1/automation/evaluate", json={"risk_labels": [payload, "high_ec"]})
     (suggestion,) = response.json()["suggestions"]
     assert suggestion["rule_id"] == "high_ec_alert"
-    assert PAYLOADS[name] not in json.dumps({k: v for k, v in suggestion.items() if k != "context"})
+    assert payload not in json.dumps({k: v for k, v in suggestion.items() if k != "context"})
     record("suggestion:labels", name, len(labels) + 1, 0)
 
 
 def test_every_suggestion_action_comes_from_a_rule_and_none_is_forbidden(client):
     every_label = sorted({label for rule in automation_main.RULES for label in rule["match_any_labels"]})
-    noisy = [*every_label, *PAYLOADS.values(), "dose_acid", "open_valve", "direct_actuator_control"]
+    noisy = [*every_label, *(text[:LABEL_MAX] for text in PAYLOADS.values()), "dose_acid", "open_valve", "direct_actuator_control"]
     suggestions = client.post("/v1/automation/evaluate", json={"risk_labels": noisy, "context": {"x": 1}}).json()["suggestions"]
     rule_actions = {rule["action"] for rule in automation_main.RULES}
     assert suggestions and {s["action"] for s in suggestions} <= rule_actions

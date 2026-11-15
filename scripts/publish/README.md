@@ -8,7 +8,7 @@
 | `huggingface.sh` | **Weights** → Hugging Face |
 
 **Multi-repo layout:** platform and ML training should be **separate GitHub repos**.  
-See [docs/MULTI_REPO.md](../../docs/MULTI_REPO.md).
+See [docs/REPOS.md](../../docs/REPOS.md).
 
 ```bash
 # Review the current worktree first; report is written under ignored private/

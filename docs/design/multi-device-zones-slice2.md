@@ -732,7 +732,8 @@ Each item: where the code differs from this doc, or what the doc left open and t
    today's single-device path.
 10. All stale (`sensor` null): `zone_snapshot` stays attached to the overview; `latest_age_s` is `newest_age_s`
     (null when there are no devices: the latest event's own age).
-11. A failed snapshot call is not cached; `zone_snapshot_error` reads `Zone snapshot unavailable: <exc>`.
+11. A failed snapshot call is not cached; `zone_snapshot_error` reads `Zone snapshot unavailable; check the service and the dashboard log.` (it goes through
+    `service_unavailable`, which logs the exception detail and keeps it out of the browser response).
 12. The `known_*` keys are always sent on the zone path (empty lists when empty). `continue routine monitoring` is
     never carried in `known_safe_next_checks`: the router would count it as added and force human review.
 13. `GLOBAL_VETO_LABELS` and `alert_detail()` are copied into the dashboard (it cannot import the router or Core);

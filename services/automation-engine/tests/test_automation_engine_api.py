@@ -263,9 +263,11 @@ SENSOR_QUALITY_LABELS = {
 def test_sensor_rules_match_every_sensor_quality_label_and_only_those():
     rules = load_rules(SERVICE_DIR / "app" / "rules.yaml")
     family = [r for r in rules if r["action"] == "check_sensor"]  # the sensor-rule family
-    assert {r["id"] for r in family} == {"sensor_check", "sensor_flatline"}
+    assert {r["id"] for r in family} == {"sensor_check", "sensor_flatline", "extreme_reading_check"}
     assert all(r["action"] not in FORBIDDEN_ACTIONS for r in family)
-    assert set().union(*(set(r["match_any_labels"]) for r in family)) == SENSOR_QUALITY_LABELS
+    # extreme_reading_check is the one rule on a reasoner label (sensor_anomaly), not on a sensor-quality label.
+    quality_rules = [r for r in family if r["id"] != "extreme_reading_check"]
+    assert set().union(*(set(r["match_any_labels"]) for r in quality_rules)) == SENSOR_QUALITY_LABELS
     sensor_check = next(r for r in family if r["id"] == "sensor_check")
     flatline = next(r for r in family if r["id"] == "sensor_flatline")
     assert set(sensor_check["match_any_labels"]) == SENSOR_QUALITY_LABELS - {"flatline_possible"}
@@ -274,6 +276,15 @@ def test_sensor_rules_match_every_sensor_quality_label_and_only_those():
     assert "raise_after_samples" not in flatline and "raise_after_seconds" not in flatline
     assert "stuck or clipped" in flatline["message"]
     assert not any(r["action"] != "check_sensor" and set(r["match_any_labels"]) & SENSOR_QUALITY_LABELS for r in rules)
+
+
+def test_extreme_reading_makes_a_check_the_probe_card_not_a_dosing_card(client: TestClient):
+    # sensor_anomaly: a reasoner called the value extreme although the probe passed its checks (so it is trusted).
+    response = client.post("/v1/automation/evaluate", json={
+        "risk_labels": ["sensor_anomaly"], "context": {"zone_id": "greenhouse-a", "trust_verdict": "trusted"}})
+    suggestions = response.json()["suggestions"]
+    assert [(s["rule_id"], s["action"]) for s in suggestions] == [("extreme_reading_check", "check_sensor")]
+    assert "Measure it by hand" in suggestions[0]["message"]
 
 
 def test_flatline_label_makes_the_flatline_card_not_a_dosing_card(client: TestClient):

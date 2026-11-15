@@ -14,6 +14,7 @@ from app.config import settings
 from app.schemas import READING_FIELDS, SensorEvent, SensorObservation, CalibrationEvent, CorrectedObservation, utc_now
 
 
+CLEANUP_INTERVAL = timedelta(minutes=1)  # the age-based deletes run at most this often per database and table
 STORED = {"stored": True}  # validation context: rows already in the database skip the sample-time floor
 PACKET_FIELD = "__packet__"  # device_fields pseudo-field: the device's live full packets (the multi-device test)
 # The packet fields that are context, not readings (docs/design/multi-device-zones-slice2.md 2.1), and how many of a
@@ -21,6 +22,20 @@ PACKET_FIELD = "__packet__"  # device_fields pseudo-field: the device's live ful
 CONTEXT_FIELDS = ("crop", "growth_stage", "system_type", "weather", "zone_area_m2", "crop_kc", "npk_target")
 INTERVAL_PACKETS = 6
 ZONE_STALE_CAP_S = 3600  # router flags packets older than 60 min as stale_reading (global veto)
+
+
+class IdConflict(ValueError):
+    """A client-supplied record id is already stored with different content."""
+
+
+def sample_epoch(value) -> Optional[float]:
+    """Seconds since the epoch of a sample time (a datetime or ISO text; no zone means UTC): the indexed sort key."""
+    try:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return value.replace(tzinfo=value.tzinfo or timezone.utc).timestamp()
+    except (ValueError, AttributeError, OverflowError):
+        return None  # an unreadable stored time never matched a julianday() comparison either
 
 
 def finite_reading_fields(packet) -> list:
@@ -48,7 +63,9 @@ class SensorEventStore:
         self._max_events = max_events if max_events is not None else settings.max_events
         self._lock = Lock()
         self._db_path = Path(db_path or settings.db_path)
+        self._cleaned: dict = {}  # (database file, table) -> when the age-based deletes last ran
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._enable_wal()
         with self._connect() as db:
             for table in ("sensor_events", "sensor_observations"):
                 db.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
@@ -65,9 +82,15 @@ class SensorEventStore:
                                    (payload["farm_id"], payload["zone_id"], payload["device_id"], payload.get("received_at"), row["id"]))
                 db.execute(f"CREATE INDEX IF NOT EXISTS {table}_zone ON {table}(farm_id, zone_id, id)")
                 db.execute(f"CREATE INDEX IF NOT EXISTS {table}_receipt ON {table}(received_at)")
-                for name, definition in (("dedupe_key", "TEXT"), ("current_eligible", "INTEGER NOT NULL DEFAULT 1")):
+                for name, definition in (("dedupe_key", "TEXT"), ("current_eligible", "INTEGER NOT NULL DEFAULT 1"),
+                                         ("sample_epoch", "REAL")):
                     if name not in columns:
                         db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                # Fill the sample-time sort key of rows that lack it (an old database, or a start-up that crashed after
+                # ALTER TABLE): keyed on the data, not on the column being new. The partial index makes "no rows left"
+                # one cheap lookup; a stored time nobody can parse stays NULL and is looked at once per start.
+                db.execute(f"CREATE INDEX IF NOT EXISTS {table}_epoch_missing ON {table}(id) WHERE sample_epoch IS NULL")
+                self._backfill_sample_epoch(db, table)
                 db.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {table}_dedupe ON {table}(dedupe_key)")
             db.execute("""CREATE TABLE IF NOT EXISTS stream_cursors (
                 stream TEXT PRIMARY KEY, sequence INTEGER NOT NULL)""")
@@ -97,11 +120,28 @@ class SensorEventStore:
             if created:  # an existing database: fill it once from the live packets still stored
                 self._backfill_device_fields(db)
             db.execute("CREATE INDEX IF NOT EXISTS sensor_events_device ON sensor_events(farm_id, zone_id, device_id, id)")
+            # Latest / prior reading by sample time without scanning the zone.
+            db.execute("CREATE INDEX IF NOT EXISTS sensor_events_sample_device ON sensor_events(farm_id, zone_id, device_id, sample_epoch, id)")
+            db.execute("CREATE INDEX IF NOT EXISTS sensor_events_sample_zone ON sensor_events(farm_id, zone_id, sample_epoch, id)")
             for table in ("calibration_events", "corrected_observations"):
                 db.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
                     id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,
                     farm_id TEXT, zone_id TEXT, device_id TEXT, sensor_id TEXT, received_at TEXT)""")
                 db.execute(f"CREATE INDEX IF NOT EXISTS {table}_zone ON {table}(farm_id, zone_id, id)")
+
+    @staticmethod
+    def _backfill_sample_epoch(db, table: str, batch: int = 5000) -> None:
+        """Set `sample_epoch` where it is NULL, `batch` rows per commit, one pass (a moving id cursor) per call."""
+        cursor = 0
+        while True:
+            rows = db.execute(f"SELECT id, timestamp FROM {table} WHERE sample_epoch IS NULL AND id > ? ORDER BY id LIMIT ?",
+                              (cursor, batch)).fetchall()
+            if not rows:
+                return
+            cursor = rows[-1]["id"]
+            db.executemany(f"UPDATE {table} SET sample_epoch=? WHERE id=?",
+                           [(epoch, r["id"]) for r in rows if (epoch := sample_epoch(r["timestamp"])) is not None])
+            db.commit()
 
     @staticmethod
     def _backfill_device_fields(db) -> None:
@@ -123,9 +163,18 @@ class SensorEventStore:
                 first_seen=MIN(first_seen, excluded.first_seen), last_seen=MAX(last_seen, excluded.last_seen)""",
                        (farm_id, zone_id, device_id, field, received_at, received_at))
 
+    def _enable_wal(self) -> None:
+        """Write-ahead log (kept in the database file): the dashboard's reads no longer wait for MQTT ingest writes."""
+        db = sqlite3.connect(self._db_path, timeout=10)
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+        finally:
+            db.close()
+
     @contextmanager
     def _connect(self):
         db = sqlite3.connect(self._db_path, timeout=10)
+        db.execute("PRAGMA busy_timeout=10000")
         db.row_factory = sqlite3.Row
         try:
             with db:
@@ -149,7 +198,7 @@ class SensorEventStore:
             # Serialize deduplication and cursor updates across processes as well as threads.
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute("SELECT sequence FROM stream_cursors WHERE stream=?", (json.dumps(stream),)).fetchone() if sequenced else None
-            clock_valid = event.timestamp <= utc_now() + timedelta(seconds=60)
+            clock_valid = event.timestamp <= utc_now() + timedelta(seconds=settings.future_slack_s)
             eligible = clock_valid and (not cursor or event.sequence > cursor["sequence"])
             duplicate = db.execute(f"SELECT id,payload FROM {table} WHERE dedupe_key=?", (dedupe_key,)).fetchone()
             promoted = bool(duplicate and not event.mqtt_retained and clock_valid
@@ -158,9 +207,9 @@ class SensorEventStore:
             if promoted:
                 db.execute(f"UPDATE {table} SET payload=?,received_at=? WHERE id=?", (payload, event.received_at.isoformat(), duplicate["id"]))
             if not duplicate:
-                db.execute(f"INSERT INTO {table} (timestamp,payload,farm_id,zone_id,device_id,received_at,dedupe_key,current_eligible) VALUES (?,?,?,?,?,?,?,?)",
+                db.execute(f"INSERT INTO {table} (timestamp,payload,farm_id,zone_id,device_id,received_at,dedupe_key,current_eligible,sample_epoch) VALUES (?,?,?,?,?,?,?,?,?)",
                            (event.timestamp.isoformat(), payload, event.farm_id, event.zone_id, event.device_id,
-                            event.received_at.isoformat(), dedupe_key, int(eligible)))
+                            event.received_at.isoformat(), dedupe_key, int(eligible), sample_epoch(event.timestamp)))
                 if sequenced and eligible:
                     db.execute("INSERT INTO stream_cursors VALUES (?,?) ON CONFLICT(stream) DO UPDATE SET sequence=excluded.sequence",
                                (json.dumps(stream), event.sequence))
@@ -185,13 +234,22 @@ class SensorEventStore:
                 if table == "sensor_events" and not event.mqtt_retained:  # a live full packet: remember what it carried
                     self._record_fields(db, event.farm_id, event.zone_id, event.device_id,
                                         [*finite_reading_fields(event), PACKET_FIELD], event.received_at.isoformat())
-            db.execute(f"DELETE FROM {table} WHERE received_at < ?", (cutoff,))
-            db.execute("DELETE FROM device_fields WHERE last_seen < ?", (cutoff,))
-            # A busy zone cannot evict a different zone's data.
-            db.execute(f"""DELETE FROM {table} WHERE farm_id=? AND zone_id=? AND id NOT IN
-                (SELECT id FROM {table} WHERE farm_id=? AND zone_id=? ORDER BY id DESC LIMIT ?)""",
+            self._cleanup(db, table, cutoff)
+            # A busy zone cannot evict a different zone's data: drop the zone's rows beyond its newest `max_events`.
+            db.execute(f"""DELETE FROM {table} WHERE farm_id=? AND zone_id=? AND id <=
+                (SELECT id FROM {table} WHERE farm_id=? AND zone_id=? ORDER BY id DESC LIMIT 1 OFFSET ?)""",
                        (event.farm_id, event.zone_id, event.farm_id, event.zone_id, self._max_events))
             return bool(eligible and not duplicate and not event.mqtt_retained)
+
+    def _cleanup(self, db, table: str, cutoff: str) -> None:
+        """The age-based deletes, at most once a minute per database and table (the first insert after start-up runs them)."""
+        now, key = utc_now(), (str(self._db_path), table)
+        last = self._cleaned.get(key)
+        if last is not None and timedelta(0) <= now - last < CLEANUP_INTERVAL:
+            return
+        self._cleaned[key] = now
+        db.execute(f"DELETE FROM {table} WHERE received_at < ?", (cutoff,))
+        db.execute("DELETE FROM device_fields WHERE last_seen < ?", (cutoff,))
 
     def add(self, event: SensorEvent) -> bool:
         return self._add(event, "sensor_events")
@@ -199,12 +257,30 @@ class SensorEventStore:
     def add_observation(self, observation: SensorObservation) -> None:
         self._add(observation, "sensor_observations")
 
+    @staticmethod
+    def _stored_repeat(db, table: str, model, record) -> Optional[object]:
+        """The stored row when `record` repeats its client-supplied id with the same content (a safe retry), else None.
+
+        Raises IdConflict when the id is stored with different content. Core's own fields (`received_at`) do not count."""
+        row = db.execute(f"SELECT payload FROM {table} WHERE id=?", (record.id,)).fetchone()
+        if row is None:
+            return None
+        stored = json.loads(row["payload"])
+        if {k: v for k, v in stored.items() if k != "received_at"} != record.model_dump(mode="json", exclude={"received_at"}):
+            raise IdConflict(f"id {record.id} is already stored with different content")
+        return model.model_validate(stored, context=STORED)
+
     def add_calibration(self, event: CalibrationEvent) -> CalibrationEvent:
         import uuid
+        supplied = event.id is not None
         event.id = event.id or uuid.uuid4().hex
         event.received_at = utc_now()
         payload = json.dumps(event.model_dump(mode="json"), separators=(",", ":"))
         with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            repeat = self._stored_repeat(db, "calibration_events", CalibrationEvent, event) if supplied else None
+            if repeat is not None:
+                return repeat
             db.execute(
                 """INSERT INTO calibration_events
                    (id, timestamp, payload, farm_id, zone_id, device_id, sensor_id, received_at)
@@ -225,6 +301,11 @@ class SensorEventStore:
     def add_corrected_observation(self, observation: CorrectedObservation) -> CorrectedObservation:
         import uuid
         with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if observation.id is not None:
+                repeat = self._stored_repeat(db, "corrected_observations", CorrectedObservation, observation)
+                if repeat is not None:
+                    return repeat
             exists = db.execute(
                 "SELECT 1 FROM calibration_events WHERE id=?",
                 (observation.calibration_event_id,),
@@ -358,21 +439,20 @@ class SensorEventStore:
         if limit <= 0:
             return []
         with self._lock, self._connect() as db:
-            own = db.execute("SELECT MAX(id) FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=? AND timestamp=?",
-                             (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat())).fetchone()[0]
+            at = sample_epoch(event.timestamp)
+            own = db.execute("SELECT MAX(id) FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=? AND sample_epoch=?",
+                             (event.farm_id, event.zone_id, event.device_id, at)).fetchone()[0]
             rows = db.execute("""SELECT payload FROM sensor_events WHERE farm_id=? AND zone_id=? AND device_id=?
-                AND (julianday(timestamp) < julianday(?) OR (julianday(timestamp) = julianday(?) AND id < ?))
-                ORDER BY julianday(timestamp) DESC, id DESC LIMIT ?""",
-                              (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat(), event.timestamp.isoformat(),
-                               own if own is not None else -1, limit)).fetchall()
+                AND (sample_epoch, id) < (?, ?) ORDER BY sample_epoch DESC, id DESC LIMIT ?""",
+                              (event.farm_id, event.zone_id, event.device_id, at, own if own is not None else -1, limit)).fetchall()
         return [SensorEvent.model_validate(json.loads(r["payload"]), context=STORED) for r in reversed(rows)]
 
     def latest_event(self, farm_id=None, zone_id=None, device_id=None) -> Optional[SensorEvent]:
         where, values = self._filters(farm_id, zone_id, device_id)
-        where += (" AND " if where else " WHERE ") + "current_eligible=1 AND julianday(timestamp) <= julianday(?)"
+        where += (" AND " if where else " WHERE ") + "current_eligible=1 AND sample_epoch <= ?"
         with self._lock, self._connect() as db:
-            row = db.execute(f"SELECT payload FROM sensor_events{where} ORDER BY julianday(timestamp) DESC, id DESC LIMIT 1",
-                             (*values, (utc_now() + timedelta(seconds=60)).isoformat())).fetchone()
+            row = db.execute(f"SELECT payload FROM sensor_events{where} ORDER BY sample_epoch DESC, id DESC LIMIT 1",
+                             (*values, (utc_now() + timedelta(seconds=settings.future_slack_s)).timestamp())).fetchone()
         return SensorEvent.model_validate(json.loads(row["payload"]), context=STORED) if row else None
 
     def list_observations(self, limit=50, farm_id=None, zone_id=None, offset=0, device_id=None):
@@ -396,7 +476,7 @@ class SensorEventStore:
             results.append({key: data.get(key) for key in ("device_id", "farm_id", "zone_id", "firmware", "sensor_id", "quality", "calibration_timestamp")} |
                            {"last_seen": last_live, "sampled_at": data["timestamp"],
                             "availability": "unknown" if received is None else ("recent" if age <= settings.device_timeout_seconds else "silent"),
-                            "sample_stale": sample_age > 3600 or sample_age < -60})
+                            "sample_stale": sample_age > 3600 or sample_age < -settings.future_slack_s})
         return results
 
     def device_fields_for(self, event: SensorEvent) -> Optional[list]:
@@ -622,6 +702,7 @@ class SensorEventStore:
                 "device_fields",
             ):
                 db.execute(f"DELETE FROM {table}")
+        self._cleaned.clear()
 
 
 event_store = SensorEventStore()

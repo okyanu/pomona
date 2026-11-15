@@ -6,7 +6,7 @@ Public docs for contributors and users.
 
 | Doc | Audience |
 |-----|----------|
-| [PLUG_AND_PLAY.md](./PLUG_AND_PLAY.md) | **Full Docker stack vision (UI + DB)** |
+| [PLUG_AND_PLAY.md](./PLUG_AND_PLAY.md) | **Full Docker stack (UI + DB): what runs now** |
 | [INSTALL.md](./INSTALL.md) | Docker + pip install (all OS) |
 | [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md) | **How to contribute (open source)** |
 | [CODE_OF_CONDUCT.md](https://github.com/okyanu/pomona/blob/main/CODE_OF_CONDUCT.md) | Community standards |
@@ -22,14 +22,15 @@ Public docs for contributors and users.
 
 | Doc | Purpose |
 |-----|---------|
-| [PHASES.md](./PHASES.md) | **Phase tracker — update when phases complete** |
+| [PHASES.md](./PHASES.md) | **The one full phase table — update when phases complete** |
+| [NEXT_90_DAYS.md](./NEXT_90_DAYS.md) | The maintainer's current plan (three items) |
 | [ROADMAP.md](./ROADMAP.md) | Roadmap summary + Hugging Face links |
 | [VERSIONING.md](./VERSIONING.md) | Platform, model, dataset, and lifecycle version rules |
 | [architecture.md](./architecture.md) | Architecture (short) |
 | [SMALL_MODEL_FACTORY.md](./SMALL_MODEL_FACTORY.md) | Repeatable pipeline for narrow specialist models |
 | [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md) | First tomato risk reasoner notes |
-| [SAFETY_TRIAGE_REASONER.md](./SAFETY_TRIAGE_REASONER.md) | Planned safety triage small model |
-| [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md) | Planned sensor quality small model |
+| [SAFETY_TRIAGE_REASONER.md](./SAFETY_TRIAGE_REASONER.md) | Safety triage small model: local candidate, failed its publish gate; not published |
+| [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md) | Sensor quality small model: local candidate, training paused; not published |
 
 ## Later patterns (design notes, mostly implemented in software)
 
@@ -49,4 +50,4 @@ commitments. Index: [LATER_PATTERNS_BACKLOG.md](./LATER_PATTERNS_BACKLOG.md).
 
 ## Maintainer-only (local, not in Git)
 
-Private experiments, raw data notes, adapter zips, publish checklists, and internal ML run logs live on the maintainer machine under `private/` and other gitignored paths. They are not part of the public GitHub repo.
+Private experiments, raw data notes, adapter zips, publish checklists, and internal ML run logs live on the maintainer machine under `private/` and other gitignored paths. They are not part of the public GitHub repo, so any `private/...` path mentioned in these docs is a maintainer-only note that you cannot open.

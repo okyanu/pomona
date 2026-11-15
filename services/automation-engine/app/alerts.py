@@ -17,6 +17,10 @@ A rule may also set `raise_after_samples`: the sensor-check labels come from det
 last few readings, so a fault is flagged for a handful of consecutive readings, not for minutes. Such a rule
 raises when the label is on that many consecutive readings of the stream, or after raise_after_seconds,
 whichever comes first. A clean reading still cancels a pending alert.
+
+A silence is not persistence: when two consecutive readings of a stream are more than `max_gap_seconds` apart
+(0 = off), the pending timers restart from the later reading, so a label seen once and again hours later with nothing
+between does not raise at once. An alert that is already raised is not touched by a gap.
 """
 
 from __future__ import annotations
@@ -45,8 +49,9 @@ def clean_detail(text: Optional[str]) -> Optional[str]:
 
 class AlertMonitor:
     def __init__(self, rules: List[Dict[str, Any]], raise_after_seconds: int, clear_after_seconds: int,
-                 db_path: Optional[Path] = None, max_events: int = 500) -> None:
+                 db_path: Optional[Path] = None, max_events: int = 500, max_gap_seconds: int = 0) -> None:
         self._rules = rules
+        self._max_gap = timedelta(seconds=max_gap_seconds)
         self._raise_after = raise_after_seconds
         self._clear_after = clear_after_seconds
         self._max_events = max_events
@@ -99,8 +104,10 @@ class AlertMonitor:
         events: List[Dict[str, Any]] = []
         with self._lock, self._db:
             last = self._db.execute("SELECT last_sample FROM alert_stream_samples WHERE stream=?", (stream,)).fetchone()
-            if last and datetime.fromisoformat(last["last_sample"]) >= t:
+            last_sample = datetime.fromisoformat(last["last_sample"]) if last else None
+            if last_sample and last_sample >= t:
                 return {"ignored": True, "events": []}
+            gap = bool(self._max_gap and last_sample and t - last_sample > self._max_gap)
             self._db.execute("INSERT INTO alert_stream_samples (stream, last_sample) VALUES (?, ?) "
                              "ON CONFLICT(stream) DO UPDATE SET last_sample=excluded.last_sample", (stream, t.isoformat()))
             for rule in self._rules:
@@ -119,7 +126,10 @@ class AlertMonitor:
                         state, row = "pending", {"since": t.isoformat(), "consecutive": 1}
                     elif state == "pending":
                         row = dict(row)
-                        row["consecutive"] = (row["consecutive"] or 1) + 1  # rows from before the column count as 1
+                        if gap:  # nothing was seen for too long: the earlier readings do not count toward persistence
+                            row["since"], row["consecutive"] = t.isoformat(), 1
+                        else:
+                            row["consecutive"] = (row["consecutive"] or 1) + 1  # rows from before the column count as 1
                     samples = rule.get("raise_after_samples")
                     if state == "pending" and (t - datetime.fromisoformat(row["since"]) >= raise_after
                                                or (samples and row["consecutive"] >= samples)):

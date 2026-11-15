@@ -66,6 +66,12 @@ the dashboard sends each new reading's risk labels to `POST /v1/automation/alert
 | `recovering` | The label is gone; it must stay away `clear_after_seconds`. If it comes back, the same incident continues. |
 | (cleared) | One `recovered` event; the alert is closed. |
 
+A gap in the data is not persistence: when two consecutive readings of a stream are more than
+`ALERT_MAX_GAP_SECONDS` apart (default 1800, 0 = off), the waiting timers (and reading counts) restart from the
+later reading, so a label seen once and again hours later raises nothing at once. A device that reports less often
+than this value never accumulates a time-based raise, so a slow reporter must raise the setting or set it to 0. An alert
+that is already raised is not touched by a gap.
+
 Defaults are 600 s to raise and 900 s to clear (`ALERT_RAISE_AFTER_SECONDS`,
 `ALERT_CLEAR_AFTER_SECONDS`); a rule in `rules.yaml` can set its own `raise_after_seconds` /
 `clear_after_seconds` (humidity uses 30 / 30 minutes, because it swings with every vent and
@@ -103,7 +109,7 @@ same farm/zone/device as the suggestion) and the suggestion carries
 
 `POST /v1/automation/alerts/observe` accepts optional `data_quality_labels`; a reading
 with any of them is untrusted and counted only as `untrusted_readings`. Readings sampled
-before the approval, repeated or older samples, and samples more than 60 s ahead of the
+before the approval, repeated or older samples, and samples more than `MAX_FUTURE_SAMPLE_S` (default 300, the same setting as Core's; 0 means 60) ahead of the
 service clock are ignored. Rejected, expired and pre-existing suggestions have no outcome
 (`null`). Advice cards expose the same data under `outcome`. There is no actuator path.
 

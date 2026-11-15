@@ -14,6 +14,9 @@ from app.config import settings
 from app.outcome_fields import counting_devices, watched_fields
 
 
+DEFAULT_LIST_LIMIT = 500
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -59,7 +62,7 @@ class SuggestionStore:
         if "sensor_timestamp" in context:
             try:
                 sampled = datetime.fromisoformat(context["sensor_timestamp"].replace("Z", "+00:00"))
-                if sampled.tzinfo is None or sampled > created + timedelta(seconds=60):
+                if sampled.tzinfo is None or sampled > created + timedelta(seconds=settings.future_slack_s):
                     raise ValueError("Invalid sample clock")
                 expiry = min(expiry, sampled + timedelta(seconds=settings.suggestion_sample_max_age_seconds))
             except (ValueError, TypeError, AttributeError):
@@ -108,6 +111,7 @@ class SuggestionStore:
                 row = self._db.execute("SELECT * FROM suggestions WHERE dedupe_key = ?", (key,)).fetchone()
             else:
                 row = self._db.execute("SELECT * FROM suggestions WHERE id = ?", (suggestion_id,)).fetchone()
+            self._prune()  # expiry just made more history; bound it here too, not only when someone decides
         return self._decode(row)
 
     def get(self, suggestion_id: str) -> Optional[Dict[str, Any]]:
@@ -116,13 +120,17 @@ class SuggestionStore:
             row = self._db.execute("SELECT * FROM suggestions WHERE id = ?", (suggestion_id,)).fetchone()
         return self._decode(row) if row else None
 
-    def list(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, status: Optional[str] = None, limit: int = DEFAULT_LIST_LIMIT) -> List[Dict[str, Any]]:
+        """Newest first, at most `limit`."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
         with self._lock, self._db:
             self._expire()
             if status is None:
-                rows = self._db.execute("SELECT * FROM suggestions ORDER BY seq DESC").fetchall()
+                rows = self._db.execute("SELECT * FROM suggestions ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
             else:
-                rows = self._db.execute("SELECT * FROM suggestions WHERE status = ? ORDER BY seq DESC", (status,)).fetchall()
+                rows = self._db.execute("SELECT * FROM suggestions WHERE status = ? ORDER BY seq DESC LIMIT ?",
+                                        (status, limit)).fetchall()
         return [self._decode(row) for row in rows]
 
     def decide(self, suggestion_id: str, status: str, reviewer: Optional[str] = None,
@@ -148,11 +156,16 @@ class SuggestionStore:
                                  ((datetime.fromisoformat(decided) + timedelta(seconds=window)).isoformat(),
                                   json.dumps(evidence), suggestion_id))
             row = self._db.execute("SELECT * FROM suggestions WHERE id = ?", (suggestion_id,)).fetchone()
-            # Pending work is never purged; only completed history is bounded.
-            self._db.execute("""DELETE FROM suggestions WHERE status != 'pending' AND seq NOT IN
-                (SELECT seq FROM suggestions WHERE status != 'pending'
-                 ORDER BY decided_at DESC, seq DESC LIMIT ?)""", (self._max_suggestions,))
+            self._prune()
         return self._decode(row) if row else None
+
+    def _prune(self) -> None:
+        # Pending work and approvals still waiting for their outcome are never purged (the outcome deadline ends the
+        # wait, so these stay few); only completed history is bounded.
+        self._db.execute("""DELETE FROM suggestions WHERE status != 'pending'
+            AND COALESCE(outcome_status, '') != 'awaiting' AND seq NOT IN
+            (SELECT seq FROM suggestions WHERE status != 'pending'
+             ORDER BY decided_at DESC, seq DESC LIMIT ?)""", (self._max_suggestions,))
 
     def _rule_id(self, suggestion_id: str) -> Optional[str]:
         row = self._db.execute("SELECT rule_id FROM suggestions WHERE id = ?", (suggestion_id,)).fetchone()
@@ -191,7 +204,7 @@ class SuggestionStore:
                 by_device = evidence.get("last_sample_by_device") if counting is not None else None
                 last = by_device.get(device_id) if by_device is not None else evidence["last_sample_time"]
                 if (t <= datetime.fromisoformat(row["decided_at"]) or (last and t <= datetime.fromisoformat(last))
-                        or t > now + timedelta(seconds=60)):
+                        or t > now + timedelta(seconds=settings.future_slack_s)):
                     continue
                 if t > datetime.fromisoformat(row["outcome_deadline"]):
                     self._finalize_outcome(row["id"], evidence)

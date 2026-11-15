@@ -5,27 +5,14 @@
 Phase status tracks product completion; it is intentionally separate from
 platform/model version numbers — see [Versioning](https://github.com/okyanu/pomona/blob/main/docs/VERSIONING.md).
 
-| # | Focus | Status |
-|---|--------|--------|
-| 0 | Project setup & open source | ✅ |
-| 1 | Local MVP (Docker, core, simulator) | ✅ |
-| 2 | Dashboard + persistence | ⏳ partial — local SQLite, dashboard, Docker validation done; hardening remains |
-| 3 | Tomato reasoner | ⏳ partial — [HF LoRA](https://huggingface.co/Okyanus/pomona-tomato-risk-reasoner-v0.1.7-lora) published but experimental (learned a training shortcut); deterministic rules decide |
-| 3b | Water/irrigation reasoner | ⏳ partial — [v0.1.8 release candidate](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) published (synthetic evaluation only); guarded platform wiring verified locally |
-| 4 | Safety checker | ⏳ partial — deterministic tomato and actuator gates implemented |
-| 5 | LLM advisor | ⏳ partial — adapter and router contract exist; live wiring pending |
-| 6 | Automation (suggestions) | ⏳ partial — YAML rules, suggestions, manual approve/reject |
-| 7 | Public browser demo | ⏳ partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) live |
-| 8 | ESP32 devices | ⬜ — logger firmware compiles; not yet bench-tested, no field data |
-| 9 | Model registry | ⏳ partial — `models/registry/` |
-| 10 | Train reasoner models | ⏳ partial — small LoRAs on HF; evaluations so far are on generated data |
+Phases 0 and 1 are done; phases 2, 3, 4, 5, 6, 7, 9 and 10 are partial (some pieces exist, which does not mean the phase is being worked on now); Phase 8 (ESP32 devices) is still planned: logger firmware compiles; not yet bench-tested, no field data. Local SQLite, dashboard and Docker validation are done for Phase 2; hardening remains. The published tomato adapter is experimental (it learned a training shortcut) and the deterministic rules decide; the water/irrigation v0.1.8 release candidate is published (synthetic evaluation only). The full phase table is in [docs/PHASES.md](https://github.com/okyanu/pomona/blob/main/docs/PHASES.md); the maintainer's current plan is in [docs/NEXT_90_DAYS.md](https://github.com/okyanu/pomona/blob/main/docs/NEXT_90_DAYS.md).
 
-## Next integration work
+## Integration endpoints
 
-```text
-POST /v1/reasoners/safety-triage
-POST /v1/actuator-command-gate/check
-```
+All four exist in the platform: `POST /v1/reasoners/sensor-quality`, `/v1/reasoners/tomato-risk` and
+`/v1/reasoners/safety-triage` (model-router; safety-triage uses a deterministic fallback, model runtime pending), and
+`POST /v1/actuator-command-gate/check` (safety-checker; deterministic final authority). Still to do: wire the remaining
+specialist model runtimes and improve tomato model-only quality.
 
 ## Future model families
 

@@ -501,7 +501,8 @@ def sensor_quality_reasoner(request: SensorQualityReasonerRequest) -> SensorQual
         raise HTTPException(status_code=404, detail=f"Model not registered: {model_id}")
 
     try:
-        result = route_sensor_quality_reasoner(request.input, request.mode, model_id)
+        result = route_sensor_quality_reasoner(
+            request.input, request.mode, model_id, future_slack_s=settings.future_slack_s)
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
@@ -722,6 +723,7 @@ async def evaluate_pomona_pipeline(request: PipelineEvaluateRequest) -> Pipeline
         known_vetoed_fields=request.known_vetoed_fields,
         known_data_quality_labels=request.known_data_quality_labels,
         known_safe_next_checks=request.known_safe_next_checks,
+        future_slack_s=settings.future_slack_s,
     )
     logger.info(
         "pipeline id=%s scenario=%s risk=%s review=%s",

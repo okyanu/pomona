@@ -19,7 +19,7 @@ Try the guarded tomato reasoner without installing anything:
 | Water / irrigation risk | v0.1.8 | Published release candidate | [Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora](https://huggingface.co/Okyanus/pomona-water-irrigation-risk-reasoner-v0.1.8-lora) | Moisture and irrigation triage |
 | Actuator command gate | v0.1 | Published research preview | [Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora](https://huggingface.co/Okyanus/pomona-actuator-command-gate-reasoner-v0.1-lora) | Advisory command classification; deterministic gate is final |
 | Sensor quality | v0.1.1-boundary | Unpublished local candidate | Local adapter only | Telemetry quality classification |
-| Safety triage | v0.1 | Unpublished local candidate | Local adapter only | Action safety classification |
+| Safety triage | v0.1 | Local candidate, failed its publish gate; not published | Local adapter only | Action safety classification |
 | Nutrient / pH-EC | v0.1.1 correction | LoRA plus guarded GGUF/MLX published | LoRA, GGUF/Ollama, MLX | pH/EC risk labels and fertigation blocking |
 
 The agronomist model has no published evaluation: no benchmark, holdout or scores
@@ -29,8 +29,8 @@ training repo, `pomona-agronomist-llm`, is not yet published (see
 
 ## Model Count
 
-- **4 published model families**: Agronomist, Tomato, Water/Irrigation, and Actuator Gate.
-- **2 active unpublished model families**: Sensor Quality and Safety Triage. Nutrient/pH-EC v0.1.1 is published with guarded runtime formats.
+- **5 published model families**: Agronomist, Tomato, Water/Irrigation, Actuator Gate, and Nutrient/pH-EC (v0.1.1, published with guarded runtime formats).
+- **2 unpublished local candidates**: Sensor Quality and Safety Triage.
 - **Historical rejected experiments** remain local and are not release candidates, including Tomato v0.2.1-v0.2.4, Water v0.1.1-v0.1.7, and rejected Actuator Gate attempts.
 - Water v0.1.8 also has published GGUF/Ollama and MLX deployment formats. These are conversions of the canonical LoRA, not separate trained families.
 

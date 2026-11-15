@@ -82,6 +82,25 @@ its watched sensor labels is a trusted reading showing the problem persists
 (`readings_seen` grows, `clean_streak` resets to 0), not an untrusted one; a
 reading with some other sensor label still does not count.
 
+Extreme-reading card: a reading can be far outside any growing range (pH at or below 3.5 or at or above 9.0,
+EC above 10 or below 0.01) and still inside the sensor check's plausible range (pH 3 to 11, EC 0 to 12), so the probe
+passes and the reasoners call it `sensor_anomaly`. The `extreme_reading_check` rule (`check_sensor`, the usual 10
+minutes) turns that label into a card: "measure it by hand now: either the condition is real and serious, or the probe
+is failing". It suggests a check only, never a dose. The water reasoner's own moisture labels (`low_moisture`, `high_moisture`,
+`irrigation_underwatering`, `irrigation_overwatering`) are reported by the water reasoner but do not raise a card yet,
+because their limits (28 % and 78 %) are not validated against real data; the `water_level_check` rule matches only the
+tomato reasoner's `water_level_risk` (10 % and 85 %). A test
+(`services/model-router/tests/test_rule_label_coverage.py`) fails when a reasoner can emit a label that no rule
+matches and that is not listed there as "no card on purpose".
+
+A gap is not persistence: an alert (the card on the dashboard) is raised only after its label has lasted
+(10 minutes, 3 readings for the sensor check). When two consecutive readings of a stream are more than
+`ALERT_MAX_GAP_SECONDS` apart (default 1800, 0 turns it off), the waiting timers restart from the later reading, so a
+label seen once and again hours later with nothing between does not raise at once. A device that reports less often than this value never accumulates a time-based raise, so a slow reporter must raise the setting or set it to 0. An alert that is already raised is not
+touched by a gap (what to do about a probe that goes silent while an alert is open is a separate, later design: see
+`docs/design/silent-probe.md`, "Out of scope"). A sample time up to `MAX_FUTURE_SAMPLE_S` (default 300, Core's own
+limit) ahead of the clock counts as current in the router and the automation engine too; 0 means 60 s there.
+
 ## Placement
 
 ```text

@@ -7,9 +7,10 @@ decision; there is no execution path to any hardware or actuator in v0.1.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.rules import InvalidRuleError, evaluate_rules, load_rules
-from app.store import suggestion_store
+from app.store import DEFAULT_LIST_LIMIT, suggestion_store
 from app.advice_cards import suggestions_to_advice_cards
 from app.alerts import AlertMonitor, clean_detail
 
@@ -40,11 +41,21 @@ class HealthResponse(BaseModel):
     rules_loaded: int
 
 
+MAX_CONTEXT_BYTES = 64 * 1024  # a stored suggestion keeps its context; a real one is a few hundred bytes
+
+
 class EvaluateRequest(BaseModel):
     event_id: Optional[str] = Field(default=None, min_length=1, max_length=256)
-    risk_labels: List[str] = Field(default_factory=list)
+    risk_labels: List[Annotated[str, Field(max_length=80)]] = Field(default_factory=list, max_length=64)
     blocked_actions: List[str] = Field(default_factory=list)
     context: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("context")
+    @classmethod
+    def context_is_small(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+        if len(json.dumps(value, default=str).encode()) > MAX_CONTEXT_BYTES:
+            raise ValueError(f"context must be at most {MAX_CONTEXT_BYTES} bytes as JSON")
+        return value
 
 
 class Suggestion(BaseModel):
@@ -166,7 +177,7 @@ class AlertListResponse(BaseModel):
 
 
 alert_monitor = AlertMonitor(RULES, settings.alert_raise_after_seconds, settings.alert_clear_after_seconds,
-                             db_path=settings.automation_db_path)
+                             db_path=settings.automation_db_path, max_gap_seconds=settings.alert_max_gap_seconds)
 
 app = FastAPI(
     title="Pomona Automation Engine",
@@ -517,10 +528,11 @@ def list_alerts(farm_id: Optional[str] = Query(default=None, max_length=128),
 
 
 @app.get("/v1/automation/suggestions", response_model=SuggestionListResponse)
-def list_suggestions(status: Optional[str] = Query(default=None)) -> SuggestionListResponse:
+def list_suggestions(status: Optional[str] = Query(default=None),
+                     limit: int = Query(default=DEFAULT_LIST_LIMIT, ge=1, le=10000)) -> SuggestionListResponse:
     if status is not None and status not in {"pending", "approved", "rejected", "expired"}:
         raise HTTPException(status_code=422, detail="status must be pending, approved, rejected, or expired")
-    suggestions = suggestion_store.list(status=status)
+    suggestions = suggestion_store.list(status=status, limit=limit)
     return SuggestionListResponse(count=len(suggestions), suggestions=suggestions)
 
 

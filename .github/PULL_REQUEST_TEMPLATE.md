@@ -14,14 +14,16 @@
 ```bash
 cp .env.example .env
 ./scripts/up.sh
-make test
+make bootstrap   # once, creates the test venvs
+make test        # every suite
 ```
 
 <!-- Add any extra steps -->
 
 ## Checklist
 
-- [ ] `make test` passes
+- [ ] `make test` passes (every suite)
+- [ ] If you changed a `requirements.txt`: ran `make lock` and committed the new `constraints.txt` files
 - [ ] No secrets or large files committed (`.env`, weights, private assets)
 - [ ] Updated docs if behavior changed
 - [ ] Follows [architecture.md](../docs/architecture.md) rules (LLM does not control actuators)

@@ -34,6 +34,10 @@ from inprocess_pomona import (AUTOMATION_APP, CORE_OPTIONAL, InProcessPomona, al
                               parse_rules, parse_ts, pipeline_risk_labels)
 SENSOR_RULE = "sensor_check"  # the main sensor card; its windows time the fault episodes
 SENSOR_ACTION = "check_sensor"  # every rule with this action is a sensor card (sensor_check, sensor_flatline), not advice
+# The rules that count as "the sensor check" in this scorer. extreme_reading_check also has the check_sensor action but
+# is not one of them: it is neither a sensor check (it does not count as a caught sensor fault or a can't-confirm) nor
+# a domain card, so a sensor_anomaly label is invisible here, as it was before that rule existed.
+SENSOR_FAMILY = {"sensor_check", "sensor_flatline"}
 # Fields a card is built from, per rule: a raise of that rule during a fault on one of them is a wrong card.
 RULE_FIELDS = {
     "ph_out_of_range": ("ph",),
@@ -90,7 +94,7 @@ METRIC_DEFINITIONS = {
 }
 # Added to the report only when the truth log holds a probe_dropout (so older reports stay as they were).
 BLIND_SPOT_DEFINITIONS = {
-    "blind_spot_case": "a run of frames where one probe is silent (the simulator's probe_dropout leaves its field out of the packet) while a real event is running and the true state has crossed a label that probe decides. Core refuses a packet missing a required field (air temperature, humidity, EC, pH, soil moisture), so for those probes the whole zone goes silent, not only that probe. Real episodes the silent probe kept from ever raising are graded here (outcome blind_spot), never as missed",
+    "blind_spot_case": "a run of frames where one probe is silent (the simulator's probe_dropout leaves its field out of the packet) while a real event is running and the true state has crossed a label that probe decides. Core stores a packet that is missing a probe (the field is absent or null; only a packet with no reading at all is refused) and the router flags the missing reading, so the zone keeps reporting. Real episodes the silent probe kept from ever raising are graded here (outcome blind_spot), never as missed",
     "false_reassurance": "the worst answer: during the case Pomona showed nothing about the fault. No card for the event, no sensor card, no flagged reading for that field (offline) and no silent-device flag: the zone looked as if nothing was wrong. Counted apart from caught and missed; --fail-on-miss fails on it",
     "cant_confirm": "a blind-spot case where Pomona showed it could not confirm: a sensor card raised or open (sensor_check, sensor_flatline), or (offline) a reading flagged for that field (vetoed, or a missing-data label), or the device marked silent (no Core-accepted reading for longer than Core's device_timeout_seconds, shown on the dashboard's Device health). `via` lists which. A pass, but silent_flag_only says when the passive device flag was the only sign (no card)",
     "alerted": "a blind-spot case where the event's own card (its rule in rules.yaml) was already open, or raised while the probe was silent, from other evidence. A pass",
@@ -176,10 +180,10 @@ class Grader:
         self.rules = {rule["id"]: rule for rule in rules}
         self.defaults = defaults
         self.frame_info = frame_info
-        self.sensor_rules = {rule["id"] for rule in rules if rule.get("action") == SENSOR_ACTION}
+        self.sensor_rules = {rule["id"] for rule in rules if rule["id"] in SENSOR_FAMILY}
         self.label_rule = {}
         for rule in rules:
-            if rule["id"] not in self.sensor_rules:
+            if rule.get("action") != SENSOR_ACTION:
                 for label in rule["match_any_labels"]:
                     self.label_rule.setdefault(label, rule["id"])
         self.by_sample = {(zone, f.sample): f for zone, frames in self.zones.items() for f in frames if f.sample}
@@ -636,6 +640,7 @@ def replay_offline(rows: List[Dict[str, Any]], rules: List[Dict[str, Any]], defa
         raise SystemExit(f"--offline needs the model-router venv (services/model-router/.venv/bin/python): {error}")
     events: List[Dict[str, Any]] = []
     info: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    family_labels = {label for rule in rules if rule["id"] in SENSOR_FAMILY for label in rule["match_any_labels"]}
     with engine:
         for row in sorted(rows, key=lambda r: (r["tick"], r["zone_id"])):
             sent = row.get("sent")
@@ -648,7 +653,8 @@ def replay_offline(rows: List[Dict[str, Any]], rules: List[Dict[str, Any]], defa
             got = engine.observe(sent)
             info[(row["zone_id"], row["tick"])] = {
                 "labels": got["labels"], "trust": got["trust"], "vetoed_fields": got["vetoed_fields"],
-                "card_labels": got["card_labels"], "sensor_check_labels": got["sensor_check_labels"]}
+                "card_labels": got["card_labels"],
+                "sensor_check_labels": [label for label in got["sensor_check_labels"] if label in family_labels]}
             events += got["alert_events"]
         states = engine.states()
     return events, info, states

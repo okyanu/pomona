@@ -110,12 +110,13 @@ CARD_TITLES = {
     "ph_out_of_range": "a pH card", "water_level_check": "a substrate-moisture card",
     "heat_stress_check": "a heat card", "cold_stress_check": "a cold card",
     "sensor_check": "a check-the-sensor card",
-    "sensor_flatline": "a flat-probe hint",
+    "sensor_flatline": "a flat-probe hint", "extreme_reading_check": "an extreme-reading card",
 }
 CARD_NAMES = {
     "high_humidity_fan": "Humidity", "high_ec_alert": "High EC", "low_ec_alert": "Low EC", "ph_out_of_range": "pH",
     "water_level_check": "Substrate moisture", "heat_stress_check": "Heat", "cold_stress_check": "Cold",
     "sensor_check": "Check the sensor", "sensor_flatline": "Flat probe hint",
+    "extreme_reading_check": "Extreme reading",
 }
 LABEL_WORDS = {"fungal_pressure": "fungal pressure (humid)", "heat_stress": "heat stress",
                "cold_stress": "cold stress", "high_ec": "high EC", "low_ec": "low EC", "high_ph": "high pH",

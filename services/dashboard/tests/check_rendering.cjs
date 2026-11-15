@@ -460,7 +460,7 @@ const context = vm.createContext({
   await run('refresh()');
   assert.ok(!html('pipeline').includes('no reading from this zone'));
   // snapshot unavailable: the newest packet, with the line saying so; today's stale rule applies to the newest packet
-  multiOverview({zone_snapshot: null, device_events: null, zone_snapshot_error: 'Zone snapshot unavailable: boom', latest_age_s: 900}, null);
+  multiOverview({zone_snapshot: null, device_events: null, zone_snapshot_error: 'Zone snapshot unavailable; check the service and the dashboard log.', latest_age_s: 900}, null);
   await run('refresh()');
   assert.equal(html('zone-notes'), `<p class="status">Zone view unavailable: showing the newest packet (climate-1)</p>`);
   assert.ok(html('pipeline').includes('no reading from this zone for 15 min'));

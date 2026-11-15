@@ -78,16 +78,45 @@ def test_mqtt_identity_retention_dedupe_and_restart(client):
     assert reopened.count() == 3
 
 
-def test_late_and_future_packets_do_not_replace_latest(client):
+def test_late_and_far_future_packets_do_not_replace_latest(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_future_sample_s", 0)  # guard off: only the 60 s rule keeps a far-future clock out
     now = datetime.now(timezone.utc)
     fresh = {**_sensor_payload(), "timestamp": now.isoformat()}
     for sample in (fresh, {**fresh, "timestamp": (now - timedelta(hours=2)).isoformat()},
-                   {**fresh, "timestamp": (now + timedelta(minutes=2)).isoformat()}):  # accepted (under the future limit), not current
+                   {**fresh, "timestamp": (now + timedelta(days=1)).isoformat()}):  # accepted with the guard off, never current
         assert client.post("/v1/sensors/events", json=sample).status_code == 201
     assert event_store.latest_event().timestamp == now
     result = client.get("/v1/sensors/events/latest").json()
     assert datetime.fromisoformat(result["timestamp"].replace("Z", "+00:00")) == now
     assert client.get("/v1/sensors/events").json()["latest_event"] == result
+    assert client.get("/v1/sensors/events").json()["count"] == 3
+
+
+def test_a_clock_a_few_minutes_fast_is_current_and_the_device_shows(client):
+    # The schema accepts a sample time up to MAX_FUTURE_SAMPLE_S (300 s) ahead; such a packet must not vanish.
+    ahead = datetime.now(timezone.utc) + timedelta(minutes=2)
+    assert client.post("/v1/sensors/events", json={**_sensor_payload(), "timestamp": ahead.isoformat()}).status_code == 201
+    assert event_store.latest_event().timestamp == ahead
+    result = client.get("/v1/sensors/events/latest")
+    assert result.status_code == 200 and datetime.fromisoformat(result.json()["timestamp"].replace("Z", "+00:00")) == ahead
+    device = client.get("/v1/sensors/devices").json()["devices"][0]
+    assert device["availability"] == "recent" and device["sample_stale"] is False
+
+
+@pytest.mark.parametrize("limit, seconds_ahead, current", [
+    (300, 290, True), (300, 320, False),  # the allowance is the ingest limit...
+    (120, 110, True), (120, 140, False),  # ...whatever it is set to
+    (0, 50, True), (0, 80, False),        # guard off: the old 60 s rule
+])
+def test_future_sample_is_current_up_to_the_ingest_limit_or_60_s_when_it_is_off(client, monkeypatch, limit, seconds_ahead, current):
+    monkeypatch.setattr(settings, "max_future_sample_s", limit)
+    stamp = datetime.now(timezone.utc) + timedelta(seconds=seconds_ahead)
+    # Straight into the store: the schema would refuse the samples that are over the limit.
+    event_store.add(SensorEvent.model_validate({**_sensor_payload(), "timestamp": stamp.isoformat()}, context=store_module.STORED))
+    assert event_store.count() == 1
+    assert (event_store.latest_event() is not None) is current
+    devices = event_store.devices()
+    assert [d["sample_stale"] for d in devices] == ([False] if current else [])  # a non-current packet leaves no device
 
 
 def test_observation_sequence_is_per_sensor(client):
@@ -386,6 +415,64 @@ def test_calibration_and_corrected_do_not_mutate_raw(client: TestClient):
     ranking = client.get("/v1/sensors/recalibrate-next", params={"budget": 2}).json()
     assert ranking["budget"] == 2
     assert "suggestions" in ranking
+
+
+def _calibration_body(**updates) -> dict:
+    return {"device_id": "test-device", "farm_id": "demo-farm", "zone_id": "greenhouse-a", "sensor_id": "ph-probe-01",
+            "measurement": "ph", "method": "two_point_buffer",
+            "points": [{"reference": 4.0, "raw": 1.1}, {"reference": 7.0, "raw": 2.0}],
+            "performed_at": "2026-11-01T10:00:00Z", "id": "cal-1", **updates}
+
+
+def _corrected_body(**updates) -> dict:
+    return {"device_id": "test-device", "farm_id": "demo-farm", "zone_id": "greenhouse-a", "sensor_id": "ph-probe-01",
+            "measurement": "ph", "raw_value": 6.8, "corrected_value": 6.5, "calibration_event_id": "cal-1",
+            "method": "response_inverse_v0", "timestamp": "2026-11-01T10:05:00Z", "id": "corr-1", **updates}
+
+
+def test_a_repeated_calibration_id_with_the_same_content_returns_the_stored_row(client: TestClient):
+    first = client.post("/v1/sensors/calibrations", json=_calibration_body())
+    assert first.status_code == 201
+    repeat = client.post("/v1/sensors/calibrations", json=_calibration_body(performed_at="2026-11-01T14:00:00+04:00"))
+    assert repeat.status_code == 201  # same instant, another spelling: still the same content (a retry)
+    assert repeat.json() == first.json()  # the stored row, with its original received_at
+    assert client.get("/v1/sensors/calibrations").json()["count"] == 1
+
+
+@pytest.mark.parametrize("change", [{"method": "one_point"}, {"performed_at": "2026-11-01T10:00:01Z"}, {"notes": "retake"},
+                                    {"points": [{"reference": 7.0, "raw": 2.0}]}])
+def test_a_repeated_calibration_id_with_different_content_is_a_conflict(client: TestClient, change):
+    first = client.post("/v1/sensors/calibrations", json=_calibration_body()).json()
+    conflict = client.post("/v1/sensors/calibrations", json=_calibration_body(**change))
+    assert conflict.status_code == 409
+    assert "cal-1" in conflict.json()["detail"] and "different content" in conflict.json()["detail"]
+    assert client.get("/v1/sensors/calibrations").json()["calibrations"] == [first]  # the stored row is untouched
+
+
+def test_a_calibration_without_an_id_still_gets_a_new_one_each_time(client: TestClient):
+    body = _calibration_body()
+    del body["id"]
+    ids = {client.post("/v1/sensors/calibrations", json=body).json()["id"] for _ in range(2)}
+    assert len(ids) == 2
+
+
+def test_a_repeated_corrected_observation_id_is_idempotent_or_a_conflict(client: TestClient):
+    assert client.post("/v1/sensors/calibrations", json=_calibration_body()).status_code == 201
+    first = client.post("/v1/sensors/corrected-observations", json=_corrected_body())
+    assert first.status_code == 201
+    repeat = client.post("/v1/sensors/corrected-observations", json=_corrected_body())
+    assert repeat.status_code == 201 and repeat.json() == first.json()
+    assert client.get("/v1/sensors/corrected-observations").json()["count"] == 1
+    conflict = client.post("/v1/sensors/corrected-observations", json=_corrected_body(corrected_value=6.4))
+    assert conflict.status_code == 409 and "corr-1" in conflict.json()["detail"]
+    assert client.get("/v1/sensors/corrected-observations").json()["corrected_observations"][0]["corrected_value"] == 6.5
+    unknown = client.post("/v1/sensors/corrected-observations", json=_corrected_body(id="corr-2", calibration_event_id="nope"))
+    assert unknown.status_code == 400  # a new id that points at no calibration is still the old error
+
+
+def test_a_corrected_observation_with_an_unknown_calibration_is_refused_before_and_after_a_repeat(client: TestClient):
+    assert client.post("/v1/sensors/corrected-observations", json=_corrected_body()).status_code == 400
+    assert client.post("/v1/sensors/corrected-observations", json=_corrected_body()).status_code == 400
 
 
 def test_recalibrate_ranking_boosts_sqi_labels(client: TestClient):

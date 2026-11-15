@@ -343,6 +343,36 @@ def test_aftermath_of_a_real_event_is_counted_apart_offline():
     assert level["normal_with_sensor_check_event_aftermath"] == 3 and level["normal_with_sensor_check_outside_tail"] == 0
 
 
+def test_labels_of_one_rule_are_different_cards():
+    # low_ph and high_ph are both on the ph_out_of_range rule, but they are different cards.
+    def level(expected, got, kind):
+        rows = [row(0, A, kind="normal", expected=[expected])] if kind == "normal" else \
+            [row(0, A, faults=[("stuck", "ph")], expected=[expected])]
+        info = {(A, 0): {"labels": [got], "trust": "trusted", "vetoed_fields": [], "card_labels": [got], "sensor_check_labels": []}}
+        return score.Grader(rows, [], RULES, DEFAULTS, info).reading_level()
+    assert level("low_ph", "high_ph", "fault")["wrong_cards"] == 1
+    assert level("low_ph", "low_ph", "fault")["wrong_cards"] == 0
+    assert level("low_ph", "high_ph", "normal")["normal_with_card"] == 1
+    assert level("low_ph", "low_ph", "normal")["normal_with_card"] == 0
+
+
+def test_extreme_reading_check_is_not_a_sensor_check_rule():
+    assert score.Grader([], [], RULES, DEFAULTS).sensor_rules == {"sensor_check", "sensor_flatline"}
+    # In a sensor fault it is not a caught sensor check; in a real episode it is not a can't-confirm catch.
+    report = grade(fault_rows(), [raised(A, "extreme_reading_check", 30)])
+    sensor = report["summary"]["sensor_fault_episodes"]
+    assert sensor["sensor_check_caught"] == 0 and report["fault_episodes"][0]["outcome"] != "caught"
+    report = grade(real_rows(zone=A), [raised(A, "extreme_reading_check", 14)])
+    assert report["real_episodes"][0]["outcome"] == "missed"
+    assert report["summary"]["real_episodes"]["caught_cant_confirm"] == 0
+    # and its label does not turn a normal frame into a frame with a card or a sensor check.
+    rows = [row(0, A, kind="normal")]
+    info = {(A, 0): {"labels": ["sensor_anomaly"], "trust": "trusted", "vetoed_fields": [], "card_labels": [],
+                     "sensor_check_labels": []}}
+    level = score.Grader(rows, [], RULES, DEFAULTS, info).reading_level()
+    assert level["normal_with_card"] == 0 and level["normal_with_sensor_check_outside_tail"] == 0
+
+
 # --- Stack mode against a fake automation-engine / Core -------------------------------------
 
 class FakeStack(BaseHTTPRequestHandler):

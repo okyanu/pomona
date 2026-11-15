@@ -36,4 +36,4 @@ rules make every decision; there is no actuator execution path, only suggestions
 
 ## Contributing
 
-Fork → branch → `make test` → open a PR. See [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md) in the main repo. Good first contributions: dashboard (Phase 2), tests, docs, simulators, crop templates.
+Fork → branch → `make test-local` → open a PR. See [CONTRIBUTING.md](https://github.com/okyanu/pomona/blob/main/CONTRIBUTING.md) in the main repo. Good first contributions: dashboard (Phase 2), tests, docs, simulators, crop templates.

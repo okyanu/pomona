@@ -47,6 +47,10 @@ against the running stack and offline (an in-process replay of the same readings
 pipeline and alert monitor). Outputs land in `data/fake_greenhouse/` (gitignored): `truth.jsonl`
 (the answer key), `report_stack.md`, `report_offline.md` and the matching `score_*.json`.
 
+The offline scorer and the browser game run the alert monitor in-process with the gap rule off and the 60 s
+future-clock rule, while the Docker services default to `ALERT_MAX_GAP_SECONDS=1800` and `MAX_FUTURE_SAMPLE_S=300`.
+With the simulator's regular ticks neither changes a result.
+
 ## Blind spots: a real fault and a silent probe
 
 The worst failure for an advisory system is a calm screen while something is really wrong, because the one probe

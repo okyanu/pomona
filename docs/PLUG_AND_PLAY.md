@@ -1,6 +1,6 @@
-# Plug and play — full stack vision
+# Plug and play — the full stack in Docker
 
-**Goal:** Clone repo → one command → entire Pomona mechanism running in Docker.
+**Goal (working locally, see the table below):** Clone repo → one command → entire Pomona mechanism running in Docker.
 
 ```bash
 git clone https://github.com/okyanu/pomona.git
@@ -123,7 +123,7 @@ Simulator on host (today) vs in Docker (target) — both OK; Docker simulator = 
 | 4–6 | Safety + automation in stack |
 | 7 | Hosted demo (same stack, cloud deploy) |
 
-When Phase 2 ships, update [PHASES.md](./PHASES.md) and README “Project phases” table.
+Phase 2 is still partial (see [PHASES.md](./PHASES.md)): the local stack above works, production hardening and hardware validation remain.
 
 ---
 

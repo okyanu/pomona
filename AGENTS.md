@@ -27,9 +27,9 @@ Human quickstart: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 3. [docs/architecture.md](docs/architecture.md) — system design (short)
 4. [docs/REPOS.md](docs/REPOS.md) — which repo owns what
 
-Detailed deliverables: `private/planning/` on maintainer machine (gitignored).
+Detailed deliverables: `private/planning/` on the maintainer's machine (gitignored; maintainer-only, not in the repository, so a public clone will not have it).
 
-Personal owner notes live in `private/` (gitignored) — not in public docs.
+Personal owner notes live in `private/` (gitignored) — not in public docs. Public docs that mention a `private/...` path point to a maintainer-only note that readers cannot open.
 
 ## Shared continuity — required for every agent
 
@@ -77,7 +77,7 @@ Sensor / Simulator → MQTT → pomona-core → DB → model-router
 
 ### Service names
 
-`pomona-core`, `pomona-dashboard`, `pomona-model-router`, `pomona-safety-checker`, `pomona-automation-engine`
+`pomona-core`, `pomona-dashboard`, `pomona-model-router`, `pomona-safety-checker`, `pomona-digital-twin`, `pomona-automation-engine`
 
 ### Safety (always enforce)
 
@@ -96,10 +96,16 @@ Block or flag: pesticide dosage, definite diagnosis without evidence, fertilizer
 
 ```text
 services/core/           ✅ FastAPI + MQTT ingest
-services/model-router/   ✅ stub/ollama advisor
-services/dashboard/      ✅ monitoring UI (Phase 2 partial)
+services/model-router/   ✅ stub/ollama advisor, reasoners, pipeline
+services/dashboard/      ✅ monitoring UI + approve/reject
+services/safety-checker/ ✅ deterministic safety checks
+services/digital-twin/   ✅ simple greenhouse model
+services/automation-engine/ ✅ suggestions, alerts (nothing actuated)
 models/registry/         YAML metadata → HF models
-examples/simulators/     greenhouse_tomato.py
+examples/simulators/     greenhouse_tomato.py, fake_greenhouse.py (+ scorer in scripts/)
+devices/                 ESP32 logger firmware (not bench-tested)
+hardware/                3D-printable sensor station
+spaces/                  Hugging Face Space sources (static demos)
 private/                 gitignored owner notes
 docs/                    public documentation
 ```
@@ -153,7 +159,7 @@ Apache-2.0 — contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 1. Read [PHASES.md](docs/PHASES.md) and PROJECT_STATUS — pick **one** task aligned with current phase
 2. Implement smallest working slice
 3. Run `make test`; if Docker available, `make up` + `make sim`
-4. When a **phase completes**, update [PHASES.md](docs/PHASES.md), [PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [README.md](README.md), [ROADMAP.md](docs/ROADMAP.md)
+4. When a **phase completes**, update [PHASES.md](docs/PHASES.md) (the only full phase table) and [PROJECT_STATUS.md](docs/PROJECT_STATUS.md), then check that the one-sentence status summaries in [README.md](README.md), [ROADMAP.md](docs/ROADMAP.md) and `wiki/Roadmap.md` still match. Do not copy the phase table into other files
 5. Update `private/AGENT_HANDOFF.md` and `private/AGENT_WORK_LOG.md` after major steps (required, local only)
 6. **Do not commit** unless the user asks
 

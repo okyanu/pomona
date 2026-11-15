@@ -8,7 +8,7 @@
 | ⏳ Active / partial | **8** (Phases 2, 3, 4, 5, 6, 7, 9, 10) |
 | ⬜ Remaining | **1** (Phase 8) |
 
-> **Source of truth for phase status.** When a phase finishes, update this file first, then [ROADMAP.md](./ROADMAP.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md), and [README.md](https://github.com/okyanu/pomona/blob/main/README.md).
+> **Source of truth for phase status, and the only full phase table.** [README.md](https://github.com/okyanu/pomona/blob/main/README.md), [ROADMAP.md](./ROADMAP.md), [PROJECT_STATUS.md](./PROJECT_STATUS.md) and the wiki only summarise it in a sentence and link here. When a phase finishes, update this file, then check that those summaries still match.
 
 ---
 
@@ -22,13 +22,15 @@
 | **3** | Tomato greenhouse reasoner | ⏳ Partial — deterministic rules decide; the HF adapter (v0.1.7) is experimental (learned a training shortcut, see [TOMATO_RISK_REASONER.md](./TOMATO_RISK_REASONER.md)); retrain pending |
 | **4** | Safety checker | ⏳ Partial — deterministic tomato and actuator gates implemented; full chain pending |
 | **5** | Agronomist LLM adapter | ⏳ Partial — HF adapter + model-router contract; live backend wiring pending |
-| **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; dashboard integration (evaluate, list, approve/reject) live in `services/dashboard` |
+| **6** | Automation engine | ⏳ Partial — YAML rules, suggestions, and manual approve/reject live in `services/automation-engine`; dashboard integration (evaluate, list, approve/reject) live in `services/dashboard`; the [public API demo](https://automation-engine-fawn.vercel.app) remains ephemeral |
 | **7** | Public browser demo | ⏳ Partial — [static guarded demo](https://huggingface.co/spaces/Okyanus/pomona-greenhouse-demo) and [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona) game live; full platform playground still planned |
 | **8** | ESP32 / real devices | ⬜ Planned — monitoring-only SD-card logger firmware ([`devices/esp32-cress-logger`](https://github.com/okyanu/pomona/tree/main/devices/esp32-cress-logger)) compiles but is not yet bench-tested on a board; no field data. Controller design: [EDGE_CONTROLLER_DESIGN_NOTES.md](./EDGE_CONTROLLER_DESIGN_NOTES.md) (exploratory) |
 | **9** | Model registry standard | ⏳ Partial — public YAML registry and HF lifecycle metadata |
 | **10** | Fine-tune pipeline | ⏳ Partial — dataset builders, validators, Colab training, and clean evaluation |
 
 **Legend:** ✅ Done · ⏳ Active or partial · ⬜ Planned
+
+"Partial" means some pieces exist. It does not mean the phase is being worked on now; the current focus is in [PROJECT_STATUS.md](./PROJECT_STATUS.md) and [NEXT_90_DAYS.md](./NEXT_90_DAYS.md).
 
 Phase status measures product completion. It is intentionally separate from
 platform and model versions; see [VERSIONING.md](./VERSIONING.md).
@@ -70,12 +72,11 @@ hardware-preparation validation without enabling autonomous actuator control.
 
 ## When you complete a phase — update these files
 
-1. **`docs/PHASES.md`** (this file) — change ⬜/⏳ to ✅, set next phase to ⏳
-2. **`docs/ROADMAP.md`** — sync the status column
-3. **`docs/PROJECT_STATUS.md`** — add deliverables + completion date
-4. **`README.md`** — sync the phase table under "Project phases"
-5. **`private/DAILY_LOG.md`** — optional personal note (local only)
+1. **`docs/PHASES.md`** (this file) — change ⬜/⏳ to ✅, set next phase to ⏳. This is the only full phase table.
+2. **`docs/PROJECT_STATUS.md`** — add deliverables + completion date, and check the short summary at the top.
+3. **`docs/ROADMAP.md`**, **`README.md`** and `wiki/Roadmap.md` — check that their one-sentence status summaries still match this file; they do not keep their own copy of the table.
+4. `private/DAILY_LOG.md` — optional personal note (maintainer-only, local; not in the repository)
 
 Partial progress: use "⏳ partial" in PHASES + note in PROJECT_STATUS only.
 
-Detailed deliverables (maintainer): `private/planning/ROADMAP.full.md`
+Detailed deliverables (maintainer-only, local; not in the repository): `private/planning/ROADMAP.full.md`

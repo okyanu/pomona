@@ -2,12 +2,17 @@
 # Dockerfile), read-only root filesystem, all Linux capabilities dropped, no privilege
 # escalation, and CPU / memory limits. Writable state lives only in the named volumes.
 # Limits can be raised in .env (e.g. MODEL_ROUTER_MEM_LIMIT=8g for the Hugging Face backend).
+# Every service also restarts by itself after a crash or a power cut (until you stop it with `docker compose stop`).
 x-hardened: &hardened
+  restart: unless-stopped
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   tmpfs: ["/tmp:size=64m,mode=1777"]
 
+# Published ports: the internal services (model-router, safety-checker, digital-twin, automation-engine, ollama)
+# are on 127.0.0.1 only. MQTT, Core and the dashboard follow POMONA_BIND_ADDRESS (default 127.0.0.1: this
+# computer only; set 0.0.0.0 in .env to let real devices on your network reach them, see SECURITY.md).
 services:
   mqtt:
     image: eclipse-mosquitto:2
@@ -16,7 +21,7 @@ services:
     mem_limit: ${MQTT_MEM_LIMIT:-128m}
     cpus: ${MQTT_CPUS:-0.5}
     ports:
-      - "1883:1883"
+      - "${POMONA_BIND_ADDRESS:-127.0.0.1}:1883:1883"
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-pomona}
       MQTT_PASSWORD: "${MQTT_PASSWORD:?MQTT_PASSWORD is not set: run scripts/setup.sh or set it in .env}"
@@ -40,7 +45,7 @@ services:
     mem_limit: ${CORE_MEM_LIMIT:-512m}
     cpus: ${CORE_CPUS:-1.0}
     ports:
-      - "8080:8080"
+      - "${POMONA_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     environment:
       CORE_HOST: ${CORE_HOST:-0.0.0.0}
       CORE_PORT: ${CORE_PORT:-8080}
@@ -62,6 +67,13 @@ services:
       OUTCOME_FEED_QUEUE_SIZE: ${OUTCOME_FEED_QUEUE_SIZE:-1000}
     volumes:
       - core_data:/app/data
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       mqtt:
         condition: service_healthy
@@ -72,7 +84,7 @@ services:
     mem_limit: ${MODEL_ROUTER_MEM_LIMIT:-2g}
     cpus: ${MODEL_ROUTER_CPUS:-2.0}
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -91,13 +103,24 @@ services:
       NUTRIENT_PH_EC_OLLAMA_MODEL: ${NUTRIENT_PH_EC_OLLAMA_MODEL:-pomona-nutrient-ph-ec:v0.1.1}
       MLX_HOST: ${MLX_HOST:-http://host.docker.internal:8083}
       WATER_IRRIGATION_MLX_MODEL: ${WATER_IRRIGATION_MLX_MODEL:-}
+      REASONER_TIMEOUT_S: ${REASONER_TIMEOUT_S:-60}
+      ADVISOR_TIMEOUT_S: ${ADVISOR_TIMEOUT_S:-60}
+      AUDIT_LOG_MAX_BYTES: ${AUDIT_LOG_MAX_BYTES:-20971520}
+      MAX_FUTURE_SAMPLE_S: ${MAX_FUTURE_SAMPLE_S:-300}
     volumes:
       - ./models/registry:/app/models/registry:ro
       - ./services/safety-checker/app:/app/safety_checker_rules:ro
       - router_data:/app/data
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       core:
-        condition: service_started
+        condition: service_healthy
 
   dashboard:
     build: ./services/dashboard
@@ -105,7 +128,7 @@ services:
     mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     cpus: ${DASHBOARD_CPUS:-0.5}
     ports:
-      - "3000:3000"
+      - "${POMONA_BIND_ADDRESS:-127.0.0.1}:3000:3000"
     environment:
       CORE_URL: ${CORE_URL:-http://core:8080}
       MODEL_ROUTER_URL: ${MODEL_ROUTER_URL:-http://model-router:8081}
@@ -113,11 +136,18 @@ services:
       DIGITAL_TWIN_URL: ${DIGITAL_TWIN_URL:-http://digital-twin:8084}
       AUTOMATION_ENGINE_URL: ${AUTOMATION_ENGINE_URL:-http://automation-engine:8085}
       ZONE_STALE_AFTER_S: ${ZONE_STALE_AFTER_S:-600}
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       core:
-        condition: service_started
+        condition: service_healthy
       model-router:
-        condition: service_started
+        condition: service_healthy
 
   digital-twin:
     build: ./services/digital-twin
@@ -125,7 +155,14 @@ services:
     mem_limit: ${DIGITAL_TWIN_MEM_LIMIT:-256m}
     cpus: ${DIGITAL_TWIN_CPUS:-0.5}
     ports:
-      - "8084:8084"
+      - "127.0.0.1:8084:8084"
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8084/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   automation-engine:
     build: ./services/automation-engine
@@ -139,10 +176,19 @@ services:
       SUGGESTION_SAMPLE_MAX_AGE_SECONDS: ${SUGGESTION_SAMPLE_MAX_AGE_SECONDS:-3600}
       ALERT_RAISE_AFTER_SECONDS: ${ALERT_RAISE_AFTER_SECONDS:-600}
       ALERT_CLEAR_AFTER_SECONDS: ${ALERT_CLEAR_AFTER_SECONDS:-900}
+      ALERT_MAX_GAP_SECONDS: ${ALERT_MAX_GAP_SECONDS:-1800}
+      MAX_FUTURE_SAMPLE_S: ${MAX_FUTURE_SAMPLE_S:-300}
     volumes:
       - automation_data:/data
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085"
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   safety-checker:
     build: ./services/safety-checker
@@ -150,18 +196,26 @@ services:
     mem_limit: ${SAFETY_CHECKER_MEM_LIMIT:-256m}
     cpus: ${SAFETY_CHECKER_CPUS:-0.5}
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
+    # Calls the service's own GET /health with the image's Python (no curl in the image; writes nothing).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       model-router:
-        condition: service_started
+        condition: service_healthy
 
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]
     # Third-party image that writes its own state: no privilege escalation, but no other lockdown.
     security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/var/lib/ollama
 

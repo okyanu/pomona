@@ -6,7 +6,7 @@ Thank you for helping make Pomona open source. **Contributions are welcome** —
 
 | Item | Detail |
 |------|--------|
-| **License** | [Apache-2.0](../LICENSE) — use, modify, and distribute with attribution |
+| **License** | [Apache-2.0](LICENSE) — use, modify, and distribute with attribution |
 | **Platform repo** | This repo (`pomona`) — Docker stack, services, docs |
 | **ML repo** | `pomona-agronomist-llm` (not yet published) — training pipeline |
 | **Model weights** | [Hugging Face](https://huggingface.co/Okyanus/ai-pomona-agronomist-gemma4) |
@@ -18,13 +18,31 @@ You do not need permission to fork, experiment, or open a PR.
 ## Quick start for contributors
 
 ```bash
-git clone https://github.com/YOUR_USER/pomona.git
+git clone https://github.com/<your-github-user>/pomona.git
 cd pomona
 cp .env.example .env
 ./scripts/setup.sh
 ./scripts/up.sh
-make test
+make bootstrap   # once: one Python 3.11 venv per service group (services/*/.venv)
+make test        # every suite
 ```
+
+Or by hand (Python 3.11, from the repo root; the pins are in `constraints-dev.txt`):
+
+```bash
+python3.11 -m venv services/core/.venv
+services/core/.venv/bin/pip install -r services/core/requirements.txt -r services/dashboard/requirements.txt \
+  -r services/safety-checker/requirements.txt -r services/digital-twin/requirements.txt \
+  -r examples/simulators/requirements.txt -c constraints-dev.txt pytest httpx pyyaml
+# the same for services/model-router (-r services/model-router/requirements.txt)
+# and services/automation-engine (-r services/automation-engine/requirements.txt)
+```
+
+`make test` and `make test-local` are the same full suite.
+
+**Updating a dependency:** edit the version in that service's `requirements.txt` (the file you edit by hand), then run
+`make lock` (needs `pip install uv`) to regenerate the exact pins, `services/*/constraints.txt` and `constraints-dev.txt`.
+Commit the requirements and the regenerated constraints together; `make lock UPGRADE=1` moves every pin to the newest version.
 
 Read before coding:
 
@@ -55,7 +73,7 @@ Read before coding:
 - Every service: `GET /health`, JSON APIs, FastAPI + Pydantic
 - **Never** let the LLM directly control actuators
 - Run `make test` before opening a PR
-- Update [docs/PROJECT_STATUS.md](PROJECT_STATUS.md) if you complete a milestone
+- Update [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) if you complete a milestone
 - Match existing code style; minimal diff
 
 ### Safety
@@ -81,7 +99,7 @@ No force-push to `main`. No commits with secrets (`.env`, tokens, weights).
 
 ## Report bugs
 
-Open a [GitHub Issue](https://github.com/YOUR_USER/pomona/issues) with:
+Open a [GitHub Issue](https://github.com/okyanu/pomona/issues) with:
 
 - OS (macOS / Linux / Windows)
 - Steps to reproduce
@@ -92,7 +110,7 @@ Open a [GitHub Issue](https://github.com/YOUR_USER/pomona/issues) with:
 
 ## Code of conduct
 
-Be respectful and constructive. See [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md).
+Be respectful and constructive. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ---
 

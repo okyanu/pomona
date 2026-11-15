@@ -19,12 +19,22 @@ class Settings(BaseSettings):
     # before an alert is raised, and stay away this long before it recovers.
     alert_raise_after_seconds: int = Field(default=600, ge=0)
     alert_clear_after_seconds: int = Field(default=900, ge=0)
+    # A silence longer than this between two readings of a stream restarts the timers of pending (not yet raised) alerts:
+    # a label seen once and again hours later is not "lasting". A raised alert is not touched. 0 = off.
+    alert_max_gap_seconds: int = Field(default=1800, ge=0)
     # Outcome confirmation after an approval: how long to watch for recovery (rules.yaml may set
     # `response_window_seconds` per rule) and how many consecutive trusted clean readings confirm it.
     outcome_response_window_seconds: int = Field(default=7200, ge=1)
     outcome_confirm_readings: int = Field(default=3, ge=1)
+    # Same setting and meaning as Core's MAX_FUTURE_SAMPLE_S: a sample time up to this many seconds ahead of the clock
+    # still counts as current (Core accepts it). 0 = Core's check is off and the old 60 s limit applies.
+    max_future_sample_s: int = Field(default=300, ge=0)
     # Unset stays ephemeral for serverless/demo deployments; Compose sets a volume path.
     automation_db_path: Optional[Path] = None
+
+    @property
+    def future_slack_s(self) -> int:
+        return self.max_future_sample_s or 60
 
 
 settings = Settings()
