@@ -317,7 +317,16 @@ Zone views for multi-device zones. The v1 reviews found these points; the slice-
 - **Router `known_vetoed_fields`:** where its reason appears (the gate has one reason string, not one per field), and
   whether it takes part in companion groups and in the `cannot_confirm` test.
 
-## Slice 3 (outline: needs its own design section, review and owner OK)
+## Slice 3 (designed in `docs/design/multi-device-zones-slice3.md`)
+
+**The full design is `docs/design/multi-device-zones-slice3.md`** (approved 2026-11-15); it answers each bullet below
+(its "Outline answers" section maps them). Slice 3 delivered devices in the fake greenhouse (a scenario `devices` key
+with per-device probes, offsets and wander, and faults per device), a truth log with one row per device per tick, a
+scorer keyed by (zone, device) with the new `caught_on_partner` verdict, and the scenarios `multi_device.json` and
+`slow_drift.json`. The game is unchanged (one device per zone). User docs:
+[FAKE_GREENHOUSE.md](../FAKE_GREENHOUSE.md#zones-with-several-devices) and the
+[simulator README](../../examples/simulators/README.md#devices-in-a-zone). The list below is kept as the outline the
+design started from.
 
 - **Simulator:** `fake_greenhouse.py` zones get devices: `DeviceConfig(device_id, sensors)`.
   - The first device keeps the existing seeds; extra devices get their own noise generators.

@@ -18,6 +18,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -27,7 +28,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 # --- Thresholds the expected labels are computed from -------------------------------------
 # These mirror services/model-router/app/tomato_reasoner.py (derive_tomato_risk and
@@ -78,6 +79,13 @@ FIELD_ALIASES = {"substrate_moisture_pct": "soil_moisture_pct"}
 # meter confirmed the probe, which accepts a new level after a flagged step. Substrate temperature has none.
 CALIBRATABLE = ("ph", "ec_ms_cm", "air_temperature_c", "humidity_pct", "soil_moisture_pct")
 CALIBRATION_METHOD = "fake_greenhouse_confirm"
+
+# A scenario may give a zone several devices (top-level `devices` key, docs/design/multi-device-zones-slice3.md 3.1).
+MAX_DEVICES_PER_ZONE = 8
+DEVICE_ID_PATTERN = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}")  # one MQTT topic segment
+DEVICE_KEYS = ("device_id", "sensors", "offsets", "wander")
+WANDER_RATE_PER_H = 0.5        # a probe's own slow walk: spread about bound / 2.5, clipped to +-bound
+WANDER_SIGMA_PER_BOUND = 0.4
 
 
 @dataclass(frozen=True)
@@ -140,8 +148,10 @@ class Injection:
     hideable = True                     # may "Hidden random" pick it
     hidden_id: Optional[int] = None
 
-    def __init__(self, zone: "Zone", field: Optional[str], params: Dict[str, Any], tick: int, now: str):
+    def __init__(self, zone: "Zone", field: Optional[str], params: Dict[str, Any], tick: int, now: str,
+                 device_id: Optional[str] = None):
         self.zone_id = zone.cfg.zone_id
+        self.device_id = device_id  # the device a fault is on; events change the zone and have none
         self.field = canonical(field) or self.default_field
         self.started_tick = tick
         self.started_at = now
@@ -433,15 +443,75 @@ def ou(x: float, rate: float, sigma: float, draw: float, dt_h: float, bound: flo
     return min(max(x, -bound), bound)
 
 
-class Zone:
-    def __init__(self, cfg: ZoneConfig, seed: int, start_hour: float):
-        self.cfg = cfg
-        self.truth_rng = random.Random(f"{seed}:{cfg.zone_id}:truth")
-        self.sensor_rng = random.Random(f"{seed}:{cfg.zone_id}:sensor")
-        self.boot_id = "boot-" + hashlib.sha1(f"fake-greenhouse:{seed}:{cfg.device_id}".encode()).hexdigest()[:8]
+class Device:
+    """One device of a zone: its probes, packet counter and own faults, calibrations and noise.
+
+    The zone's true state, events and truth/sensor RNGs stay on the Zone. `sensors` holds canonical probe names;
+    an `alias_only` device sends its moisture probe as `substrate_moisture_pct` only.
+    """
+
+    def __init__(self, device_id: str, sensors: Iterable[str], seed: int, zone_id: str, first: bool,
+                 alias_only: bool = False, offsets: Optional[Dict[str, float]] = None,
+                 wander: Optional[Dict[str, float]] = None):
+        self.device_id = device_id
+        self.sensors: Tuple[str, ...] = tuple(sensors)
+        self.alias_only = alias_only
+        self.offsets: Dict[str, float] = dict(offsets or {})
+        self.wander: Dict[str, float] = dict(wander or {})  # field -> bound
+        self.walk: Dict[str, float] = {f: 0.0 for f in self.wander}
+        self.wander_rng = random.Random(f"{seed}:{zone_id}:{device_id}:wander") if self.wander else None
+        # The first device of a zone uses the zone's own sensor draws; every later one has its own stream.
+        self.sensor_rng = None if first else random.Random(f"{seed}:{zone_id}:{device_id}:sensor")
+        self.boot_id = "boot-" + hashlib.sha1(f"fake-greenhouse:{seed}:{device_id}".encode()).hexdigest()[:8]
         self.sequence = 0
         self.last_sent: Dict[str, float] = {}
         self.faults: List[Fault] = []
+        self.recovery: List[List[Any]] = []  # [fault name, published samples left] after a sensor fault stops
+        self.calibrations: List[Dict[str, Any]] = []  # asked for since the last reading: {field, at, source}
+        self.probe_true: Dict[str, float] = {}  # this tick's probe values before noise (calibration reference)
+
+    def advance_wander(self, dt_h: float) -> None:
+        """One OU step per listed field, in SENSOR_ORDER order (called from tick 1 on)."""
+        for field in SENSOR_ORDER:
+            if field in self.walk:
+                bound = self.wander[field]
+                self.walk[field] = ou(self.walk[field], WANDER_RATE_PER_H, WANDER_SIGMA_PER_BOUND * bound,
+                                      self.wander_rng.gauss(0.0, 1.0), dt_h, bound)
+
+    def probe_value(self, field: str, true_value: float) -> float:
+        """The probe's own true value: the zone's plus where the probe hangs (offset) and its wander."""
+        if field in self.offsets:
+            true_value += self.offsets[field]
+        if field in self.walk:
+            true_value += self.walk[field]
+        return true_value
+
+    def device_offset(self) -> Dict[str, float]:
+        return {f: round(self.offsets.get(f, 0.0) + self.walk.get(f, 0.0), 4)
+                for f in SENSOR_ORDER if f in self.offsets or f in self.walk}
+
+    def silent_fields(self) -> List[str]:
+        """Probes whose field is absent from this device's packet right now."""
+        return sorted({f for fault in self.faults for f in fault.omitted_fields()})
+
+
+class Zone:
+    def __init__(self, cfg: ZoneConfig, seed: int, start_hour: float, layout: Optional[List[Dict[str, Any]]] = None):
+        self.cfg = cfg
+        self.truth_rng = random.Random(f"{seed}:{cfg.zone_id}:truth")
+        self.sensor_rng = random.Random(f"{seed}:{cfg.zone_id}:sensor")
+        if layout is None:  # today's zone: one device with every probe
+            self._devices = [Device(cfg.device_id, cfg.sensors, seed, cfg.zone_id, True)]
+        else:
+            self._devices = [Device(d["device_id"], d["sensors"], seed, cfg.zone_id, index == 0,
+                                    d["alias_only"], d["offsets"], d["wander"]) for index, d in enumerate(layout)]
+        # The first device carrying a field uses the zone's draw for it.
+        self._owner: Dict[str, Device] = {}
+        for field in SENSOR_ORDER:
+            for device in self._devices:
+                if field in device.sensors:
+                    self._owner[field] = device
+                    break
         self.events: List[Event] = []
         self.air_walk = 0.0
         self.humidity_walk = 0.0
@@ -452,8 +522,6 @@ class Zone:
         self.irrigated = False
         self.dosed = False
         self.next_pulse_h = start_hour + 0.5
-        self.recovery: List[List[Any]] = []  # [fault name, published samples left] after a sensor fault stops
-        self.calibrations: List[Dict[str, Any]] = []  # asked for since the last reading: {field, at, source}
         self.substrate_temp = self._air(start_hour) - SUBSTRATE_OFFSET_C
 
     # Truth ----------------------------------------------------------------------------
@@ -494,6 +562,8 @@ class Zone:
                 self._substrate_step(hour, abs_hour, air, humidity, sub, g)
             else:
                 self._reservoir_step(sub, g)
+        for device in self._devices:
+            device.advance_wander(dt_h)
 
     def _substrate_step(self, hour: float, abs_hour: float, air: float, humidity: float,
                         dt_h: float, g: List[float]) -> None:
@@ -541,55 +611,117 @@ class Zone:
 
     # Sensors --------------------------------------------------------------------------
 
-    def sample(self, true: Dict[str, Any]) -> Dict[str, float]:
-        """Noisy, quantised, fault-altered readings. Draws are fixed per tick so faults never shift them."""
-        draws = {field: self.sensor_rng.gauss(0.0, 1.0) for field in SENSOR_ORDER}
-        sent: Dict[str, float] = {}
-        for field in self.cfg.sensors:
-            sigma = NOISE[field]
-            for fault in self.faults:
-                sigma *= fault.noise_factor(field)
-            value = quantise(field, true[field] + draws[field] * sigma)
-            for fault in self.faults:
-                value = fault.apply(field, value, self.last_sent.get(field))
-            sent[field] = quantise(field, value)
-        return sent
+    def sample(self, true: Dict[str, Any]) -> List[Dict[str, float]]:
+        """Noisy, quantised, fault-altered readings, one dict per device. Draws are fixed per tick so faults never
+        shift them: the zone draws every SENSOR_ORDER field, and so does every device after the first."""
+        zone_draws = {field: self.sensor_rng.gauss(0.0, 1.0) for field in SENSOR_ORDER}
+        readings = []
+        for device in self._devices:
+            own = None if device.sensor_rng is None else {
+                field: device.sensor_rng.gauss(0.0, 1.0) for field in SENSOR_ORDER}
+            sent: Dict[str, float] = {}
+            device.probe_true = {}
+            for field in device.sensors:
+                draw = zone_draws[field] if own is None or self._owner[field] is device else own[field]
+                probe = device.probe_value(field, true[field])
+                device.probe_true[field] = probe
+                sigma = NOISE[field]
+                for fault in device.faults:
+                    sigma *= fault.noise_factor(field)
+                value = quantise(field, probe + draw * sigma)
+                for fault in device.faults:
+                    value = fault.apply(field, value, device.last_sent.get(field))
+                sent[field] = quantise(field, value)
+            readings.append(sent)
+        return readings
 
-    def build_event(self, sent: Dict[str, float], farm_id: str, timestamp: str) -> Dict[str, Any]:
+    def reference(self, device: Device, true: Dict[str, Any], field: str) -> float:
+        """What a meter held next to this probe reads: its own true value (the zone's, when it has no offset)."""
+        if field in device.offsets or field in device.walk:
+            return round(device.probe_true[field], 4)
+        return true[field]
+
+    def build_event(self, device: Device, sent: Dict[str, float], farm_id: str, timestamp: str) -> Dict[str, Any]:
         cfg = self.cfg
         event: Dict[str, Any] = {
-            "device_id": cfg.device_id, "farm_id": farm_id, "zone_id": cfg.zone_id,
+            "device_id": device.device_id, "farm_id": farm_id, "zone_id": cfg.zone_id,
             "crop": "tomato", "growth_stage": "flowering", "system_type": cfg.system_type,
-            "air_temperature_c": sent["air_temperature_c"],
-            "humidity_pct": sent["humidity_pct"],
-            "ec_ms_cm": sent["ec_ms_cm"],
-            "ph": sent["ph"],
         }
+        for field in ("air_temperature_c", "humidity_pct", "ec_ms_cm", "ph"):
+            if field in device.sensors:
+                event[field] = sent[field]
         if cfg.has_substrate:
-            event["soil_moisture_pct"] = sent["soil_moisture_pct"]
-            event["substrate_temperature_c"] = sent["substrate_temperature_c"]
-            event["substrate_moisture_pct"] = sent["soil_moisture_pct"]
+            if "soil_moisture_pct" in device.sensors and not device.alias_only:
+                event["soil_moisture_pct"] = sent["soil_moisture_pct"]
+            if "substrate_temperature_c" in device.sensors:
+                event["substrate_temperature_c"] = sent["substrate_temperature_c"]
+            if "soil_moisture_pct" in device.sensors:
+                event["substrate_moisture_pct"] = sent["soil_moisture_pct"]
             event.update(zone_context())
-        else:
+        elif len(self._devices) == 1:  # a multi-device hydroponic zone sends no placeholder
             event["soil_moisture_pct"] = PLACEHOLDER_MOISTURE_PCT
         event.update(timestamp=timestamp, source="fake_greenhouse", schema_version="1.0",
-                     sequence=self.sequence, boot_id=self.boot_id)
-        for fault in self.faults:
+                     sequence=device.sequence, boot_id=device.boot_id)
+        for fault in device.faults:
             for field in fault.omitted_fields():
                 event.pop(field, None)
         return event
 
+    # What outside code reads (the game, the abstention eval): the zone as a whole, or the first device -----------
+
+    @property
+    def devices(self) -> List[Device]:
+        return self._devices
+
+    @property
+    def multi(self) -> bool:
+        return len(self._devices) > 1
+
+    def device(self, device_id: Any) -> Device:
+        for device in self._devices:
+            if device.device_id == device_id:
+                return device
+        raise ValueError(f"zone {self.cfg.zone_id} has no device {device_id!r}; known: "
+                         f"{[d.device_id for d in self._devices]}")
+
+    def carriers(self, field: str) -> List[Device]:
+        return [d for d in self._devices if field in d.sensors]
+
+    @property
+    def faults(self) -> List[Fault]:
+        return [f for d in self._devices for f in d.faults]
+
+    @property
+    def boot_id(self) -> str:
+        return self._devices[0].boot_id
+
+    @property
+    def sequence(self) -> int:
+        return self._devices[0].sequence
+
+    @property
+    def last_sent(self) -> Dict[str, float]:
+        return self._devices[0].last_sent
+
+    @property
+    def recovery(self) -> List[List[Any]]:
+        return self._devices[0].recovery
+
+    @property
+    def calibrations(self) -> List[Dict[str, Any]]:
+        return self._devices[0].calibrations
+
     def silent_fields(self) -> List[str]:
-        """Probes whose field is absent from the packet right now."""
-        return sorted({f for fault in self.faults for f in fault.omitted_fields()})
+        """Probes whose field is absent from some packet right now."""
+        return sorted({f for device in self._devices for f in device.silent_fields()})
 
     @property
     def placeholder_fields(self) -> List[str]:
-        return [] if self.cfg.has_substrate else ["soil_moisture_pct"]
+        return [] if self.cfg.has_substrate or self.multi else ["soil_moisture_pct"]
 
     @property
     def calibratable(self) -> List[str]:
-        return [f for f in CALIBRATABLE if f in self.cfg.sensors]
+        return [f for f in CALIBRATABLE if any(f in d.sensors for d in self._devices)]
 
 
 def zone_context() -> Dict[str, Any]:
@@ -604,8 +736,14 @@ def zone_context() -> Dict[str, Any]:
     }
 
 
-def expected_labels(true: Dict[str, Any]) -> List[str]:
-    """Labels a correct system should raise for the TRUE state (see the threshold block)."""
+def expected_labels(true: Dict[str, Any], fields: Optional[Iterable[str]] = None) -> List[str]:
+    """Labels a correct system should raise for the TRUE state (see the threshold block).
+
+    With `fields` (canonical probe names), a label counts only through the probes in the set: what one device could
+    show. `water_level_risk` is read through `soil_moisture_pct`, from the truth's `substrate_moisture_pct`.
+    """
+    if fields is not None:
+        return _labels_through(true, set(fields))
     labels = []
     if true["air_temperature_c"] >= HEAT_C or true.get("substrate_temperature_c", 0.0) >= HEAT_C:
         labels.append("heat_stress")
@@ -616,6 +754,24 @@ def expected_labels(true: Dict[str, Any]) -> List[str]:
     if true["ec_ms_cm"] >= HIGH_EC_MS_CM:
         labels.append("high_ec")
     moisture = true.get("substrate_moisture_pct")
+    if moisture is not None and (moisture < WATER_RISK_LOW_PCT or moisture > WATER_RISK_HIGH_PCT):
+        labels.append("water_level_risk")
+    return labels
+
+
+def _labels_through(true: Dict[str, Any], fields: set) -> List[str]:
+    air, humidity = "air_temperature_c" in fields, "humidity_pct" in fields
+    substrate = "substrate_temperature_c" in fields
+    labels = []
+    if (air and true["air_temperature_c"] >= HEAT_C) or (substrate and true.get("substrate_temperature_c", 0.0) >= HEAT_C):
+        labels.append("heat_stress")
+    if (air and true["air_temperature_c"] <= COLD_C) or (substrate and true.get("substrate_temperature_c", 99.0) <= COLD_C):
+        labels.append("cold_stress")
+    if (humidity and true["humidity_pct"] >= FUNGAL_HUMIDITY_PCT) or (air and humidity and true["vpd_kpa"] < LOW_VPD_KPA):
+        labels.append("fungal_pressure")
+    if "ec_ms_cm" in fields and true["ec_ms_cm"] >= HIGH_EC_MS_CM:
+        labels.append("high_ec")
+    moisture = true.get("substrate_moisture_pct") if "soil_moisture_pct" in fields else None
     if moisture is not None and (moisture < WATER_RISK_LOW_PCT or moisture > WATER_RISK_HIGH_PCT):
         labels.append("water_level_risk")
     return labels
@@ -647,6 +803,121 @@ def load_scenario(path: Path) -> Dict[str, Any]:
     return scenario
 
 
+def _is_number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def parse_layout(layout: Any, zones: Dict[str, ZoneConfig], steps: Iterable[Any] = ()) -> Dict[str, List[Dict[str, Any]]]:
+    """Check a scenario's `devices` key and its steps on the zones it lists; return each zone's device specs.
+
+    Every problem is a ValueError naming it. Specs: {device_id, sensors (canonical, SENSOR_ORDER), alias_only,
+    offsets, wander}. Steps on zones the layout does not list are not checked here (they fail when their tick runs).
+    """
+    if not isinstance(layout, dict):
+        raise ValueError("devices must be an object: zone id -> list of device objects")
+    parsed: Dict[str, List[Dict[str, Any]]] = {}
+    for zone_id, entries in layout.items():
+        cfg = zones.get(zone_id)
+        if cfg is None:
+            raise ValueError(f"devices: unknown zone {zone_id!r}; known: {sorted(zones)}")
+        where = f"devices[{zone_id}]"
+        if not isinstance(entries, list):
+            raise ValueError(f"{where} must be a list of device objects")
+        if not entries:
+            raise ValueError(f"{where} is empty: a zone needs at least one device")
+        if len(entries) > MAX_DEVICES_PER_ZONE:
+            raise ValueError(f"{where} has {len(entries)} devices; at most {MAX_DEVICES_PER_ZONE} per zone")
+        specs: List[Dict[str, Any]] = []
+        seen = set()
+        carried = set()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError(f"{where}: every device must be an object")
+            unknown = sorted(set(entry) - set(DEVICE_KEYS))
+            if unknown:
+                raise ValueError(f"{where}: unknown device keys {unknown}; accepted {sorted(DEVICE_KEYS)}")
+            device_id = entry.get("device_id")
+            if not isinstance(device_id, str) or not DEVICE_ID_PATTERN.fullmatch(device_id):
+                raise ValueError(f"{where}: device_id {device_id!r} must match {DEVICE_ID_PATTERN.pattern} "
+                                 "(one MQTT topic segment, not '.' or '..')")
+            if device_id in seen or device_id in (".", ".."):
+                raise ValueError(f"{where}: device_id {device_id!r} is used twice")
+            seen.add(device_id)
+            listed = entry.get("sensors")
+            if not isinstance(listed, list) or not listed:
+                raise ValueError(f"{where}[{device_id}]: sensors must be a non-empty list")
+            probes: List[str] = []
+            for name in listed:
+                if not isinstance(name, str) or not (
+                        name in cfg.sensors or (name in FIELD_ALIASES and FIELD_ALIASES[name] in cfg.sensors)):
+                    raise ValueError(f"{where}[{device_id}]: {name!r} is not a sensor of zone {zone_id}; "
+                                     f"known: {list(cfg.sensors)}")
+                if canonical(name) in probes:
+                    raise ValueError(f"{where}[{device_id}]: probe {canonical(name)!r} is listed twice")
+                probes.append(canonical(name))
+            alias_only = any(name in FIELD_ALIASES for name in listed)
+            tables: Dict[str, Dict[str, float]] = {}
+            for key in ("offsets", "wander"):
+                table = entry.get(key, {})
+                if not isinstance(table, dict):
+                    raise ValueError(f"{where}[{device_id}]: {key} must be an object: probe -> number")
+                for field, value in table.items():
+                    if field in FIELD_ALIASES:
+                        raise ValueError(f"{where}[{device_id}]: {key} uses canonical probe names "
+                                         f"({FIELD_ALIASES[field]!r}, not {field!r})")
+                    if field not in probes:
+                        raise ValueError(f"{where}[{device_id}]: {key} names {field!r}, which the device does not carry")
+                    if not _is_number(value):
+                        raise ValueError(f"{where}[{device_id}]: {key}[{field}] must be a finite number")
+                    if key == "wander" and value < 0:
+                        raise ValueError(f"{where}[{device_id}]: wander[{field}] must not be negative")
+                tables[key] = {f: float(v) for f, v in table.items()}
+            carried.update(probes)
+            specs.append({"device_id": device_id, "sensors": tuple(f for f in SENSOR_ORDER if f in probes),
+                          "alias_only": alias_only, "offsets": tables["offsets"], "wander": tables["wander"]})
+        if len(specs) == 1 and (specs[0]["offsets"] or specs[0]["wander"] or specs[0]["alias_only"]):
+            raise ValueError(f"{where}: a zone with one device may not use offsets, wander or substrate_moisture_pct "
+                             "(its truth rows would not show the difference)")
+        missing = [f for f in cfg.sensors if f not in carried]
+        if missing:
+            raise ValueError(f"{where}: no device carries {missing}; together the devices must carry every sensor of "
+                             f"zone {zone_id}")
+        parsed[zone_id] = specs
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_zone = step.get("zone")
+        if step_zone is not None and not isinstance(step_zone, str):
+            raise ValueError(f"step {step}: zone must be a string, got {step_zone!r}")
+        if step_zone in parsed:
+            _check_step_device(step, parsed[step_zone])
+    return parsed
+
+
+def _check_step_device(step: Dict[str, Any], specs: List[Dict[str, Any]]) -> None:
+    zone_id = step["zone"]
+    name = step.get("start") or step.get("stop")
+    cls = REGISTRY.get(name) if isinstance(name, str) else None
+    if cls is not None and issubclass(cls, Event) and "device" in step:
+        raise ValueError(f"step {step}: {name} is an event: it changes the zone's truth and takes no device")
+    device = None
+    if "device" in step:
+        known = [d["device_id"] for d in specs]
+        if step["device"] not in known:
+            raise ValueError(f"step {step}: zone {zone_id} has no device {step['device']!r}; known: {known}")
+        device = next(d for d in specs if d["device_id"] == step["device"])
+    field = None
+    if "calibrate" in step:
+        field = canonical(step["calibrate"])
+    elif "start" in step and cls is not None and issubclass(cls, Fault):
+        field = canonical(step.get("field")) or cls.default_field
+    if field:
+        pool = [device] if device else specs
+        if not any(field in d["sensors"] for d in pool):
+            who = f"device {device['device_id']!r}" if device else f"any device of zone {zone_id}"
+            raise ValueError(f"step {step}: {who} does not carry {field!r}")
+
+
 class Simulation:
     def __init__(self, seed: int = 42, farm_id: str = "demo-farm", interval: float = 30.0,
                  sim_speed: float = 1.0, start_hour: float = 8.0,
@@ -661,7 +932,10 @@ class Simulation:
         self.clock = clock
         self.steps = list((scenario or {}).get("steps", []))
         self.duration_ticks = (scenario or {}).get("duration_ticks")
-        self.zones = {cfg.zone_id: Zone(cfg, seed, start_hour) for cfg in zones}
+        self.has_layout = bool(scenario) and "devices" in scenario  # only multi-device scenarios have the key
+        self.layout = scenario["devices"] if self.has_layout else None
+        parsed = parse_layout(self.layout, {cfg.zone_id: cfg for cfg in zones}, self.steps) if self.has_layout else {}
+        self.zones = {cfg.zone_id: Zone(cfg, seed, start_hour, parsed.get(cfg.zone_id)) for cfg in zones}
         self.tick = 0
         self.now = ""
         # Control page: commands queue up and apply at the start of the next step(), under the lock.
@@ -671,66 +945,122 @@ class Simulation:
         self.hidden_rng = random.Random(f"{seed}:hidden")
         self.hidden_log: List[Dict[str, Any]] = []  # answer key: every hidden injection started
         self.revealed = False
-        self.last_sent: Dict[str, Dict[str, Any]] = {}
+        self.last_sent: Dict[str, Dict[str, Any]] = {}  # per zone: its first device
         self.last_published: Dict[str, bool] = {}
+        self.device_sent: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.device_published: Dict[Tuple[str, str], bool] = {}
         self.next_tick_due: Optional[float] = None  # time.monotonic() of the next tick, set by run()
 
     # Registry control (the scenario runner and the control page both use these) ----------
 
+    def _resolve_device(self, zone: Zone, injection: Injection, device: Any) -> Optional[Device]:
+        """The device an injection is on. Events change the zone's truth and take none."""
+        if isinstance(injection, Event):
+            if device is not None:
+                raise ValueError(f"{injection.name} is an event: it changes the zone's truth and takes no device")
+            return None
+        if device is not None:
+            found = self._named_device(zone, device)
+            if injection.field and injection.field not in found.sensors:
+                raise ValueError(f"device {device!r} of zone {zone.cfg.zone_id} has no sensor field {injection.field}")
+            return found
+        if injection.field:  # the first device that carries it
+            carriers = zone.carriers(injection.field)
+            if not carriers:
+                raise ValueError(f"no device of zone {zone.cfg.zone_id} carries {injection.field}")
+            return carriers[0]
+        return zone.devices[0]
+
+    def _build(self, name: str, zone: Zone, field: Optional[str], params: Dict[str, Any], tick: int, now: str,
+               device: Any) -> Tuple[Injection, Optional[Device]]:
+        """An injection built with its device: a probe validates the request and names the device (its field may
+        be the class default), then the real one is constructed with that device_id."""
+        cls = REGISTRY[name]
+        target = self._resolve_device(zone, cls(zone, field, params, tick, now), device)
+        return cls(zone, field, params, tick, now, device_id=target.device_id if target else None), target
+
+    @staticmethod
+    def _named_device(zone: Zone, device: Any) -> Device:
+        if not isinstance(device, str):
+            raise ValueError("device must be a string")
+        return zone.device(device)
+
     def start(self, name: str, zone_id: str, field: Optional[str] = None, *, source: str = "scenario",
-              **params: Any) -> Injection:
+              device: Optional[str] = None, **params: Any) -> Injection:
         """Start a fault or event. Starting one that is already active returns the active one.
 
-        A hidden injection never merges with a visible one, so pressing a button cannot reveal it.
+        A hidden injection never merges with a visible one, so pressing a button cannot reveal it. A fault is on one
+        device (`device`, else the first one that carries its field, else the zone's first); the same fault on two
+        devices is two faults.
         """
         zone = self.zones[zone_id]
-        injection = REGISTRY[name](zone, field, params, self.tick, self.now)
+        injection, target = self._build(name, zone, field, params, self.tick, self.now, device)
         injection.source = source
         for existing in zone.faults + zone.events:
-            if (existing.name, existing.field, existing.source == "hidden") == (
-                    injection.name, injection.field, source == "hidden"):
+            if (existing.device_id, existing.name, existing.field, existing.source == "hidden") == (
+                    injection.device_id, injection.name, injection.field, source == "hidden"):
                 existing.stopping = False  # restarting one that is still ramping down
                 return existing
-        (zone.faults if isinstance(injection, Fault) else zone.events).append(injection)
+        (target.faults if target else zone.events).append(injection)
         return injection
 
-    def stop(self, name: str, zone_id: str, field: Optional[str] = None, hidden: bool = False) -> int:
-        """Stop matching injections (hidden ones only when `hidden`); returns how many were running."""
+    def stop(self, name: str, zone_id: str, field: Optional[str] = None, hidden: bool = False, *,
+             device: Optional[str] = None) -> int:
+        """Stop matching injections (hidden ones only when `hidden`); returns how many were running.
+
+        With `device`, only that device's faults match; without it, every device's."""
         zone = self.zones[zone_id]
+        if device is not None:
+            self._named_device(zone, device)
+            if issubclass(REGISTRY[name], Event):
+                raise ValueError(f"{name} is an event: it changes the zone's truth and takes no device")
         matched = 0
         for injection in zone.faults + zone.events:
             if (injection.name == name and (injection.source == "hidden") == hidden
-                    and (field is None or injection.field == canonical(field)) and not injection.stopping):
+                    and (field is None or injection.field == canonical(field)) and not injection.stopping
+                    and (device is None or injection.device_id == device)):
                 injection.stop()
                 matched += 1
         self._prune()
         return matched
 
-    def calibrate(self, zone_id: str, field: str, source: str = "scenario") -> str:
+    def _calibration_device(self, zone: Zone, field: str, device: Any) -> Device:
+        if device is not None:
+            found = self._named_device(zone, device)
+            if field not in found.sensors:
+                raise ValueError(f"device {device!r} of zone {zone.cfg.zone_id} cannot be calibrated for {field!r}")
+            return found
+        return zone.carriers(field)[0]
+
+    def calibrate(self, zone_id: str, field: str, source: str = "scenario", *, device: Optional[str] = None) -> str:
         """Confirm a probe with a meter (not an injection: the truth is unchanged). Returns the field.
 
         The calibration is stamped with this tick's wall time and rides on this tick's truth line; the
-        Core publisher also posts it as a CalibrationEvent.
+        Core publisher also posts it as a CalibrationEvent. It is on `device`, else the first device that carries
+        the probe.
         """
         field = canonical(field)
         zone = self.zones[zone_id]
         if field not in zone.calibratable:
             raise ValueError(f"zone {zone_id} has no calibratable probe {field!r}; known: {zone.calibratable}")
-        zone.calibrations.append({"field": field, "at": self.now, "source": source})
+        self._calibration_device(zone, field, device).calibrations.append(
+            {"field": field, "at": self.now, "source": source})
         return field
 
     def _prune(self, zone: Optional[Zone] = None) -> None:
         for z in [zone] if zone else self.zones.values():
-            for fault in z.faults:
-                if fault.finished and fault.wrong_fields():
-                    z.recovery.append([fault.name, RECOVERY_SAMPLES])
-            z.faults = [f for f in z.faults if not f.finished]
+            for device in z.devices:
+                for fault in device.faults:
+                    if fault.finished and fault.wrong_fields():
+                        device.recovery.append([fault.name, RECOVERY_SAMPLES])
+                device.faults = [f for f in device.faults if not f.finished]
             z.events = [e for e in z.events if not e.finished]
 
     # Ticking -----------------------------------------------------------------------------
 
     def step(self) -> List[Reading]:
-        """Run one tick: scenario steps, queued commands, physics, sensors. One Reading per zone."""
+        """Run one tick: scenario steps, queued commands, physics, sensors. One Reading per device, zones in
+        config order (a one-device zone gives one per tick)."""
         with self.lock:
             return self._step()
 
@@ -741,13 +1071,15 @@ class Simulation:
         for step in self.steps:
             if step["at_tick"] == tick:
                 source = step.get("source", "scenario")
+                device = step.get("device")
                 if "calibrate" in step:
-                    self.calibrate(step["zone"], step["calibrate"], source)
+                    self.calibrate(step["zone"], step["calibrate"], source, device=device)
                 elif "start" in step:
-                    self.start(step["start"], step["zone"], step.get("field"), source=source,
+                    self.start(step["start"], step["zone"], step.get("field"), source=source, device=device,
                                **step.get("params", {}))
                 else:
-                    self.stop(step["stop"], step["zone"], step.get("field"), hidden=source == "hidden")
+                    self.stop(step["stop"], step["zone"], step.get("field"), hidden=source == "hidden",
+                              device=device)
         self._apply_commands(tick)
         sim_hours = self.start_hour + tick * self.dt_h
         readings = []
@@ -755,17 +1087,24 @@ class Simulation:
             if tick > 0:
                 zone.advance(sim_hours, self.dt_h, self.interval / 60.0)
                 self._prune(zone)  # an event that has fully ramped down is over
-            reading = self._read_zone(zone, tick, sim_hours)
-            readings.append(reading)
-            self.last_published[zone.cfg.zone_id] = reading.event is not None
-            if reading.event is not None:
-                self.last_sent[zone.cfg.zone_id] = reading.event
+            zone_readings = self._read_zone(zone, tick, sim_hours)
+            readings.extend(zone_readings)
+            for device, reading in zip(zone.devices, zone_readings):
+                key = (zone.cfg.zone_id, device.device_id)
+                self.device_published[key] = reading.event is not None
+                if reading.event is not None:
+                    self.device_sent[key] = reading.event
+            first = zone_readings[0]
+            self.last_published[zone.cfg.zone_id] = first.event is not None
+            if first.event is not None:
+                self.last_sent[zone.cfg.zone_id] = first.event
         self.tick += 1
         return readings
 
     # Control page ------------------------------------------------------------------------
 
-    def validate_start(self, name: Any, zone_id: Any, field: Any, params: Any) -> Optional[str]:
+    def validate_start(self, name: Any, zone_id: Any, field: Any, params: Any, *,
+                       device: Optional[str] = None) -> Optional[str]:
         """Build a throwaway injection so a bad request fails here, never in the tick loop."""
         if not isinstance(name, str) or name not in REGISTRY:
             raise ValueError(f"unknown injection {name!r}; known: {sorted(REGISTRY)}")
@@ -775,7 +1114,9 @@ class Simulation:
             raise ValueError("field must be a string")
         if params is not None and not isinstance(params, dict):
             raise ValueError("params must be an object")
-        return REGISTRY[name](self.zones[zone_id], field, dict(params or {}), 0, "").field
+        zone = self.zones[zone_id]
+        injection, _ = self._build(name, zone, field, dict(params or {}), 0, "", device)
+        return injection.field
 
     def applicable_zones(self, name: str) -> List[str]:
         cls = REGISTRY[name]
@@ -789,19 +1130,24 @@ class Simulation:
             zones.append(zone_id)
         return zones
 
-    def queue_start(self, name: Any, zone_id: Any, field: Any = None, params: Any = None) -> None:
-        self.validate_start(name, zone_id, field, params)
+    def queue_start(self, name: Any, zone_id: Any, field: Any = None, params: Any = None, *,
+                    device: Optional[str] = None) -> None:
+        self.validate_start(name, zone_id, field, params, device=device)
         self._queue({"op": "start", "name": name, "zone": zone_id, "field": field,
-                     "params": dict(params or {}), "source": "manual"})
+                     "params": dict(params or {}), "source": "manual", "device": device})
 
-    def queue_stop(self, name: Any, zone_id: Any, field: Any = None) -> None:
+    def queue_stop(self, name: Any, zone_id: Any, field: Any = None, *, device: Optional[str] = None) -> None:
         if not isinstance(name, str) or name not in REGISTRY:
             raise ValueError(f"unknown injection {name!r}")
         if not isinstance(zone_id, str) or zone_id not in self.zones:
             raise ValueError(f"unknown zone {zone_id!r}")
         if field is not None and not isinstance(field, str):
             raise ValueError("field must be a string")
-        self._queue({"op": "stop", "name": name, "zone": zone_id, "field": field})
+        if device is not None:
+            self._named_device(self.zones[zone_id], device)
+            if issubclass(REGISTRY[name], Event):
+                raise ValueError(f"{name} is an event: it changes the zone's truth and takes no device")
+        self._queue({"op": "stop", "name": name, "zone": zone_id, "field": field, "device": device})
 
     def queue_stop_hidden(self, hidden_id: Any) -> None:
         with self.lock:
@@ -809,37 +1155,74 @@ class Simulation:
                 raise ValueError(f"unknown hidden id {hidden_id!r}")
             self.pending.append({"op": "stop_hidden", "id": hidden_id})
 
-    def queue_calibrate(self, zone_id: Any, field: Any) -> None:
+    def queue_calibrate(self, zone_id: Any, field: Any, *, device: Optional[str] = None) -> None:
         if not isinstance(zone_id, str) or zone_id not in self.zones:
             raise ValueError(f"unknown zone {zone_id!r}; known: {sorted(self.zones)}")
         if not isinstance(field, str) or canonical(field) not in self.zones[zone_id].calibratable:
             raise ValueError(f"{field!r} cannot be calibrated in {zone_id}; known: {self.zones[zone_id].calibratable}")
-        self._queue({"op": "calibrate", "zone": zone_id, "field": canonical(field)})
+        if device is not None:
+            self._calibration_device(self.zones[zone_id], canonical(field), device)
+        self._queue({"op": "calibrate", "zone": zone_id, "field": canonical(field), "device": device})
 
     def queue_stop_all(self) -> None:
         self._queue({"op": "stop_all"})
 
     def queue_hidden(self) -> int:
-        """Queue one random applicable injection from the dedicated hidden RNG; returns its id."""
+        """Queue one random applicable injection from the dedicated hidden RNG; returns its id.
+
+        With no multi-device zone this is the original algorithm, draw for draw. With one, the candidates are
+        (name, zone, device) triples (events have no device), one `choice` picks a triple, and a fault that needs a
+        field draws it among that device's probes.
+        """
         with self.lock:
-            taken = {(i.name, i.zone_id) for z in self.zones.values() for i in z.faults + z.events
-                     if i.source == "hidden"}
-            taken |= {(c["name"], c["zone"]) for c in self.pending if c["op"] == "start" and c["source"] == "hidden"}
-            candidates = [(name, zone_id) for name in REGISTRY if REGISTRY[name].hideable
-                          for zone_id in self.applicable_zones(name) if (name, zone_id) not in taken]
-            if not candidates:
-                raise ValueError("every applicable injection is already running hidden")
-            name, zone_id = self.hidden_rng.choice(candidates)
+            multi = any(z.multi for z in self.zones.values())
+            if not multi:
+                taken = {(i.name, i.zone_id) for z in self.zones.values() for i in z.faults + z.events
+                         if i.source == "hidden"}
+                taken |= {(c["name"], c["zone"]) for c in self.pending
+                          if c["op"] == "start" and c["source"] == "hidden"}
+                candidates = [(name, zone_id) for name in REGISTRY if REGISTRY[name].hideable
+                              for zone_id in self.applicable_zones(name) if (name, zone_id) not in taken]
+                if not candidates:
+                    raise ValueError("every applicable injection is already running hidden")
+                name, zone_id = self.hidden_rng.choice(candidates)
+                device_id = None
+            else:
+                taken3 = {(i.name, i.zone_id, i.device_id) for z in self.zones.values() for i in z.faults + z.events
+                          if i.source == "hidden"}
+                taken3 |= {(c["name"], c["zone"], c.get("device")) for c in self.pending
+                           if c["op"] == "start" and c["source"] == "hidden"}
+                candidates3 = [(name, zone_id, device_id) for name in REGISTRY if REGISTRY[name].hideable
+                               for zone_id in self.applicable_zones(name)
+                               for device_id in self._hideable_devices(REGISTRY[name], self.zones[zone_id])
+                               if (name, zone_id, device_id) not in taken3]
+                if not candidates3:
+                    raise ValueError("every applicable injection is already running hidden")
+                name, zone_id, device_id = self.hidden_rng.choice(candidates3)
             cls = REGISTRY[name]
             field = cls.default_field
             if cls.needs_field:
-                field = self.hidden_rng.choice(list(self.zones[zone_id].cfg.sensors))
+                pool = self.zones[zone_id].cfg.sensors if not multi else self.zones[zone_id].device(device_id).sensors
+                field = self.hidden_rng.choice(list(pool))
             hidden_id = len(self.hidden_log) + 1
-            self.hidden_log.append({"id": hidden_id, "name": name, "zone": zone_id, "field": field,
-                                    "queued_tick": self.tick, "started_tick": None})
-            self.pending.append({"op": "start", "name": name, "zone": zone_id, "field": field, "params": {},
-                                 "source": "hidden", "hidden_id": hidden_id})
+            entry = {"id": hidden_id, "name": name, "zone": zone_id, "field": field,
+                     "queued_tick": self.tick, "started_tick": None}
+            command = {"op": "start", "name": name, "zone": zone_id, "field": field, "params": {},
+                       "source": "hidden", "hidden_id": hidden_id, "device": device_id}
+            if self.zones[zone_id].multi:
+                entry["device"] = device_id
+            self.hidden_log.append(entry)
+            self.pending.append(command)
             return hidden_id
+
+    @staticmethod
+    def _hideable_devices(cls: type, zone: Zone) -> List[Optional[str]]:
+        """The devices of `zone` that can take this injection ([None] for an event: it takes no device)."""
+        if issubclass(cls, Event):
+            return [None]
+        if cls.default_field is not None:
+            return [d.device_id for d in zone.carriers(cls.default_field)]
+        return [d.device_id for d in zone.devices]  # needs a field (any probe) or takes none (whole device)
 
     def reveal(self) -> List[Dict[str, Any]]:
         """From now on the state shows hidden injections by name. Returns every one started so far."""
@@ -853,8 +1236,10 @@ class Simulation:
             self.pending.append(command)
 
     def _record(self, tick: int, op: str, name: str, zone_id: str, field: Optional[str],
-                params: Optional[Dict[str, Any]], source: str) -> None:
+                params: Optional[Dict[str, Any]], source: str, device: Optional[str] = None) -> None:
         step: Dict[str, Any] = {"at_tick": tick, op: name, "zone": zone_id}
+        if device and self.zones[zone_id].multi:  # a one-device zone never carries a device
+            step["device"] = device
         if field:
             step["field"] = field
         if params:
@@ -869,37 +1254,50 @@ class Simulation:
             if cmd["op"] == "start":
                 try:
                     injection = self.start(cmd["name"], cmd["zone"], cmd["field"], source=cmd["source"],
-                                           **cmd["params"])
+                                           device=cmd.get("device"), **cmd["params"])
                 except ValueError:
                     continue
                 if cmd["source"] == "hidden" and injection.hidden_id is None:
                     injection.hidden_id = cmd["hidden_id"]
                     self.hidden_log[cmd["hidden_id"] - 1]["started_tick"] = tick
                 self._record(tick, "start", injection.name, cmd["zone"], injection.field, cmd["params"],
-                             cmd["source"])
+                             cmd["source"], injection.device_id)
             elif cmd["op"] == "stop":
-                if self.stop(cmd["name"], cmd["zone"], cmd["field"]):
-                    self._record(tick, "stop", cmd["name"], cmd["zone"], cmd["field"], None, "manual")
+                if self.stop(cmd["name"], cmd["zone"], cmd["field"], device=cmd.get("device")):
+                    self._record(tick, "stop", cmd["name"], cmd["zone"], cmd["field"], None, "manual",
+                                 cmd.get("device"))
             elif cmd["op"] == "calibrate":
-                self.calibrate(cmd["zone"], cmd["field"], "manual")
-                self._record(tick, "calibrate", cmd["field"], cmd["zone"], None, None, "manual")
+                device = self._calibration_device(self.zones[cmd["zone"]], cmd["field"], cmd.get("device"))
+                self.calibrate(cmd["zone"], cmd["field"], "manual", device=device.device_id)
+                self._record(tick, "calibrate", cmd["field"], cmd["zone"], None, None, "manual", device.device_id)
             elif cmd["op"] == "stop_hidden":
                 found = [i for z in self.zones.values() for i in z.faults + z.events
                          if i.hidden_id == cmd["id"] and not i.stopping]
                 for injection in found:
-                    if self.stop(injection.name, injection.zone_id, injection.field, hidden=True):
-                        self._record(tick, "stop", injection.name, injection.zone_id, injection.field, None, "hidden")
+                    if self.stop(injection.name, injection.zone_id, injection.field, hidden=True,
+                                 device=injection.device_id):
+                        self._record(tick, "stop", injection.name, injection.zone_id, injection.field, None, "hidden",
+                                     injection.device_id)
             else:  # stop_all
-                running = [(i.name, i.zone_id, i.field, i.source) for z in self.zones.values()
+                running = [(i.name, i.zone_id, i.field, i.source, i.device_id) for z in self.zones.values()
                            for i in z.faults + z.events if not i.stopping]
-                for name, zone_id, field, source in running:
-                    if self.stop(name, zone_id, field, hidden=source == "hidden"):
-                        self._record(tick, "stop", name, zone_id, field, None, source)
+                for name, zone_id, field, source, device_id in running:
+                    if self.stop(name, zone_id, field, hidden=source == "hidden", device=device_id):
+                        self._record(tick, "stop", name, zone_id, field, None, source, device_id)
 
     def catalog(self) -> Dict[str, Any]:
+        zones = []
+        for z in self.zones.values():
+            entry: Dict[str, Any] = {
+                "zone_id": z.cfg.zone_id, "device_id": z.devices[0].device_id, "system_type": z.cfg.system_type,
+                "sensors": list(z.cfg.sensors), "calibratable": z.calibratable}
+            if z.multi:
+                entry["devices"] = [{"device_id": d.device_id, "sensors": list(d.sensors),
+                                     "calibratable": [f for f in CALIBRATABLE if f in d.sensors]}
+                                    for d in z.devices]
+            zones.append(entry)
         return {
-            "zones": [{"zone_id": z.cfg.zone_id, "device_id": z.cfg.device_id, "system_type": z.cfg.system_type,
-                       "sensors": list(z.cfg.sensors), "calibratable": z.calibratable} for z in self.zones.values()],
+            "zones": zones,
             "injections": [{"name": name, "kind": cls.kind, "description": cls.description,
                             "takes_field": cls.takes_field(), "needs_field": cls.needs_field,
                             "default_field": cls.default_field, "zones": self.applicable_zones(name),
@@ -911,119 +1309,164 @@ class Simulation:
         with self.lock:
             zones = []
             for zone_id, zone in self.zones.items():
+                first = zone.devices[0]
                 running = [i for i in zone.faults + zone.events if i.source != "hidden"]
-                zones.append({
-                    "zone_id": zone_id, "device_id": zone.cfg.device_id, "system_type": zone.cfg.system_type,
-                    "sequence": zone.sequence - 1 if zone.sequence else None,
+                entry: Dict[str, Any] = {
+                    "zone_id": zone_id, "device_id": first.device_id, "system_type": zone.cfg.system_type,
+                    "sequence": first.sequence - 1 if first.sequence else None,
                     "published": self.last_published.get(zone_id),
                     "last_sent": self.last_sent.get(zone_id),
-                    "injections": [{"name": i.name, "field": i.field, "started_tick": i.started_tick,
-                                    "stopping": i.stopping, "source": i.source} for i in running],
-                })
+                    "injections": [self._injection_entry(i, zone.multi) for i in running],
+                }
+                if zone.multi:
+                    entry["devices"] = [{
+                        "device_id": d.device_id, "sensors": list(d.sensors),
+                        "sequence": d.sequence - 1 if d.sequence else None,
+                        "published": self.device_published.get((zone_id, d.device_id)),
+                        "last_sent": self.device_sent.get((zone_id, d.device_id)),
+                        "injections": [self._injection_entry(i, False) for i in d.faults if i.source != "hidden"],
+                    } for d in zone.devices]
+                zones.append(entry)
             hidden = []
             for i in (i for z in self.zones.values() for i in z.faults + z.events if i.source == "hidden"):
-                entry: Dict[str, Any] = {"hidden": True, "id": i.hidden_id}
+                entry = {"hidden": True, "id": i.hidden_id}
                 if self.revealed:
                     entry.update(name=i.name, zone=i.zone_id, field=i.field, started_tick=i.started_tick,
                                  stopping=i.stopping)
+                    if self.zones[i.zone_id].multi:
+                        entry["device"] = i.device_id
                 hidden.append(entry)
             for cmd in self.pending:
                 if cmd["op"] == "start" and cmd["source"] == "hidden":
                     entry = {"hidden": True, "id": cmd["hidden_id"], "queued": True}
                     if self.revealed:
                         entry.update(name=cmd["name"], zone=cmd["zone"], field=cmd["field"])
+                        if self.zones[cmd["zone"]].multi:
+                            entry["device"] = cmd.get("device")
                     hidden.append(entry)
             due = None if self.next_tick_due is None else round(max(0.0, self.next_tick_due - time.monotonic()), 1)
+            pending = []
+            for c in self.pending:
+                if c["op"] in ("start", "stop") and c.get("source") != "hidden":
+                    item = {"op": c["op"], "name": c["name"], "zone": c["zone"], "field": c["field"]}
+                    if c.get("device"):
+                        item["device"] = c["device"]
+                    pending.append(item)
             return {
                 "tick": self.tick, "interval": self.interval, "seconds_to_next_tick": due,
                 "revealed": self.revealed, "queued": len(self.pending), "recorded": len(self.recorded),
-                "pending": [{"op": c["op"], "name": c["name"], "zone": c["zone"], "field": c["field"]}
-                            for c in self.pending if c["op"] in ("start", "stop") and c.get("source") != "hidden"],
-                "zones": zones, "hidden": hidden,
+                "pending": pending, "zones": zones, "hidden": hidden,
             }
+
+    @staticmethod
+    def _injection_entry(i: Injection, with_device: bool) -> Dict[str, Any]:
+        entry = {"name": i.name, "field": i.field, "started_tick": i.started_tick,
+                 "stopping": i.stopping, "source": i.source}
+        if with_device and i.device_id is not None:  # a fault in a multi-device zone; events have none
+            entry["device"] = i.device_id
+        return entry
 
     def session_scenario(self) -> Dict[str, Any]:
         """The original scenario steps merged with the manual ones. Contains the answer key."""
         with self.lock:
             steps = sorted([dict(s) for s in self.steps] + [dict(s) for s in self.recorded],
                            key=lambda s: s["at_tick"])  # stable: scenario steps stay before manual ones
-            return {"seed": self.seed,
-                    "duration_ticks": self.duration_ticks if self.duration_ticks is not None else self.tick,
-                    "run": {"interval": self.interval, "sim_speed": self.sim_speed, "start_hour": self.start_hour},
-                    "steps": steps}
+            session = {"seed": self.seed,
+                       "duration_ticks": self.duration_ticks if self.duration_ticks is not None else self.tick,
+                       "run": {"interval": self.interval, "sim_speed": self.sim_speed, "start_hour": self.start_hour}}
+            if self.has_layout:  # only when the scenario had the key, so every other session keeps its bytes
+                session["devices"] = json.loads(json.dumps(self.layout))
+            session["steps"] = steps
+            return session
 
-    def _read_zone(self, zone: Zone, tick: int, sim_hours: float) -> Reading:
+    def _read_zone(self, zone: Zone, tick: int, sim_hours: float) -> List[Reading]:
+        """One Reading per device of the zone, in device order. Truth and events are the zone's; the rest the device's."""
         cfg = zone.cfg
         hour = sim_hours % 24.0
         for fault in zone.faults:
             fault.elapsed_min = (tick - fault.started_tick) * self.interval / 60.0
-        recovering = sorted({name for name, _ in zone.recovery})
         true = zone.true_values(hour)
-        sent = zone.sample(true)
-        dropout = any(f.drops for f in zone.faults)
-        dead = any(f.dead_clock for f in zone.faults)
-        event = None
-        silent = [] if dropout else zone.silent_fields()
-        if not dropout:
-            event = zone.build_event(sent, self.farm_id, DEAD_CLOCK_TIMESTAMP if dead else self.now)
-            zone.sequence += 1
-            zone.last_sent.update(sent)
-            if not dead:  # Core keeps only accepted samples in the history (a partial packet is accepted)
-                for entry in zone.recovery:
-                    entry[1] -= 1
-                zone.recovery = [e for e in zone.recovery if e[1] > 0]
-
-        calibrations = [{**c, "raw": sent[c["field"]], "reference": true[c["field"]]} for c in zone.calibrations]
-        zone.calibrations = []
-        wrong = sorted({name for f in zone.faults for name in f.wrong_fields()})
-        onset_step = any(f.name == "plausible_offset" and 0 < f.started_tick and tick - f.started_tick < RECOVERY_SAMPLES
-                         for f in zone.faults)
-        sensor_faulty = any(f.wrong_fields() for f in zone.faults)
-        if dropout:
-            kind = "not_published"
-        elif dead:
-            kind = "rejected_by_core"
-        elif sensor_faulty and zone.events:
-            kind = "both"
-        elif sensor_faulty:
-            kind = "sensor_fault"
-        elif zone.events:
-            kind = "real_event"
-        else:
-            kind = "normal"
-
+        sent_by_device = zone.sample(true)
+        labels = expected_labels(true)
         sim_time = datetime(SIM_EPOCH.year, SIM_EPOCH.month, SIM_EPOCH.day) + timedelta(hours=sim_hours)
-        truth = {
-            "tick": tick,
-            "wall_timestamp": self.now,
-            "sim_time": sim_time.isoformat(timespec="seconds"),
-            "sim_day": int(sim_hours // 24),
-            "sim_hour": round(hour, 3),
-            "zone_id": cfg.zone_id,
-            "device_id": cfg.device_id,
-            "published": event is not None,
-            "reason": "dropout" if dropout else None,
-            "sequence": event["sequence"] if event else None,
-            "true": true,
-            "sent": event,
-            "active_faults": [f.describe() for f in zone.faults],
-            "active_events": [e.describe() for e in zone.events],
-            "placeholder_fields": zone.placeholder_fields,
-            "expect": {
-                "kind": kind,
-                "expected_labels": expected_labels(true),
-                "forbid_domain_cards_from": wrong,
-                "detectable": all(f.detectable for f in zone.faults),
-                "onset_step": onset_step,
-                "recovering_from": recovering,
-            },
-        }
-        if silent:  # only while a probe is silent, so other truth lines stay as they were
-            truth["expect"]["silent_fields"] = [f for f in silent if f != "substrate_moisture_pct"]
-        if calibrations:  # only on the tick a calibration happened, so other truth lines stay as they were
-            truth["calibrations"] = [{"field": c["field"], "at": c["at"], "source": c["source"]} for c in calibrations]
-        topic = f"pomona/{self.farm_id}/{cfg.zone_id}/sensor/{cfg.device_id}/state"
-        return Reading(topic, event, truth, calibrations or None)
+        readings = []
+        for device, sent in zip(zone.devices, sent_by_device):
+            recovering = sorted({name for name, _ in device.recovery})
+            dropout = any(f.drops for f in device.faults)
+            dead = any(f.dead_clock for f in device.faults)
+            event = None
+            silent = [] if dropout else device.silent_fields()
+            if not dropout:
+                event = zone.build_event(device, sent, self.farm_id, DEAD_CLOCK_TIMESTAMP if dead else self.now)
+                device.sequence += 1
+                device.last_sent.update(sent)
+                if not dead:  # Core keeps only accepted samples in the history (a partial packet is accepted)
+                    for entry in device.recovery:
+                        entry[1] -= 1
+                    device.recovery = [e for e in device.recovery if e[1] > 0]
+
+            calibrations = [{**c, "raw": sent[c["field"]], "reference": zone.reference(device, true, c["field"])}
+                            for c in device.calibrations]
+            device.calibrations = []
+            wrong = sorted({name for f in device.faults for name in f.wrong_fields()})
+            onset_step = any(f.name == "plausible_offset" and 0 < f.started_tick
+                             and tick - f.started_tick < RECOVERY_SAMPLES for f in device.faults)
+            sensor_faulty = any(f.wrong_fields() for f in device.faults)
+            if dropout:
+                kind = "not_published"
+            elif dead:
+                kind = "rejected_by_core"
+            elif sensor_faulty and zone.events:
+                kind = "both"
+            elif sensor_faulty:
+                kind = "sensor_fault"
+            elif zone.events:
+                kind = "real_event"
+            else:
+                kind = "normal"
+
+            extra: Dict[str, Any] = {}  # new keys, in multi-device zones only
+            device_labels: Dict[str, Any] = {}
+            if zone.multi:
+                extra["sensors"] = list(device.sensors)
+                if device.offsets or device.wander:
+                    extra["device_offset"] = device.device_offset()
+                device_labels["device_labels"] = expected_labels(true, fields=device.sensors)
+            truth = {
+                "tick": tick,
+                "wall_timestamp": self.now,
+                "sim_time": sim_time.isoformat(timespec="seconds"),
+                "sim_day": int(sim_hours // 24),
+                "sim_hour": round(hour, 3),
+                "zone_id": cfg.zone_id,
+                "device_id": device.device_id,
+                "published": event is not None,
+                "reason": "dropout" if dropout else None,
+                "sequence": event["sequence"] if event else None,
+                "true": dict(true) if zone.multi else true,
+                "sent": event,
+                "active_faults": [f.describe() for f in device.faults],
+                "active_events": [e.describe() for e in zone.events],
+                "placeholder_fields": zone.placeholder_fields,
+                **extra,
+                "expect": {
+                    "kind": kind,
+                    "expected_labels": list(labels) if zone.multi else labels,
+                    "forbid_domain_cards_from": wrong,
+                    "detectable": all(f.detectable for f in device.faults),
+                    "onset_step": onset_step,
+                    "recovering_from": recovering,
+                    **device_labels,
+                },
+            }
+            if silent:  # only while a probe is silent, so other truth lines stay as they were
+                truth["expect"]["silent_fields"] = [f for f in silent if f != "substrate_moisture_pct"]
+            if calibrations:  # only on the tick a calibration happened, so other truth lines stay as they were
+                truth["calibrations"] = [{"field": c["field"], "at": c["at"], "source": c["source"]}
+                                         for c in calibrations]
+            topic = f"pomona/{self.farm_id}/{cfg.zone_id}/sensor/{device.device_id}/state"
+            readings.append(Reading(topic, event, truth, calibrations or None))
+        return readings
 
 
 # --- Control page -------------------------------------------------------------------------
@@ -1102,14 +1545,15 @@ class ControlHandler(BaseHTTPRequestHandler):
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         sim = self.sim
         if path == "/api/start":
-            sim.queue_start(body.get("name"), body.get("zone"), body.get("field"), body.get("params"))
+            sim.queue_start(body.get("name"), body.get("zone"), body.get("field"), body.get("params"),
+                            device=body.get("device"))
         elif path == "/api/stop":
             if "id" in body:
                 sim.queue_stop_hidden(body["id"])
             else:
-                sim.queue_stop(body.get("name"), body.get("zone"), body.get("field"))
+                sim.queue_stop(body.get("name"), body.get("zone"), body.get("field"), device=body.get("device"))
         elif path == "/api/calibrate":
-            sim.queue_calibrate(body.get("zone"), body.get("field"))
+            sim.queue_calibrate(body.get("zone"), body.get("field"), device=body.get("device"))
         elif path == "/api/stop_all":
             sim.queue_stop_all()
         elif path == "/api/hidden":
@@ -1211,9 +1655,10 @@ def summary_line(reading: Reading) -> str:
     delivery = truth.get("delivery")
     if delivery and delivery["status"] not in (200, 201):
         suffix += f" core={delivery['status']}"
+    where = truth["zone_id"] + (f" device={truth['device_id']}" if "sensors" in truth else "")  # multi-device rows only
     if event is None:
-        return f"tick {truth['tick']} {truth['zone_id']} not published ({truth['reason']}){suffix}"
-    return (f"tick {truth['tick']} {truth['zone_id']} seq={event['sequence']} "
+        return f"tick {truth['tick']} {where} not published ({truth['reason']}){suffix}"
+    return (f"tick {truth['tick']} {where} seq={event['sequence']} "
             f"temp={event.get('air_temperature_c')} rh={event.get('humidity_pct')} ec={event.get('ec_ms_cm')} "
             f"ph={event.get('ph')} moisture={event.get('soil_moisture_pct')}{suffix}")
 

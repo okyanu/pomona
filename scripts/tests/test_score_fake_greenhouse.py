@@ -1,5 +1,6 @@
 """Tests for the fake greenhouse scorer. Run with the model-router venv (offline mode imports its pipeline)."""
 
+import copy
 import json
 import sys
 import threading
@@ -390,7 +391,8 @@ class FakeStack(BaseHTTPRequestHandler):
             events = self.alerts.get(query["zone_id"], [])[:int(query["limit"])]
             body = {"count": 0, "alerts": [], "events": events}
         else:
-            body = {"count": 0, "events": [{"timestamp": t} for t in self.stored.get(query["zone_id"], [])]}
+            body = {"count": 0, "events": [{"timestamp": t} if isinstance(t, str) else t  # a dict carries a device_id
+                                           for t in self.stored.get(query["zone_id"], [])]}
         data = json.dumps(body).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -634,3 +636,484 @@ def test_the_pipeline_alone_would_say_cant_confirm_for_a_probe_that_is_missing()
             assert "missing_ec" in got["labels"] and got["trust"] != "trusted"
             raised_events += got["alert_events"]
         assert [(e["rule_id"], e["event"]) for e in raised_events] == [("sensor_check", "raised")]
+
+
+# --- Multi-device zones: every join keyed by device (docs/design/multi-device-zones-slice3.md 3.5) -----------------
+# Hand-built rows in the truth log's multi-device row format (3.2): a row per device per tick, with `device_id`, the
+# device's `sensors` and `expect.device_labels`. Zone A has the devices below; zone B stays a single stream.
+
+C1, C2, S1, S2 = "climate-1", "climate-2", "substrate-1", "substrate-2"
+CLIMATE_PROBES = ["air_temperature_c", "humidity_pct"]
+LAYOUT = {C1: CLIMATE_PROBES, C2: CLIMATE_PROBES,
+          S1: ["ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c"],
+          S2: ["soil_moisture_pct"]}  # a second moisture probe (the pair case)
+
+
+def drow(tick, device, zone=A, sensors=None, device_labels=None, **kw):
+    """One device's truth row of a multi-device zone (`row()` arguments as ever)."""
+    out = row(tick, zone, **kw)
+    out["device_id"] = device
+    if out["sent"]:
+        out["sent"]["device_id"] = device
+    out["sensors"] = list(LAYOUT[device] if sensors is None else sensors)
+    out["expect"]["device_labels"] = list(kw.get("expected", ()) if device_labels is None else device_labels)
+    return out
+
+
+def trio(total=80, zone=A, devices=(C1, C2, S1), per=None, shared=None):
+    """Rows for `total` ticks, one per device per tick. `shared` and each `per[device]` are `row()` arguments, or a
+    function of the tick returning them."""
+    per, shared = per or {}, shared or {}
+    out = []
+    for tick in range(total):
+        for device in devices:
+            kw = {}
+            for source in (shared, per.get(device) or {}):
+                kw.update(source(tick) if callable(source) else source)
+            out.append(drow(tick, device, zone, **kw))
+    return out
+
+
+def during(start, end, **kw):
+    return lambda tick: kw if start <= tick <= end else {}
+
+
+def silent_run(field="ec_ms_cm", start=10, end=100):
+    """`row()` arguments of a device whose `field` probe is silent (probe_dropout) from start to end."""
+    return lambda tick: {"faults": [("probe_dropout", field)]} if start <= tick <= end else {}
+
+
+def stuck(field="humidity_pct", name="stuck", start=5, end=45, tail=11):
+    """`row()` arguments of one device's fault: active start..end, then its recovering_from tail."""
+    def at(tick):
+        if start <= tick <= end:
+            return {"faults": [(name, field)], "forbid": [field]}
+        return {"recovering": [name]} if end < tick <= end + tail else {}
+    return at
+
+
+def draised(rule, tick, device, zone=A, event="raised", detail=None):
+    out = {**raised(zone, rule, tick), "device_id": device, "event": event}
+    if detail:
+        out["detail"] = detail
+    return out
+
+
+def dinfo(device, ticks, vetoed=(), labels=(), zone=A):
+    """Offline per-reading results of a multi-device zone: keyed (zone, device, tick)."""
+    return {(zone, device, t): {"labels": list(labels), "trust": "partial", "vetoed_fields": list(vetoed),
+                                "card_labels": [], "sensor_check_labels": ["baseline_drift_possible"]} for t in ticks}
+
+
+def mgrade(rows, events, info=None):
+    return score.Grader(rows, events, RULES, DEFAULTS, info).report()
+
+
+def test_two_devices_at_the_same_tick_do_not_collide():
+    rows = trio(60)
+    events = [draised("sensor_check", 25, S1), draised("sensor_check", 25, C1)]  # one sample time, two streams
+    grader = score.Grader(rows, events, RULES, DEFAULTS)
+    assert grader.unmatched == [] and len(grader.by_sample) == 60 * 3
+    assert [r["device"] for r in grader.raises] == [C1, S1]  # sorted by (time, rule, device), not by event order
+    assert grader.multi == {A: [C1, C2, S1]}
+    report = grader.report()
+    assert report["frames"]["total"] == 180 and report["summary"]["unmatched_events"] == 0
+    assert [(a["device"], a["tick"]) for a in report["false_alarms"]] == [(C1, 25), (S1, 25)]
+    assert mgrade(rows, events[::-1])["false_alarms"] == report["false_alarms"]
+
+
+def test_each_raise_records_its_device_and_detail_and_a_recovery_closes_its_own_incident():
+    events = [draised("sensor_check", 20, S1, detail="check the pH probe"), draised("sensor_check", 20, C1),
+              draised("sensor_check", 40, C1, event="recovered")]
+    c1, s1 = score.Grader(trio(60), events, RULES, DEFAULTS).raises
+    assert (c1["device"], s1["device"], s1["detail"], "detail" in c1) == (C1, S1, "check the pH probe", False)
+    assert c1["until"] is not None and s1["until"] is None  # the recovery on climate-1 closed only climate-1's card
+    # A single-stream zone ignores the device: no device or detail key leaks into its report.
+    single = grade(fault_rows(), [{**raised(A, "sensor_check", 30), "device_id": "other", "detail": "x"}])
+    assert set(single["fault_episodes"][0]["raised"]) == {"rule", "time", "tick", "delay_s", "delay_samples", "already_active"}
+    # In a multi-device zone the report carries the device and the detail.
+    got = mgrade(trio(80, per={C1: stuck()}), [draised("sensor_check", 30, C1, detail="verify humidity on climate-2")])
+    assert got["fault_episodes"][0]["raised"]["device"] == C1
+    assert got["fault_episodes"][0]["raised"]["detail"] == "verify humidity on climate-2"
+
+
+def test_an_event_without_device_id_joins_a_single_stream_zone_and_is_unmatched_in_a_multi_device_zone():
+    rows = real_rows(zone=B) + trio(80)  # zone B: one stream; zone A: three
+    grader = score.Grader(rows, [raised(B, "high_ec_alert", 32), raised(A, "high_ec_alert", 32),
+                                 {**raised(B, "sensor_check", 33), "device_id": "not-the-log's-device"}], RULES, DEFAULTS)
+    assert [(r["zone"], r["rule"]) for r in grader.raises] == [(B, "high_ec_alert"), (B, "sensor_check")]
+    assert [e["zone_id"] for e in grader.unmatched] == [A]  # the device is ignored in B, required in A
+    assert grader.report()["summary"]["unmatched_events"] == 1
+    # The same event with a device id of the zone joins.
+    assert score.Grader(rows, [draised("high_ec_alert", 32, S1)], RULES, DEFAULTS).unmatched == []
+
+
+def test_a_row_without_a_device_id_is_no_device_so_a_zone_with_one_id_is_single_stream():
+    rows = real_rows(zone=B)  # every row carries dev-greenhouse-b
+    for r in rows[::2]:
+        r["device_id"] = None  # rows the producer sent without a device id
+    assert score.multi_device_zones(rows) == {}
+    grader = score.Grader(rows, [raised(B, "high_ec_alert", 32)], RULES, DEFAULTS)  # the event has no device id either
+    assert grader.multi == {} and grader.unmatched == []
+    assert grader.report()["real_episodes"][0]["outcome"] == "caught"
+    # Two real ids make a zone multi-device, and its None rows are not a third device.
+    assert score.multi_device_zones(trio(3) + [{**row(0, A), "device_id": None}]) == {A: [C1, C2, S1]}
+
+
+def test_frame_info_keys_are_zone_tick_for_a_single_stream_zone_and_zone_device_tick_for_a_multi_device_zone():
+    single = score.Grader([row(0, B, kind="normal")], [], RULES, DEFAULTS, frame_info(B, [0], ["ph"])).reading_level()
+    assert single["normal_frames"] == 1 and single["normal_with_sensor_check_outside_tail"] == 1
+    multi_rows = trio(1)
+    level = score.Grader(multi_rows, [], RULES, DEFAULTS, dinfo(C1, [0])).reading_level()
+    assert level["normal_frames"] == 1 and level["normal_with_sensor_check_outside_tail"] == 1  # only climate-1 has a result
+    with pytest.raises(ValueError, match="no device"):
+        score.Grader(multi_rows, [], RULES, DEFAULTS, frame_info(A, [0], []))  # a (zone, tick) key in a multi-device zone
+    # The same two-tuple key is fine next door, in a zone with one device id.
+    score.Grader(multi_rows + [row(0, B)], [], RULES, DEFAULTS, frame_info(B, [0], []))
+    # A single-stream zone also takes a (zone, device, tick) key: the device is ignored there, so it reads as (zone, tick).
+    keyed = {(B, "any-device-id", 0): frame_info(B, [0], ["ph"])[(B, 0)]}
+    assert score.Grader([row(0, B, kind="normal")], [], RULES, DEFAULTS, keyed).reading_level() == single
+
+
+def test_a_card_on_any_device_catches_a_real_event_and_the_report_names_the_device():
+    rows = trio(80, shared=during(10, 60, expected=["high_ec"], events=["ev"]))
+    for device in (C1, S1):  # the climate device has no EC probe, yet its card is a card for the zone
+        report = mgrade(rows, [draised("high_ec_alert", 32, device)])
+        (ep,) = report["real_episodes"]
+        assert ep["outcome"] == "caught" and ep["raised"]["device"] == device
+        assert (ep["raised"]["delay_s"], ep["raised"]["delay_samples"]) == (660.0, 22)
+        assert report["summary"]["false_alarms"] == 0
+    both = mgrade(rows, [draised("high_ec_alert", 32, C1), draised("high_ec_alert", 40, S1)])
+    assert both["summary"]["false_alarms"] == 0  # a real event exempts the raises of every device of its zone
+    text = score.markdown(mgrade(rows, [draised("high_ec_alert", 32, C1)]), "stack", Path("t"))
+    assert "high_ec_alert at 12:16:00 (+660 s, 22 samples) on climate-1 | caught" in text
+    assert "| greenhouse-a | 12:05:00 |" in text  # a real event's Zone column stays the zone
+
+
+def test_a_sensor_card_counts_on_the_faulted_device():
+    rows = trio(80, per={C1: stuck()})
+    report = mgrade(rows, [draised("sensor_check", 30, C1)])
+    (ep,) = report["fault_episodes"]  # one episode: the stuck probe on climate-1 (the other rows carry no fault)
+    assert ep["outcome"] == "caught" and ep["device"] == C1 and ep["partners"] == [C2]
+    assert ep["raised"]["device"] == C1 and ep["raised_on_partner"] is None
+    # A fault's "raised" text does not name the device (the Zone column already shows zone · device).
+    assert score.raised_text(ep) == "sensor_check at 12:15:00 (+750 s, 25 samples)"
+    sensor = report["summary"]["sensor_fault_episodes"]
+    assert (sensor["total"], sensor["sensor_check_caught"], sensor["sensor_check_caught_on_partner"]) == (1, 1, 0)
+    assert report["summary"]["false_alarms"] == 0
+    # The same fault with no card at all is missed.
+    assert mgrade(rows, [])["fault_episodes"][0]["outcome"] == "missed"
+
+
+def test_a_partner_card_in_a_fault_too_short_to_raise_counts_only_when_it_is_about_the_field():
+    rows = trio(80, per={C1: stuck(start=5, end=10)})  # active 5..10, then the tail: 16 readings, 480 s, raise_after 600 s
+    partner = [draised("sensor_check", 12, C2)]
+    assert mgrade(rows, [])["fault_episodes"][0]["outcome"] == "too_short_to_raise"
+    # Stack mode has no per-reading results, so the partner's card counts (the partner outranks too_short_to_raise).
+    stack = mgrade(rows, partner)["fault_episodes"][0]
+    assert (stack["outcome"], stack["duration_s"]) == ("caught_on_partner", 480.0)
+    # Offline the partner's card is about the fault's field only if its label run says so: a card for air temperature
+    # is no catch, so the short fault stays too short to raise.
+    short = mgrade(rows, partner, dinfo(C2, range(10, 13), vetoed=["air_temperature_c"]))["fault_episodes"][0]
+    assert (short["outcome"], short["raised_on_partner"]) == ("too_short_to_raise", None)
+
+
+def test_a_partner_card_that_does_not_count_leaves_a_long_fault_missed_offline():
+    rows = trio(80, per={C1: stuck()})  # active 5..45, tail to 56: 51 readings, long enough to raise
+    outcome = lambda events, info: mgrade(rows, events, info)["fault_episodes"][0]["outcome"]
+    # The partner's label run began after the fault ended (its readings 50..52): the snap back, not the lie.
+    assert outcome([draised("sensor_check", 52, C2)], dinfo(C2, range(50, 53), vetoed=["humidity_pct"])) == "missed"
+    # A card about another field on the partner (air temperature, the run at 28..30) is no catch for humidity.
+    assert outcome([draised("sensor_check", 30, C2)], dinfo(C2, range(28, 31), vetoed=["air_temperature_c"])) == "missed"
+
+
+def test_a_multi_device_row_without_sensors_carries_nothing_so_it_is_no_partner_and_no_cant_confirm():
+    def without_sensors(rows, device):
+        return [{k: v for k, v in r.items() if k != "sensors"} if r["device_id"] == device else r for r in rows]
+    # A fault on climate-1 (humidity): climate-2 has no probes listed, so it is not a partner and its card is no catch.
+    rows = without_sensors(trio(80, per={C1: stuck()}), C2)
+    (ep,) = mgrade(rows, [draised("sensor_check", 30, C2)])["fault_episodes"]
+    assert (ep["outcome"], ep["partners"], ep["raised_on_partner"]) == ("missed", [], None)
+    # A real event on high_ec: a card on climate-2 cannot confirm the probe (the EC probe is on substrate-1 only).
+    event_rows = without_sensors(trio(80, shared=during(10, 60, expected=["high_ec"], events=["ev"])), C2)
+    (episode,) = mgrade(event_rows, [draised("sensor_check", 30, C2)])["real_episodes"]
+    assert episode["outcome"] == "missed"
+    (episode,) = mgrade(event_rows, [draised("sensor_check", 30, S1)])["real_episodes"]
+    assert episode["outcome"] == "caught_cant_confirm"
+
+
+def test_fault_episodes_are_found_per_stream_and_name_their_partners():
+    rows = trio(80, per={C1: stuck("humidity_pct"), C2: stuck("humidity_pct"),
+                         S1: stuck("ph", "jump", start=20, end=30)})
+    report = mgrade(rows, [draised("sensor_check", 30, C1), draised("sensor_check", 30, C2)])
+    eps = {(e["device"], e["fault"]): e for e in report["fault_episodes"]}
+    assert set(eps) == {(C1, "stuck"), (C2, "stuck"), (S1, "jump")}  # the same fault on two devices is two episodes
+    assert eps[(C1, "stuck")]["partners"] == [C2] and eps[(C2, "stuck")]["partners"] == [C1]
+    assert eps[(S1, "jump")]["partners"] == []  # nobody else carries pH
+    assert eps[(C1, "stuck")]["outcome"] == eps[(C2, "stuck")]["outcome"] == "caught"
+    assert eps[(S1, "jump")]["outcome"] == "missed"  # ten minutes of readings, no card on substrate-1
+    # A whole-device fault has no field and no partners; a dropout of one device is not scored.
+    drop = trio(60, per={C2: lambda t: {"faults": [("dropout", None)], "published": False} if 10 <= t < 20 else {}})
+    (ep,) = mgrade(drop, [])["fault_episodes"]
+    assert (ep["device"], ep["partners"], ep["outcome"]) == (C2, [], "not_published")
+
+
+def test_caught_on_partner_is_its_own_outcome_and_a_pass():
+    rows = trio(80, per={C1: stuck()})
+    report = mgrade(rows, [draised("sensor_check", 30, C2)])  # stack mode: no per-reading results
+    (ep,) = report["fault_episodes"]
+    assert ep["outcome"] == "caught_on_partner" and ep["raised"] is None
+    assert (ep["raised_on_partner"]["device"], ep["raised_on_partner"]["tick"]) == (C2, 30)
+    sensor = report["summary"]["sensor_fault_episodes"]
+    assert (sensor["total"], sensor["sensor_check_caught"], sensor["missed"], sensor["sensor_check_caught_on_partner"]) == (1, 0, 0, 1)
+    assert report["summary"]["false_alarms"] == 0 and score.failures(report) == 0  # --fail-on-miss does not fail on it
+    text = score.markdown(report, "stack", Path("t"))
+    assert "| greenhouse-a · climate-1 |" in text and "sensor_check on the partner climate-2 at 12:15:00" in text
+    assert "caught on the partner probe (the card asks to check both)" in text
+    assert "caught on the partner probe 1." in text
+
+
+def test_caught_on_partner_precedence_and_what_does_not_count():
+    rows = trio(80, per={C1: stuck()})
+    outcome = lambda events, rows=rows, info=None: mgrade(rows, events, info)["fault_episodes"][0]["outcome"]
+    partner = draised("sensor_check", 30, C2)
+    # first match wins: undetectable, wrong_card, caught, caught_on_partner, caught_at_recovery, too_short, missed
+    offset = trio(80, per={C1: stuck(name="plausible_offset")})
+    assert outcome([partner], offset) == "undetectable"
+    assert outcome([partner, draised("high_humidity_fan", 31, C1)]) == "wrong_card"
+    assert outcome([partner, draised("sensor_check", 30, C1)]) == "caught"
+    # A wrong card is a domain card on the faulted device; the same card on the healthy partner is not this fault's.
+    healthy = mgrade(rows, [draised("sensor_check", 30, C1), draised("high_humidity_fan", 31, C2)])
+    assert healthy["fault_episodes"][0]["outcome"] == "caught" and healthy["fault_episodes"][0]["wrong_cards"] == []
+    late = draised("sensor_check", 52, C1)  # on the faulted device, only after the fault ended
+    assert outcome([late]) == "caught_at_recovery"
+    assert outcome([late, partner]) == "caught_on_partner"
+    # An already open card on a partner does not count (it was raised before the fault began).
+    assert outcome([draised("sensor_check", 2, C2)]) == "missed"
+    # A card on an unrelated device (no humidity probe) is not a partner's card.
+    assert outcome([draised("sensor_check", 30, S1)]) == "missed"
+    # A card on a partner whose label run began after the fault's last reading is the snap back, not the lie.
+    assert outcome([draised("sensor_check", 52, C2)]) == "missed"
+
+
+def test_the_label_run_is_counted_in_the_partners_own_stream():
+    rows = trio(80, per={C1: stuck()})  # active to tick 45
+    # A partner raise at tick 47 follows readings 45, 46, 47 of climate-2: the run began on the fault's last reading.
+    # (Counting the zone's readings instead would put the run's start at tick 46, after the fault.)
+    assert mgrade(rows, [draised("sensor_check", 47, C2)])["fault_episodes"][0]["outcome"] == "caught_on_partner"
+    assert mgrade(rows, [draised("sensor_check", 48, C2)])["fault_episodes"][0]["outcome"] == "missed"
+
+
+def test_offline_the_partners_card_must_be_about_the_faulted_field():
+    rows = trio(80, per={C1: stuck()})
+    events = [draised("sensor_check", 30, C2)]
+    outcome = lambda info: mgrade(rows, events, info)["fault_episodes"][0]["outcome"]
+    run = range(28, 31)  # the three readings the raise follows from
+    assert outcome(dinfo(C2, run, vetoed=["humidity_pct"])) == "caught_on_partner"
+    assert outcome(dinfo(C2, run, labels=["missing_humidity"])) == "caught_on_partner"  # a missing-data label counts
+    assert outcome(dinfo(C2, run, vetoed=["air_temperature_c"])) == "missed"  # a chance card for another field
+    assert outcome(dinfo(C2, range(0, 20), vetoed=["humidity_pct"])) == "missed"  # flagged before the run, not in it
+    # The moisture probe goes by two names: a pipeline veto of the alias is the same field.
+    moisture = trio(80, devices=(S1, S2), per={S1: stuck("soil_moisture_pct")})
+    card = [draised("sensor_check", 30, S2)]
+    info = dinfo(S2, run, vetoed=["substrate_moisture_pct"])
+    assert mgrade(moisture, card, info)["fault_episodes"][0]["outcome"] == "caught_on_partner"
+
+
+def test_false_alarms_are_partner_aware():
+    rows = trio(80, per={C1: stuck()})
+    alarms = lambda events: [(a["device"], a["rule"]) for a in mgrade(rows, events)["false_alarms"]]
+    assert alarms([draised("sensor_check", 30, C2)]) == []  # a sensor card on a partner: the fault's own
+    assert alarms([draised("sensor_check", 30, S1)]) == [(S1, "sensor_check")]  # an unrelated device: a false alarm
+    assert alarms([draised("high_humidity_fan", 31, C2)]) == [(C2, "high_humidity_fan")]  # a domain card on a partner
+    assert alarms([draised("high_ec_alert", 31, C1)]) == []  # any card on the faulted device itself
+    # Past the fault and its clear window the faulted device's card is a false alarm too.
+    late = trio(200, per={C1: stuck()})
+    assert [(a["device"], a["tick"]) for a in mgrade(late, [draised("sensor_check", 140, C1)])["false_alarms"]] == [(C1, 140)]
+    # In a single-stream zone a fault hides every raise of the zone, as ever.
+    assert grade(fault_rows(), [raised(A, "high_ec_alert", 31)])["summary"]["false_alarms"] == 0
+
+
+def test_a_silent_probe_exempts_the_raises_of_its_own_device_only():
+    rows = trio(80, per={S1: silent_run(end=60)})  # no real event: a probe goes quiet on substrate-1
+    alarms = lambda events: [(a["device"], a["rule"]) for a in mgrade(rows, events)["false_alarms"]]
+    assert alarms([draised("sensor_check", 30, S1)]) == []
+    assert alarms([draised("sensor_check", 30, C1)]) == [(C1, "sensor_check")]
+    assert alarms([draised("high_humidity_fan", 30, C1)]) == [(C1, "high_humidity_fan")]
+
+
+def test_a_cant_confirm_catch_needs_the_card_on_a_device_that_carries_the_labels_field():
+    rows = trio(100, shared=during(10, 80, expected=["high_ec"], events=["ev"]))
+    on_climate = mgrade(rows, [draised("sensor_check", 14, C1)])  # climate-1 has no EC probe
+    assert on_climate["real_episodes"][0]["outcome"] == "missed"
+    assert on_climate["summary"]["false_alarms"] == 0  # still a card during a real event: not a false alarm
+    on_substrate = mgrade(rows, [draised("sensor_check", 14, S1)])
+    assert on_substrate["real_episodes"][0]["outcome"] == "caught_cant_confirm"
+    assert on_substrate["real_episodes"][0]["raised"]["device"] == S1
+    # Offline the veto may be on any stream of the zone.
+    events = [draised("sensor_check", 14, S1)]
+    ec = mgrade(rows, events, {**dinfo(S1, range(10, 40), vetoed=["ec_ms_cm"])})
+    assert ec["real_episodes"][0]["outcome"] == "caught_cant_confirm" and ec["real_episodes"][0]["field_vetoed"] is True
+    ph = mgrade(rows, events, dinfo(S1, range(10, 40), vetoed=["ph"]))
+    assert ph["real_episodes"][0]["outcome"] == "missed"
+
+
+def test_blind_spots_are_per_device_and_the_events_card_on_any_device_counts():
+    shared = during(10, 100, expected=["high_ec"], events=["ev"])
+    rows = trio(120, shared=shared, per={S1: silent_run()})
+    case = lambda events, rows=rows, info=None: next(c for c in mgrade(rows, events, info)["blind_spot_cases"])
+    nothing = case([])
+    assert (nothing["zone"], nothing["device"], nothing["field"], nothing["outcome"]) == (A, S1, "ec_ms_cm", "false_reassurance")
+    assert mgrade(rows, [])["real_episodes"][0]["outcome"] == "blind_spot"
+    assert score.failures(mgrade(rows, [])) == 1
+    # A sensor card on the silent device is a sign; on another device it is not (its own stream decides).
+    own = case([draised("sensor_check", 14, S1)])
+    assert own["outcome"] == "cant_confirm" and own["via"] == ["sensor card"]
+    assert case([draised("sensor_check", 14, C1)])["outcome"] == "false_reassurance"
+    # The event's own card on any device counts as alerted: another probe still showed it.
+    alerted = case([draised("high_ec_alert", 40, C1)])
+    assert alerted["outcome"] == "alerted" and alerted["domain_card"]["tick"] == 40
+    summary = mgrade(rows, [draised("sensor_check", 14, S1)])["summary"]["blind_spot"]
+    assert (summary["total"], summary["cant_confirm"]) == (1, 1)
+    # The passive device flag is the silent device's own: no accepted packet from it for longer than the timeout,
+    # while the other devices keep reporting.
+    gone = trio(120, shared=shared, per={S1: lambda t: {**silent_run()(t), **({"published": False} if 10 <= t <= 100 else {})}})
+    flagged = case([], gone)
+    assert flagged["outcome"] == "cant_confirm" and flagged["via"] == ["device silent"] and flagged["silent_flag_only"]
+
+
+def test_silent_probe_blocked_counts_the_zones_reporting_devices():
+    fungal = score.Grader([], [], RULES, DEFAULTS).label_rule["fungal_pressure"]
+    assert score.Grader([], [], RULES, DEFAULTS).window(fungal)[0] == timedelta(minutes=30)
+    shared = during(10, 100, expected=["fungal_pressure"], events=["ev"])
+    silent = lambda t: {"faults": [("probe_dropout", "humidity_pct")]} if 10 <= t <= 100 else {}
+    outcome = lambda rows: mgrade(rows, [])["real_episodes"][0]["outcome"]
+    # climate-2 keeps reporting humidity: the episode is a plain miss, not a blind spot.
+    assert outcome(trio(120, shared=shared, per={C1: silent})) == "missed"
+    # Both humidity probes silent: a blind spot (substrate-1 reports, but carries neither humidity nor air).
+    assert outcome(trio(120, shared=shared, per={C1: silent, C2: silent})) == "blind_spot"
+    # climate-2 reports for ten minutes, then goes quiet (nothing reaches Core): shorter than the rule's 30 minutes.
+    quiet = lambda t: {"published": False, "faults": [("dropout", None)]} if t > 30 else {}
+    assert outcome(trio(120, shared=shared, per={C1: silent, C2: quiet})) == "blind_spot"
+
+
+def test_the_reading_level_judges_each_device_by_its_own_labels():
+    def level(rows, got):
+        info = {(r["zone_id"], r["device_id"], r["tick"]): got for r in rows if r["zone_id"] == A and r["device_id"] in (C1, S1)}
+        info.update({(r["zone_id"], r["tick"]): got for r in rows if r["zone_id"] == B})
+        return score.Grader(rows, [], RULES, DEFAULTS, info).reading_level()
+    card = {"labels": ["high_ec"], "trust": "trusted", "vetoed_fields": [], "card_labels": ["high_ec"], "sensor_check_labels": []}
+    # The truth says high_ec, but only substrate-1's probes could show it: climate-1's card is not expected of it.
+    rows = [drow(0, C1, kind="normal", expected=["high_ec"], device_labels=[]),
+            drow(0, S1, kind="normal", expected=["high_ec"], device_labels=["high_ec"])]
+    assert level(rows, card)["normal_with_card"] == 1  # climate-1's frame; substrate-1's card is right
+    quiet = {**card, "card_labels": []}
+    faulty = [drow(0, C1, faults=[("stuck", "humidity_pct")], expected=["high_ec"], device_labels=[]),
+              drow(0, S1, faults=[("stuck", "ph")], expected=["high_ec"], device_labels=["high_ec"])]
+    assert level(faulty, quiet)["wrong_cards"] == 1  # substrate-1 should have shown it, climate-1 should not
+    assert level(faulty, card)["wrong_cards"] == 1  # climate-1 showed a card its probes cannot support
+    assert level(faulty, quiet)["faulty_frames"] == 2
+    # A single-stream zone keeps expected_labels, even if a row carries device_labels.
+    single = row(0, B, kind="normal", expected=["high_ec"])
+    single["expect"]["device_labels"] = []
+    assert level([single], card)["normal_with_card"] == 0
+
+
+def test_core_check_compares_per_stream_in_a_multi_device_zone_and_per_zone_otherwise():
+    dead = [drow(10, device, dead=True, delivery=422, faults=[("dead_clock", None)]) for device in (C1, S1)]
+    rows = trio(10, devices=(C1, S1)) + dead + [row(t, B) for t in range(10)]
+    grader = score.Grader(rows, [], RULES, DEFAULTS)
+    at = lambda t: BASE + timedelta(seconds=30 * t)
+    stored = {A: [(C1, at(t)) for t in range(10)] + [(S1, at(t)) for t in range(7)]  # substrate-1 lost ticks 7-9
+                 + [at(8)] + [(S1, score.parse_ts("1970-01-01T00:00:00Z"))],  # a stored event without a device matches none
+              B: [("whatever", at(t)) for t in range(10)]}  # a single-stream zone ignores the device
+    check = score.core_check(grader, stored)
+    assert (check["stored"], check["accepted_in_truth"], check["accepted_missing_in_core"], check["rejected_but_stored"]) == (29, 30, 3, 1)
+    assert check["by_stream"] == {A: {C1: {"accepted_in_truth": 10, "accepted_missing_in_core": 0, "rejected_but_stored": 0},
+                                      S1: {"accepted_in_truth": 10, "accepted_missing_in_core": 3, "rejected_but_stored": 1}}}
+    # Single-stream zones only: today's four numbers, no new key.
+    single = score.core_check(score.Grader(real_rows(zone=B), [], RULES, DEFAULTS), {B: [at(t) for t in range(80)]})
+    assert single == {"stored": 80, "accepted_in_truth": 80, "accepted_missing_in_core": 0, "rejected_but_stored": 0}
+
+
+def test_stack_mode_reads_the_device_of_alerts_and_of_what_core_stored(tmp_path, fake_stack):
+    url, stack = fake_stack
+    rows = trio(80, per={C1: stuck()})
+    truth = tmp_path / "truth.jsonl"
+    write_truth(truth, rows)
+    stack.alerts = {A: [draised("sensor_check", 30, C2)]}
+    stack.stored = {A: [{"timestamp": r["sent"]["timestamp"], "device_id": r["device_id"]} for r in rows]}
+    out, md = tmp_path / "r.json", tmp_path / "r.md"
+    args = ["--truth", str(truth), "--automation-url", url, "--core-url", url, "--json", str(out), "--report", str(md)]
+    assert score.main(args + ["--fail-on-miss"]) == 0  # caught on the partner does not fail
+    report = json.loads(out.read_text())
+    assert report["summary"]["sensor_fault_episodes"]["sensor_check_caught_on_partner"] == 1
+    assert report["summary"]["multi_device"] == {"zones": {A: [C1, C2, S1]}}
+    assert report["core_check"]["accepted_missing_in_core"] == 0 and report["core_check"]["accepted_in_truth"] == 240
+    assert set(report["core_check"]["by_stream"][A]) == {C1, C2, S1}
+    assert "caught on the partner probe 1." in md.read_text()
+    # Core's events without a device id match no stream of a multi-device zone.
+    stack.stored = {A: [r["sent"]["timestamp"] for r in rows]}
+    assert score.main(args) == 0
+    assert json.loads(out.read_text())["core_check"]["accepted_missing_in_core"] == 240
+    # fetch_core_events keeps each stored event's device when it has one.
+    got = score.fetch_core_events(url, "demo-farm", [A])
+    assert got == {A: [score.parse_ts(r["sent"]["timestamp"]) for r in rows]}  # no device_id stored: plain sample times
+
+
+def test_no_new_key_on_single_stream_zones_also_in_a_mixed_log():
+    b_rows = real_rows(zone=B, total=100)
+    b_events = [raised(B, "high_ec_alert", 32), raised(B, "sensor_check", 90)]
+    alone = score.Grader(b_rows, b_events, RULES, DEFAULTS)
+    alone_report = alone.report()
+    # A log with only single-stream zones carries none of the multi-device keys.
+    assert "multi_device" not in alone_report["summary"]
+    assert "sensor_check_caught_on_partner" not in alone_report["summary"]["sensor_fault_episodes"]
+    assert alone_report["metric_definitions"] == score.METRIC_DEFINITIONS
+    assert "partners" not in score.markdown(alone_report, "stack", Path("t"))
+    # The same zone B in a log whose zone A has three devices: B's items are the same, key for key.
+    a_rows = trio(100, per={C1: stuck()})
+    mixed = score.Grader(a_rows + b_rows, b_events + [draised("sensor_check", 30, C2)], RULES, DEFAULTS).report()
+    assert mixed["summary"]["multi_device"] == {"zones": {A: [C1, C2, S1]}}
+    for key in ("real_episodes", "fault_episodes", "false_alarms"):
+        assert [i for i in mixed[key] if i["zone"] == B] == alone_report[key], key
+    assert "device" not in mixed["real_episodes"][0]["raised"]
+    # Zone B's rows of the markdown keep their text.
+    only_b = lambda text: [line for line in text.splitlines() if line.startswith(f"| {B}")]
+    assert only_b(score.markdown(mixed, "stack", Path("t"))) == only_b(score.markdown(alone_report, "stack", Path("t")))
+    for text in only_b(score.markdown(mixed, "stack", Path("t"))):
+        assert " · " not in text
+    assert all(" · " not in line for line in score.markdown(alone_report, "stack", Path("t")).splitlines())
+
+
+def test_the_report_and_print_summary_say_which_zones_have_several_devices(capsys):
+    report = mgrade(trio(80, per={C1: stuck()}), [draised("sensor_check", 30, C2)])
+    assert report["summary"]["multi_device"] == {"zones": {A: [C1, C2, S1]}}
+    for key in ("stream", "partners", "caught_on_partner", "device_labels"):
+        assert key in report["metric_definitions"]
+    assert "stack mode" in report["metric_definitions"]["caught_on_partner"]
+    score.print_summary(report, "offline")
+    assert ("[offline] multi-device zones greenhouse-a (climate-1, climate-2, substrate-1): "
+            "caught on the partner probe 1") in capsys.readouterr().out
+
+
+def test_replay_offline_keeps_the_logs_device_order_and_keys_results_by_device():
+    sim = fg.Simulation(seed=7, clock=fake_clock())
+    rows = []
+    for _ in range(6):
+        for reading in sim.step():
+            truth = reading.truth
+            if truth["zone_id"] == B:
+                rows.append(truth)
+                continue
+            for device in ("z-device", "a-device"):  # the log's order is not alphabetical
+                copy_ = copy.deepcopy(truth)
+                copy_["device_id"] = copy_["sent"]["device_id"] = device
+                copy_["sent"]["boot_id"] = f"{copy_['sent']['boot_id']}-{device}"
+                copy_["sensors"] = list(fg.SENSOR_ORDER)
+                rows.append(copy_)
+    events, info, _ = score.replay_offline(rows, RULES, DEFAULTS)
+    keys_a = [k for k in info if k[0] == A]
+    assert keys_a[:4] == [(A, "z-device", 0), (A, "a-device", 0), (A, "z-device", 1), (A, "a-device", 1)]
+    assert all(len(k) == 2 for k in info if k[0] == B) and (B, 0) in info  # a single-stream zone: (zone, tick)
+    assert score.Grader(rows, events, RULES, DEFAULTS, info).report()["frames"]["total"] == 6 * 3

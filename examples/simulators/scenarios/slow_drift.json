@@ -1,0 +1,31 @@
+{
+  "seed": 23,
+  "duration_ticks": 1000,
+  "devices": {
+    "greenhouse-a": [
+      {"device_id": "substrate-1", "sensors": ["ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c"]},
+      {"device_id": "substrate-2", "sensors": ["substrate_moisture_pct"],
+       "offsets": {"soil_moisture_pct": 1.0}, "wander": {"soil_moisture_pct": 0.8}},
+      {"device_id": "climate-1", "sensors": ["air_temperature_c", "humidity_pct"]},
+      {"device_id": "climate-2", "sensors": ["air_temperature_c", "humidity_pct"],
+       "offsets": {"air_temperature_c": 0.4, "humidity_pct": -1.5},
+       "wander": {"air_temperature_c": 0.3, "humidity_pct": 1.0}}
+    ]
+  },
+  "steps": [
+    {"at_tick": 240, "start": "drift", "zone": "greenhouse-a", "device": "climate-1", "field": "air_temperature_c", "params": {"rate_per_min": -0.1}},
+    {"at_tick": 240, "start": "drift", "zone": "greenhouse-b", "field": "air_temperature_c", "params": {"rate_per_min": -0.1}},
+    {"at_tick": 320, "stop": "drift", "zone": "greenhouse-a", "device": "climate-1"},
+    {"at_tick": 320, "stop": "drift", "zone": "greenhouse-b"},
+    {"at_tick": 400, "start": "drift", "zone": "greenhouse-a", "device": "climate-2", "field": "humidity_pct", "params": {"rate_per_min": -0.5}},
+    {"at_tick": 480, "stop": "drift", "zone": "greenhouse-a", "device": "climate-2"},
+    {"at_tick": 560, "start": "drift", "zone": "greenhouse-a", "device": "substrate-2", "field": "soil_moisture_pct", "params": {"rate_per_min": -0.5}},
+    {"at_tick": 640, "stop": "drift", "zone": "greenhouse-a", "device": "substrate-2"},
+    {"at_tick": 700, "start": "stuck", "zone": "greenhouse-a", "device": "climate-1", "field": "humidity_pct"},
+    {"at_tick": 740, "stop": "stuck", "zone": "greenhouse-a", "device": "climate-1"},
+    {"at_tick": 780, "start": "humid_night", "zone": "greenhouse-a"},
+    {"at_tick": 880, "stop": "humid_night", "zone": "greenhouse-a"},
+    {"at_tick": 900, "start": "dropout", "zone": "greenhouse-a", "device": "climate-2"},
+    {"at_tick": 940, "stop": "dropout", "zone": "greenhouse-a", "device": "climate-2"}
+  ]
+}

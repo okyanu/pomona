@@ -12,6 +12,9 @@ alerts Pomona raised (the operator-visible cards on Core's feed path: automation
 
 Joins are by zone + sample timestamp (parsed, so ISO spellings do not matter). Alert time is the
 sample time of the reading, never the wall clock. See METRIC_DEFINITIONS in the JSON report.
+
+A zone whose truth rows carry more than one device id is multi-device: there every join also uses the device
+(docs/design/multi-device-zones-slice3.md 3.5). A zone with one device id ignores the device in every join.
 """
 
 from __future__ import annotations
@@ -102,6 +105,14 @@ BLIND_SPOT_DEFINITIONS = {
     "no_fault_in_window": "a probe was silent during a real event, but the true state never crossed a label that probe decides, so there was no fault to confirm: not judged",
     "no_real_event": "a probe was silent with no real event running: nothing to be falsely reassured about, not judged",
 }
+# Added to the report only when the truth log holds a multi-device zone (its rows carry more than one device id).
+MULTI_DEVICE_DEFINITIONS = {
+    "stream": "a zone and one of its devices. A zone is multi-device when its truth rows carry more than one device id; there every join (frames, alerts, per-reading results, what Core stored) uses the device, and an alert or stored event without a device id is unmatched. A zone with one device id ignores the device everywhere, as before",
+    "partners": "for a sensor fault in a multi-device zone: the other devices of the zone whose probes (row field sensors) hold the fault's field",
+    "caught_on_partner": "a sensor fault on one device of a multi-device zone: no sensor card on the faulted device while the fault ran, but a sensor-family card raised on one of its partners inside the episode window, with a label run that began no later than the fault's last reading (a card already open on a partner does not count). Offline the card must be about the fault's field (a partner reading in that run has the field vetoed or its missing-data label); stack mode has no per-reading results, so that check is skipped there and any sensor-family card on a partner counts. A pass that is neither caught nor missed: the card asks to check both probes; --fail-on-miss does not fail on it",
+    "device_labels": "offline reading level in a multi-device zone: normal_with_card and wrong_cards compare a device frame's card labels with expect.device_labels (the labels of the true state that this device's own probes could show) instead of expected_labels, so a climate device is not blamed for not raising high_ec",
+}
+MOISTURE_ALIASES = {"soil_moisture_pct": "substrate_moisture_pct", "substrate_moisture_pct": "soil_moisture_pct"}
 
 
 # --- Small helpers ----------------------------------------------------------------------
@@ -125,6 +136,24 @@ def core_accepted(row: Dict[str, Any]) -> bool:
     return expect["kind"] != "rejected_by_core"
 
 
+def field_aliases(field: str) -> set:
+    """The field and its other packet name (the moisture probe goes by two)."""
+    return {field, MOISTURE_ALIASES[field]} if field in MOISTURE_ALIASES else {field}
+
+
+def multi_device_zones(rows: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """The zones whose rows carry more than one device id, with their device ids in order of first appearance.
+
+    A row without a device id (None) is no device: a zone with one real id and some None rows is single-stream."""
+    seen: Dict[str, List[str]] = {}
+    for row in rows:
+        ids = seen.setdefault(row["zone_id"], [])
+        device = row.get("device_id")
+        if device is not None and device not in ids:
+            ids.append(device)
+    return {zone: ids for zone, ids in seen.items() if len(ids) > 1}
+
+
 def device_timeout_s() -> int:
     """Core's device_timeout_seconds (services/core/app/config.py), 120 when that file is not at hand (the Space)."""
     try:
@@ -143,20 +172,44 @@ class Frame:
     time: datetime  # wall time of the attempt
     accepted: bool
     sample: Optional[datetime]  # sent timestamp, only for accepted frames (the join key)
+    device: Optional[str] = None  # the row's device_id; a join key only in multi-device zones
 
     @property
     def expect(self) -> Dict[str, Any]:
         return self.row["expect"]
 
 
-def build_frames(rows: List[Dict[str, Any]]) -> Dict[str, List[Frame]]:
+def build_frames(rows: List[Dict[str, Any]], multi: Optional[Dict[str, List[Optional[str]]]] = None):
+    """The Grader's frame structures: (zones, streams, all_frames, by_tick).
+
+    `zones[zone]`: the zone timeline. A single-stream zone: all its frames by tick, as ever. A multi-device zone: the
+    first device's frame of each tick (truth, events and expected labels repeat on every device row of a tick).
+    `streams[(zone, device)]`: the frames of one stream by tick; device is None in a single-stream zone (the device is
+    ignored there), where this is the same list as `zones[zone]`. `all_frames[zone]`: every frame of the zone.
+    `by_tick[zone][tick]`: that tick's frames, one per device.
+    """
+    multi = multi_device_zones(rows) if multi is None else multi
     zones: Dict[str, List[Frame]] = {}
+    streams: Dict[Tuple[str, Optional[str]], List[Frame]] = {}
+    all_frames: Dict[str, List[Frame]] = {}
+    by_tick: Dict[str, Dict[int, List[Frame]]] = {}
     for row in sorted(rows, key=lambda r: (r["zone_id"], r["tick"])):
         accepted = core_accepted(row)
         sample = parse_ts(row["sent"]["timestamp"]) if accepted and row.get("sent") else None
-        zones.setdefault(row["zone_id"], []).append(
-            Frame(row, row["zone_id"], row["tick"], parse_ts(row["wall_timestamp"]), accepted, sample))
-    return zones
+        zone = row["zone_id"]
+        frame = Frame(row, zone, row["tick"], parse_ts(row["wall_timestamp"]), accepted, sample, row.get("device_id"))
+        at_tick = by_tick.setdefault(zone, {}).setdefault(frame.tick, [])
+        if zone in multi:
+            if not at_tick:
+                zones.setdefault(zone, []).append(frame)
+            streams.setdefault((zone, frame.device), []).append(frame)
+            all_frames.setdefault(zone, []).append(frame)
+        else:
+            zones.setdefault(zone, []).append(frame)
+            all_frames[zone] = zones[zone]
+            streams[(zone, None)] = zones[zone]
+        at_tick.append(frame)
+    return zones, streams, all_frames, by_tick
 
 
 def runs(frames: List[Frame], predicate) -> List[List[Frame]]:
@@ -175,8 +228,20 @@ def runs(frames: List[Frame], predicate) -> List[List[Frame]]:
 
 class Grader:
     def __init__(self, rows: List[Dict[str, Any]], events: List[Dict[str, Any]], rules: List[Dict[str, Any]],
-                 defaults: Tuple[int, int], frame_info: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None):
-        self.zones = build_frames(rows)
+                 defaults: Tuple[int, int], frame_info: Optional[Dict[Tuple, Dict[str, Any]]] = None):
+        # frame_info keys: (zone, tick) in a single-stream zone, (zone, device, tick) in a multi-device zone.
+        self.multi = multi_device_zones(rows)
+        for key in frame_info or {}:
+            if len(key) == 2 and key[0] in self.multi:
+                raise ValueError(f"frame_info key {key!r} has no device, but zone {key[0]!r} has several devices: "
+                                 "use (zone, device, tick)")
+        # A single-stream zone also takes (zone, device, tick) keys: the device is ignored there, so it reads as (zone, tick).
+        frame_info = None if frame_info is None else {
+            (key[0], key[2]) if len(key) == 3 and key[0] not in self.multi else key: value
+            for key, value in frame_info.items()}
+        self.zones, self.streams, self.all_frames, self.by_tick = build_frames(rows, self.multi)
+        self.sensors = {(zone, device): {s for f in frames for s in f.row.get("sensors", ())}
+                        for (zone, device), frames in self.streams.items() if zone in self.multi}
         self.rules = {rule["id"]: rule for rule in rules}
         self.defaults = defaults
         self.frame_info = frame_info
@@ -186,43 +251,64 @@ class Grader:
             if rule.get("action") != SENSOR_ACTION:
                 for label in rule["match_any_labels"]:
                     self.label_rule.setdefault(label, rule["id"])
-        self.by_sample = {(zone, f.sample): f for zone, frames in self.zones.items() for f in frames if f.sample}
+        self.by_sample = {(zone, f.device, f.sample) if zone in self.multi else (zone, f.sample): f
+                          for zone, frames in self.all_frames.items() for f in frames if f.sample}
         self.unmatched: List[Dict[str, Any]] = []
         self.raises: List[Dict[str, Any]] = []
-        recovered: List[Tuple[str, str, datetime]] = []
+        recovered: List[Tuple[str, str, datetime, Optional[str]]] = []
         for event in events:
-            frame = self.by_sample.get((event["zone_id"], parse_ts(event["sample_time"])))
+            zone, sample = event["zone_id"], parse_ts(event["sample_time"])
+            # In a multi-device zone an event without a device id matches no frame.
+            frame = self.by_sample.get((zone, event.get("device_id"), sample) if zone in self.multi else (zone, sample))
             if frame is None:
                 self.unmatched.append(event)
             elif event.get("event") == "raised":
                 self.raises.append({"zone": frame.zone, "rule": event["rule_id"], "tick": frame.tick,
-                                    "time": frame.time, "sample_time": event["sample_time"], "until": None})
+                                    "time": frame.time, "sample_time": event["sample_time"], "until": None,
+                                    "device": self.dev(frame.zone, frame.device),
+                                    **({"detail": event["detail"]} if event.get("detail") else {})})
             elif event.get("event") == "recovered":
-                recovered.append((frame.zone, event["rule_id"], frame.time))
-        self.raises.sort(key=lambda r: (r["time"], r["rule"]))
-        for zone, rule_id, when in sorted(recovered, key=lambda r: r[2]):  # an incident lasts from raise to recovery
+                recovered.append((frame.zone, event["rule_id"], frame.time, self.dev(frame.zone, frame.device)))
+        self.raises.sort(key=lambda r: (r["time"], r["rule"], r["device"] or ""))
+        for zone, rule_id, when, device in sorted(recovered, key=lambda r: r[2]):  # an incident lasts from raise to recovery
             open_incident = [r for r in self.raises if (r["zone"], r["rule"]) == (zone, rule_id)
-                             and r["until"] is None and r["time"] <= when]
+                             and (device is None or r["device"] == device) and r["until"] is None and r["time"] <= when]
             if open_incident:
                 open_incident[-1]["until"] = when
+
+    def dev(self, zone: str, device: Optional[str]) -> Optional[str]:
+        """The device as a join key: itself in a multi-device zone, None (ignored) in a single-stream zone."""
+        return device if zone in self.multi else None
+
+    def info_key(self, frame: Frame) -> Tuple:
+        return (frame.zone, frame.device, frame.tick) if frame.zone in self.multi else (frame.zone, frame.tick)
+
+    def frames_of(self, zone: str, device: Optional[str] = None) -> List[Frame]:
+        """The frames of one stream, or (no device) of the whole zone, one per device and tick."""
+        return self.all_frames[zone] if device is None else self.streams[(zone, device)]
+
+    def carries(self, zone: str, device: Optional[str], fields: Any) -> bool:
+        """Does this device of a multi-device zone have a probe among `fields` (the rows' `sensors`)?"""
+        return bool(set(fields) & self.sensors.get((zone, device), set()))
 
     def window(self, rule_id: str) -> Tuple[timedelta, timedelta]:
         rule = self.rules.get(rule_id, {})
         return (timedelta(seconds=rule.get("raise_after_seconds", self.defaults[0])),
                 timedelta(seconds=rule.get("clear_after_seconds", self.defaults[1])))
 
-    def find_check(self, zone: str, start: datetime, end: datetime) -> Optional[Dict[str, Any]]:
+    def find_check(self, zone: str, start: datetime, end: datetime, device: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """A sensor card (any rule of the sensor family) raised inside the window, else one still open during it.
 
         A card that is already up when the window opens still shows the operator the probe is in doubt, so it
         counts (an earlier fault's incident continues while the labels keep coming).
         """
-        hit = self.find_raise(zone, self.sensor_rules, start, end)
-        return hit or self.open_sensor_card(zone, start)
+        hit = self.find_raise(zone, self.sensor_rules, start, end, device)
+        return hit or self.open_sensor_card(zone, start, device)
 
-    def open_sensor_card(self, zone: str, start: datetime) -> Optional[Dict[str, Any]]:
+    def open_sensor_card(self, zone: str, start: datetime, device: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """A sensor card raised before `start` and still open at it."""
         return next((r for r in self.raises if r["zone"] == zone and r["rule"] in self.sensor_rules and r["time"] < start
+                     and (device is None or r["device"] == device)
                      and (r["until"] is None or r["until"] >= start)), None)
 
     def run_began_by(self, hit: Dict[str, Any]) -> datetime:
@@ -236,11 +322,12 @@ class Grader:
         samples = rule.get("raise_after_samples")
         if not samples:
             return by_time
-        readings = [f for f in self.zones[hit["zone"]] if f.accepted and f.tick <= hit["tick"]]
+        readings = [f for f in self.streams[(hit["zone"], hit["device"])] if f.accepted and f.tick <= hit["tick"]]
         by_samples = readings[max(0, len(readings) - samples)].time
         return max(by_time, by_samples)
 
-    def find_check_during(self, zone: str, start: datetime, active_end: datetime, end: datetime) -> Optional[Dict[str, Any]]:
+    def find_check_during(self, zone: str, start: datetime, active_end: datetime, end: datetime,
+                          device: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """A sensor card whose trigger was in the fault, not in its recovery tail.
 
         A raise counts when its label run began no later than the fault's last (wrong) reading: the card follows
@@ -249,14 +336,28 @@ class Grader:
         when the fault began counts as in find_check.
         """
         hit = next((r for r in self.raises if r["zone"] == zone and r["rule"] in self.sensor_rules
+                    and (device is None or r["device"] == device)
                     and start <= r["time"] <= end and self.run_began_by(r) <= active_end), None)
-        return hit or self.open_sensor_card(zone, start)
+        return hit or self.open_sensor_card(zone, start, device)
 
-    def find_raise(self, zone: str, rule_id: Any, start: datetime, end: datetime) -> Optional[Dict[str, Any]]:
-        """The first raise of a rule (an id, or a set of ids) on the zone inside the window."""
+    def find_raise(self, zone: str, rule_id: Any, start: datetime, end: datetime,
+                   device: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """The first raise of a rule (an id, or a set of ids) on the zone (or on one device of it) inside the window."""
         rule_ids = {rule_id} if isinstance(rule_id, str) else rule_id
-        return next((r for r in self.raises if r["zone"] == zone and r["rule"] in rule_ids and start <= r["time"] <= end),
-                    None)
+        return next((r for r in self.raises if r["zone"] == zone and r["rule"] in rule_ids and start <= r["time"] <= end
+                     and (device is None or r["device"] == device)), None)
+
+    def find_label_check(self, zone: str, label: str, start: datetime, end: datetime) -> Optional[Dict[str, Any]]:
+        """The sensor card that can count as a can't-confirm for a real episode's label.
+
+        A single-stream zone: any sensor card on the zone. A multi-device zone: one on a device that carries one of
+        the label's fields (the earliest such card)."""
+        if zone not in self.multi:
+            return self.find_check(zone, start, end)
+        fields = LABEL_FIELDS.get(label, ())
+        found = [hit for device in self.multi[zone] if self.carries(zone, device, fields)
+                 for hit in [self.find_check(zone, start, end, device)] if hit]
+        return min(found, key=lambda r: r["time"], default=None)
 
     # Episodes
 
@@ -280,7 +381,7 @@ class Grader:
                         ep["raise_after_s"] = raise_after.total_seconds()
                         ep["clear_after_s"] = clear_after.total_seconds()
                         hit = self.find_raise(zone, rule_id, start.time, end.time + clear_after)
-                        check = self.find_check(zone, start.time, end.time + clear_after)
+                        check = self.find_label_check(zone, label, start.time, end.time + clear_after)
                         vetoed = self.field_vetoed(zone, LABEL_FIELDS.get(label, ()), start.time, end.time + clear_after)
                         if hit:
                             ep["outcome"] = "caught"
@@ -312,29 +413,44 @@ class Grader:
         episode lasted (or for none of it), the silence is why: a blind spot. A probe that was back for longer
         than that and still raised nothing is an ordinary miss.
         """
+        zone = run[0].zone
+        if zone in self.multi:
+            # A tick reports the field when some device frame is accepted, carries one of the fields and is not silent on them.
+            at_ticks = [self.by_tick[zone][f.tick] for f in run]
+            if not any(self.silent_on(d, fields) for frames in at_ticks for d in frames):
+                return False
+            reporting = [run[i] for i, frames in enumerate(at_ticks)
+                         if any(d.accepted and set(fields) & set(d.row.get("sensors", ())) and not self.silent_on(d, fields)
+                                for d in frames)]
+            return not reporting or reporting[-1].time - reporting[0].time < raise_after
         if not any(self.silent_on(f, fields) for f in run):
             return False
         reporting = [f for f in run if f.accepted and not self.silent_on(f, fields)]
         return not reporting or reporting[-1].time - reporting[0].time < raise_after
 
-    def field_vetoed(self, zone: str, fields: Tuple[str, ...], start: datetime, end: datetime) -> Optional[bool]:
-        """Offline: was one of `fields` vetoed on some reading in the window? None when there is no per-reading data."""
+    def field_vetoed(self, zone: str, fields: Tuple[str, ...], start: datetime, end: datetime,
+                     device: Optional[str] = None) -> Optional[bool]:
+        """Offline: was one of `fields` vetoed on some reading in the window? None when there is no per-reading data.
+
+        In a multi-device zone: on any device's reading, or (`device`) on that device's own."""
         if not self.frame_info:
             return None
-        return any(set(fields) & set(self.frame_info.get((zone, f.tick), {}).get("vetoed_fields", ()))
-                   for f in self.zones[zone] if start <= f.time <= end)
+        return any(set(fields) & set(self.frame_info.get(self.info_key(f), {}).get("vetoed_fields", ()))
+                   for f in self.frames_of(zone, device) if start <= f.time <= end)
 
     @staticmethod
     def _raised(hit: Dict[str, Any], start_time: datetime, start_tick: int) -> Dict[str, Any]:
         return {"rule": hit["rule"], "time": hit["time"], "tick": hit["tick"],
                 "delay_s": (hit["time"] - start_time).total_seconds(), "delay_samples": hit["tick"] - start_tick,
-                "already_active": hit["time"] < start_time}
+                "already_active": hit["time"] < start_time,
+                **({"device": hit["device"], **({"detail": hit["detail"]} if "detail" in hit else {})}
+                   if hit["device"] is not None else {})}
 
     def fault_episodes(self, real: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out = []
-        names = sorted({f["name"] for frames in self.zones.values() for fr in frames
+        names = sorted({f["name"] for frames in self.all_frames.values() for fr in frames
                         for f in fr.row["active_faults"]} - {"probe_dropout"})  # graded as blind-spot cases
-        for zone, frames in self.zones.items():
+        for (zone, device), frames in self.streams.items():  # one stream per zone, unless the zone has several devices
             for name in names:
                 def on(frame: Frame, name=name) -> bool:
                     return (any(f["name"] == name for f in frame.row["active_faults"])
@@ -346,11 +462,15 @@ class Grader:
                     start, end, active_end = run[0], run[-1], active[-1]
                     field = next((x["field"] for f in active for x in f.row["active_faults"] if x["name"] == name), None)
                     forbidden = sorted({fld for f in active for fld in f.expect["forbid_domain_cards_from"]})
-                    ep = {"type": "sensor_fault", "fault": name, "zone": zone, "field": field,
-                          "forbidden_fields": forbidden, "start_tick": start.tick, "end_tick": end.tick,
+                    ep = {"type": "sensor_fault", "fault": name, "zone": zone,
+                          **({"device": device, "partners": self.partners_of(zone, device, field)}
+                             if zone in self.multi else {}),
+                          "field": field, "forbidden_fields": forbidden, "start_tick": start.tick, "end_tick": end.tick,
                           "active_end_tick": active_end.tick, "start_time": start.time, "end_time": end.time,
                           "active_end_time": active_end.time, "duration_s": (end.time - start.time).total_seconds(),
                           "frames": len(run), "raised": None, "raised_at_recovery": None, "wrong_cards": []}
+                    if zone in self.multi:
+                        ep["raised_on_partner"] = None
                     if name == "dropout":
                         ep["outcome"] = "not_published"
                     elif name == "dead_clock":
@@ -362,27 +482,61 @@ class Grader:
                     out.append(ep)
         return out
 
+    def partners_of(self, zone: str, device: Optional[str], field: Optional[str]) -> List[Optional[str]]:
+        """The other devices of a multi-device zone whose probes hold `field` (its moisture alias counts)."""
+        if field is None:
+            return []
+        aliases = field_aliases(field)
+        return [d for d in self.multi[zone] if d != device and aliases & self.sensors.get((zone, d), set())]
+
+    def find_partner_check(self, ep: Dict[str, Any], active_end: datetime) -> Optional[Dict[str, Any]]:
+        """A sensor-family card raised on a partner inside the episode, whose label run began by the fault's last reading.
+
+        An already open card does not count. Offline the card must be about the fault's field: some partner reading in
+        the label run has the field (or its alias) vetoed, or the field's missing label. Stack mode (no per-reading
+        results) skips that check."""
+        field = ep["field"]
+        for hit in self.raises:
+            if (hit["zone"] != ep["zone"] or hit["device"] not in ep["partners"] or hit["rule"] not in self.sensor_rules
+                    or not ep["start_time"] <= hit["time"] <= ep["end_time"] or self.run_began_by(hit) > active_end):
+                continue
+            if not self.frame_info or field is None:
+                return hit
+            aliases, began = field_aliases(field), self.run_began_by(hit)
+            for f in self.streams[(hit["zone"], hit["device"])]:
+                info = self.frame_info.get(self.info_key(f))
+                if info and f.accepted and began <= f.time <= hit["time"] and (
+                        aliases & set(info.get("vetoed_fields", ())) or MISSING_LABEL.get(field) in info.get("labels", ())):
+                    return hit
+        return None
+
     def _grade_fault(self, ep: Dict[str, Any], name: str, real: List[Dict[str, Any]]) -> None:
         zone, start, end = ep["zone"], ep["start_time"], ep["end_time"]
+        device = self.dev(zone, ep.get("device"))  # None in a single-stream zone: the whole zone is the stream
         active_end = ep["active_end_time"]
         flagged_active = None
         if self.frame_info:  # offline: did the sensor check fire on a single reading, even if it never persisted?
-            flags = [f.time for f in self.zones[zone] if start <= f.time <= end
-                     and self.frame_info.get((zone, f.tick), {}).get("sensor_check_labels")]
+            flags = [f.time for f in self.streams[(zone, device)] if start <= f.time <= end
+                     and self.frame_info.get(self.info_key(f), {}).get("sensor_check_labels")]
             ep["sensor_check_frames"] = len(flags)
             flagged_active = sum(1 for when in flags if when <= active_end)  # the recovery tail does not vouch for an old card
-        check = self.find_check_during(zone, start, active_end, end)
+        check = self.find_check_during(zone, start, active_end, end, device)
         if check and check["time"] < start and flagged_active == 0:
             check = None  # an earlier incident, and this fault raised nothing itself
-        late = None if check else self.find_raise(zone, self.sensor_rules, start, end)  # raised only after the fault ended
+        late = None if check else self.find_raise(zone, self.sensor_rules, start, end, device)  # raised only after the fault ended
+        partner = self.find_partner_check(ep, active_end) if ep.get("partners") and not check else None
         if check:
             ep["raised"] = self._raised(check, start, ep["start_tick"])
         if late:
             ep["raised_at_recovery"] = self._raised(late, start, ep["start_tick"])
+        if partner:
+            ep["raised_on_partner"] = self._raised(partner, start, ep["start_tick"])
         for hit in self.raises:
             fields = RULE_FIELDS.get(hit["rule"], ())
             if hit["zone"] != zone or not start <= hit["time"] <= end or not set(fields) & set(ep["forbidden_fields"]):
                 continue
+            if device is not None and hit["device"] != device:
+                continue  # a domain card on a healthy partner is judged as a false alarm, not as this fault's wrong card
             if any(r["zone"] == zone and r["rule"] == hit["rule"] and r["start_time"] <= hit["time"]
                    <= r["end_time"] + timedelta(seconds=r.get("clear_after_s", 0)) for r in real):
                 continue  # the same card is also right for a real event happening at that time
@@ -395,6 +549,8 @@ class Grader:
             ep["outcome"] = "wrong_card"
         elif check:
             ep["outcome"] = "caught"
+        elif partner:
+            ep["outcome"] = "caught_on_partner"
         elif late:
             ep["outcome"] = "caught_at_recovery"  # not noticed while it lasted: a miss
         elif ep["duration_s"] < raise_after.total_seconds():
@@ -411,14 +567,21 @@ class Grader:
                 for zone, start, end in self.event_windows())
             in_real = any(e["zone"] == hit["zone"] and e["rule"] == hit["rule"] and e["start_time"] <= hit["time"]
                           <= e["end_time"] + clear_after for e in real)
+            # A fault exempts its own device (any rule) and sensor cards on its partners; in a single-stream zone the
+            # device is the zone. A silent probe exempts raises on its own device.
             in_fault = any(e["zone"] == hit["zone"] and e["start_time"] <= hit["time"] <= e["end_time"] + clear_after
+                           and (hit["device"] is None or hit["device"] == e["device"]
+                                or (hit["device"] in e["partners"] and hit["rule"] in self.sensor_rules))
                            for e in faults)
-            in_silence = any(zone == hit["zone"] and run[0].time <= hit["time"] <= run[-1].time + clear_after
+            in_silence = any(zone == hit["zone"] and self.dev(zone, run[0].device) == hit["device"]
+                             and run[0].time <= hit["time"] <= run[-1].time + clear_after
                              for zone, _, run in self.silent_runs())  # a card while a probe is silent is about that
             if not (in_real or in_fault or in_event or in_silence):
-                item = {"zone": hit["zone"], "rule": hit["rule"], "tick": hit["tick"], "time": hit["time"]}
-                if self.frame_info and (hit["zone"], hit["tick"]) in self.frame_info:
-                    item["labels"] = self.frame_info[(hit["zone"], hit["tick"])]["labels"]
+                item = {"zone": hit["zone"], **({"device": hit["device"]} if hit["zone"] in self.multi else {}),
+                        "rule": hit["rule"], "tick": hit["tick"], "time": hit["time"]}
+                key = (hit["zone"], hit["device"], hit["tick"]) if hit["zone"] in self.multi else (hit["zone"], hit["tick"])
+                if self.frame_info and key in self.frame_info:
+                    item["labels"] = self.frame_info[key]["labels"]
                 out.append(item)
         return out
 
@@ -432,10 +595,12 @@ class Grader:
     # Blind spots: a real fault runs and the probe that would show it goes silent
 
     def silent_runs(self) -> List[Tuple[str, str, List[Frame]]]:
-        """(zone, field, frames) for each run of frames with a probe_dropout active on that field."""
+        """(zone, field, frames) for each run of frames with a probe_dropout active on that field.
+
+        Per stream: in a multi-device zone the frames of one device (`frames[0].device` names it)."""
         if not hasattr(self, "_silent_runs"):
             self._silent_runs = []
-            for zone, frames in self.zones.items():
+            for (zone, _), frames in self.streams.items():
                 fields = sorted({x["field"] for f in frames for x in f.row["active_faults"] if x["name"] == "probe_dropout"})
                 for field in fields:
                     for run in runs(frames, lambda f, field=field: self.silent_on(f, (field,))):
@@ -449,14 +614,15 @@ class Grader:
         return hit or next((r for r in self.raises if r["zone"] == zone and r["rule"] in ids and r["time"] < start
                             and (r["until"] is None or r["until"] >= start)), None)
 
-    def silent_since(self, zone: str, start: datetime, end: datetime) -> Optional[datetime]:
+    def silent_since(self, zone: str, start: datetime, end: datetime, device: Optional[str] = None) -> Optional[datetime]:
         """When Core's device flag turned to silent inside [start, end]: the last accepted reading plus the timeout.
 
         None when a Core-accepted reading kept arriving (never silent for longer than the timeout) in that window.
         """
         timeout = timedelta(seconds=device_timeout_s())
-        accepted = [f.time for f in self.zones[zone] if f.accepted]
-        for frame in self.zones[zone]:
+        frames = self.frames_of(zone, device)
+        accepted = [f.time for f in frames if f.accepted]
+        for frame in frames:
             if not start <= frame.time <= end:
                 continue
             last = max((t for t in accepted if t <= frame.time), default=None)
@@ -467,9 +633,11 @@ class Grader:
     def blind_spot_cases(self) -> List[Dict[str, Any]]:
         out = []
         for zone, field, run in self.silent_runs():
+            device = self.dev(zone, run[0].device)  # the silent stream; None in a single-stream zone
             with_event = [f for f in run if f.row["active_events"]]
             case: Dict[str, Any] = {
-                "type": "blind_spot", "zone": zone, "field": field, "start_tick": run[0].tick, "end_tick": run[-1].tick,
+                "type": "blind_spot", "zone": zone, "field": field, **({"device": device} if device is not None else {}),
+                "start_tick": run[0].tick, "end_tick": run[-1].tick,
                 "start_time": run[0].time, "end_time": run[-1].time, "events": [], "labels": [], "outcome": None,
                 "via": [], "signal": None, "silent_flag_only": False,
                 "core_refused_frames": sum(1 for f in run if not f.accepted)}
@@ -494,14 +662,14 @@ class Grader:
                 case["signal"] = self._signal(card["time"], start.time, crossing.time)
                 case["domain_card"] = {"rule": card["rule"], "time": card["time"], "tick": card["tick"]}
                 continue
-            check = self.find_raise(zone, self.sensor_rules, start.time, end.time)
-            old = None if check else self.open_sensor_card(zone, start.time)
-            if check or (old and self.field_vetoed(zone, (field,), start.time, end.time) is not False):
+            check = self.find_raise(zone, self.sensor_rules, start.time, end.time, device)
+            old = None if check else self.open_sensor_card(zone, start.time, device)
+            if check or (old and self.field_vetoed(zone, (field,), start.time, end.time, device) is not False):
                 signals.append(("sensor card", (check or old)["time"]))
-            flagged = self.flagged_reading(zone, field, start.time, end.time)
+            flagged = self.flagged_reading(zone, field, start.time, end.time, device)
             if flagged:
                 signals.append(("reading flagged", flagged))
-            silent = self.silent_since(zone, run[0].time, end.time)
+            silent = self.silent_since(zone, run[0].time, end.time, device)
             if silent:
                 signals.append(("device silent", silent))
             if signals:
@@ -511,18 +679,19 @@ class Grader:
                 case["signal"] = self._signal(signals[0][1], start.time, crossing.time)
                 case["silent_flag_only"] = case["via"] == ["device silent"]
             else:
-                before = [f.time for f in self.zones[zone] if f.accepted and f.time < run[0].time]
+                before = [f.time for f in self.frames_of(zone, device) if f.accepted and f.time < run[0].time]
                 waited = (end.time - max(before)).total_seconds() if before else (end.time - run[0].time).total_seconds()
                 case["outcome"] = "false_reassurance" if waited > device_timeout_s() else "too_short_to_judge"
         return sorted(out, key=lambda c: (c["start_time"], c["zone"]))
 
-    def flagged_reading(self, zone: str, field: str, start: datetime, end: datetime) -> Optional[datetime]:
+    def flagged_reading(self, zone: str, field: str, start: datetime, end: datetime,
+                        device: Optional[str] = None) -> Optional[datetime]:
         """Offline: the first Core-accepted reading in the window whose result flags `field` (vetoed or a missing label)."""
         if not self.frame_info:
             return None
         aliases = {field, "substrate_moisture_pct"} if field == "soil_moisture_pct" else {field}
-        for f in self.zones[zone]:
-            info = self.frame_info.get((zone, f.tick))
+        for f in self.frames_of(zone, device):
+            info = self.frame_info.get(self.info_key(f))
             if info and f.accepted and start <= f.time <= end and (
                     aliases & set(info.get("vetoed_fields", ())) or MISSING_LABEL.get(field) in info.get("labels", ())):
                 return f.time
@@ -541,18 +710,21 @@ class Grader:
                "normal_tail_frames": 0, "faulty_frames": 0,
                "wrong_cards": 0, "trusted_wrong_cards": 0, "cannot_confirm_frames": 0, "partial_frames": 0}
         card_rules = set(self.label_rule)
-        for frames in self.zones.values():
+        for frames in self.all_frames.values():  # every device's frame in a multi-device zone
             for f in frames:
-                got = info.get((f.zone, f.tick))
+                got = info.get(self.info_key(f))
                 if got is None:
                     continue
                 kind = f.expect["kind"]
+                # A multi-device zone's device is judged against what its own probes could show.
+                labels = f.expect.get("device_labels", f.expect["expected_labels"]) if f.zone in self.multi \
+                    else f.expect["expected_labels"]
                 if kind == "normal":
                     tail = bool(f.expect["recovering_from"])
                     out["normal_frames"] += 1
                     out["normal_tail_frames"] += tail
                     # A card label the truth still expects (an event just stopped, the true state not yet back) is right.
-                    out["normal_with_card"] += bool(set(got["card_labels"]) - set(f.expect["expected_labels"]))
+                    out["normal_with_card"] += bool(set(got["card_labels"]) - set(labels))
                     if got["sensor_check_labels"]:
                         aftermath = any(z == f.zone and start <= f.time <= end + timedelta(seconds=AFTERMATH_S)
                                         for z, start, end in self.event_windows())
@@ -561,7 +733,7 @@ class Grader:
                             "normal_with_sensor_check_outside_tail"] += 1
                 elif kind in ("sensor_fault", "both"):
                     out["faulty_frames"] += 1
-                    wanted = sorted(set(f.expect["expected_labels"]) & card_rules)
+                    wanted = sorted(set(labels) & card_rules)
                     wrong = sorted(got["card_labels"]) != wanted
                     out["wrong_cards"] += wrong
                     out["trusted_wrong_cards"] += wrong and got["trust"] != "cannot_confirm"
@@ -588,7 +760,9 @@ class Grader:
                                       "trusted_wrong_card": count(sensor, "outcome", "wrong_card"),
                                       "too_short_to_raise": count(sensor, "outcome", "too_short_to_raise"),
                                       "missed": count(sensor, "outcome", "missed") + at_recovery,  # a miss, whenever it was noticed
-                                      "missed_noticed_only_at_recovery": at_recovery},
+                                      "missed_noticed_only_at_recovery": at_recovery,
+                                      **({"sensor_check_caught_on_partner": count(sensor, "outcome", "caught_on_partner")}
+                                         if self.multi else {})},
             "undetectable": {"total": count(faults, "fault", "plausible_offset"),
                              "sensor_check_raised": sum(1 for e in faults if e["fault"] == "plausible_offset" and e["raised"]),
                              "wrong_card": sum(1 for e in faults if e["fault"] == "plausible_offset" and e["wrong_cards"])},
@@ -598,20 +772,23 @@ class Grader:
             "dropout": {"total": count(faults, "fault", "dropout")},
             "false_alarms": len(false_alarms), "unmatched_events": len(self.unmatched),
         }
-        frames = [f for fr in self.zones.values() for f in fr]
+        frames = [f for fr in self.all_frames.values() for f in fr]
         blind = self.blind_spot_cases()
         if blind:  # only when a probe went silent, so reports of other runs keep their shape
             summary["blind_spot"] = {"total": len(blind), **{outcome: count(blind, "outcome", outcome) for outcome in (
                 "false_reassurance", "cant_confirm", "alerted", "too_short_to_judge", "no_fault_in_window", "no_real_event")},
                 "cant_confirm_by_silent_flag_only": sum(1 for c in blind if c["silent_flag_only"])}
             summary["real_episodes"]["blind_spot"] = count(real, "outcome", "blind_spot")
+        if self.multi:  # only when a zone has several devices, so other logs keep their keys
+            summary["multi_device"] = {"zones": {zone: list(devices) for zone, devices in self.multi.items()}}
         report = {"frames": {"total": len(frames), "accepted_by_core": sum(f.accepted for f in frames),
                              "published": sum(bool(f.row["published"]) for f in frames)},
                   "rules": {rid: {"labels": r["match_any_labels"], "raise_after_s": self.window(rid)[0].total_seconds(),
                                   "clear_after_s": self.window(rid)[1].total_seconds()} for rid, r in self.rules.items()},
                   "summary": summary, "real_episodes": real, "fault_episodes": faults, "false_alarms": false_alarms,
                   "unmatched_events": self.unmatched, "reading_level": self.reading_level() if self.frame_info else None,
-                  "metric_definitions": {**METRIC_DEFINITIONS, **(BLIND_SPOT_DEFINITIONS if blind else {})}}
+                  "metric_definitions": {**METRIC_DEFINITIONS, **(BLIND_SPOT_DEFINITIONS if blind else {}),
+                                         **(MULTI_DEVICE_DEFINITIONS if self.multi else {})}}
         if blind:
             report["blind_spot_cases"] = blind
         return report
@@ -639,10 +816,11 @@ def replay_offline(rows: List[Dict[str, Any]], rules: List[Dict[str, Any]], defa
     except ImportError as error:
         raise SystemExit(f"--offline needs the model-router venv (services/model-router/.venv/bin/python): {error}")
     events: List[Dict[str, Any]] = []
-    info: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    info: Dict[Tuple, Dict[str, Any]] = {}  # (zone, tick); (zone, device, tick) in a multi-device zone
+    multi = multi_device_zones(rows)
     family_labels = {label for rule in rules if rule["id"] in SENSOR_FAMILY for label in rule["match_any_labels"]}
     with engine:
-        for row in sorted(rows, key=lambda r: (r["tick"], r["zone_id"])):
+        for row in sorted(rows, key=lambda r: (r["tick"], r["zone_id"])):  # never by device: the log's device order is Core's
             sent = row.get("sent")
             for item in row.get("calibrations", []):  # before the reading, so Core has them when it evaluates it
                 if (item.get("delivery") or {"status": 201}).get("status") in ACCEPTED_STATUSES:
@@ -651,7 +829,8 @@ def replay_offline(rows: List[Dict[str, Any]], rules: List[Dict[str, Any]], defa
             if not core_accepted(row):
                 continue
             got = engine.observe(sent)
-            info[(row["zone_id"], row["tick"])] = {
+            key = (row["zone_id"], row["device_id"], row["tick"]) if row["zone_id"] in multi else (row["zone_id"], row["tick"])
+            info[key] = {
                 "labels": got["labels"], "trust": got["trust"], "vetoed_fields": got["vetoed_fields"],
                 "card_labels": got["card_labels"],
                 "sensor_check_labels": [label for label in got["sensor_check_labels"] if label in family_labels]}
@@ -679,14 +858,16 @@ def fetch_alerts(automation_url: str, farm_id: str, zones: List[str]) -> Tuple[L
     return events, states
 
 
-def fetch_core_events(core_url: str, farm_id: str, zones: List[str]) -> Dict[str, List[datetime]]:
-    stored: Dict[str, List[datetime]] = {}
+def fetch_core_events(core_url: str, farm_id: str, zones: List[str]) -> Dict[str, List[Any]]:
+    """What Core stored, per zone: a sample time, or a (device_id, sample time) pair when the stored event names its device."""
+    stored: Dict[str, List[Any]] = {}
     for zone in zones:
         offset, got = 0, []
         while True:
             query = urllib.parse.urlencode({"farm_id": farm_id, "zone_id": zone, "limit": 500, "offset": offset})
             page = get_json(f"{core_url.rstrip('/')}/v1/sensors/events?{query}")["events"]
-            got += [parse_ts(e["timestamp"]) for e in page]
+            got += [(e["device_id"], parse_ts(e["timestamp"])) if e.get("device_id") else parse_ts(e["timestamp"])
+                    for e in page]
             if len(page) < 500:
                 break
             offset += 500
@@ -694,14 +875,26 @@ def fetch_core_events(core_url: str, farm_id: str, zones: List[str]) -> Dict[str
     return stored
 
 
-def core_check(grader: Grader, stored: Dict[str, List[datetime]]) -> Dict[str, Any]:
-    """What Core stored against what the truth log says it accepted."""
-    accepted = {zone: {f.sample for f in frames if f.accepted} for zone, frames in grader.zones.items()}
-    dead = {zone: {parse_ts(f.row["sent"]["timestamp"]) for f in frames if f.row["published"] and not f.accepted
-                   and f.row.get("sent")} for zone, frames in grader.zones.items()}
+def core_check(grader: Grader, stored: Dict[str, List[Any]]) -> Dict[str, Any]:
+    """What Core stored against what the truth log says it accepted.
+
+    Compared per zone, or per stream (zone and device) in a multi-device zone, where a stored event without a device
+    id matches no stream."""
+    def stored_of(zone: str, device: Optional[str]) -> set:
+        pairs = [item if isinstance(item, tuple) else (None, item) for item in stored.get(zone, [])]
+        return {when for who, when in pairs if device is None or who == device}
+
+    accepted = {key: {f.sample for f in frames if f.accepted} for key, frames in grader.streams.items()}
+    dead = {key: {parse_ts(f.row["sent"]["timestamp"]) for f in frames if f.row["published"] and not f.accepted
+                  and f.row.get("sent")} for key, frames in grader.streams.items()}
     out = {"stored": sum(len(v) for v in stored.values()), "accepted_in_truth": sum(len(v) for v in accepted.values())}
-    out["accepted_missing_in_core"] = sum(len(accepted[z] - set(stored.get(z, []))) for z in accepted)
-    out["rejected_but_stored"] = sum(len(dead[z] & set(stored.get(z, []))) for z in dead)
+    out["accepted_missing_in_core"] = sum(len(accepted[k] - stored_of(*k)) for k in accepted)
+    out["rejected_but_stored"] = sum(len(dead[k] & stored_of(*k)) for k in dead)
+    if grader.multi:
+        out["by_stream"] = {zone: {device: {"accepted_in_truth": len(accepted[(zone, device)]),
+                                            "accepted_missing_in_core": len(accepted[(zone, device)] - stored_of(zone, device)),
+                                            "rejected_but_stored": len(dead[(zone, device)] & stored_of(zone, device))}
+                                   for device in devices} for zone, devices in grader.multi.items()}
     return out
 
 
@@ -718,7 +911,8 @@ def jsonable(value: Any) -> Any:
 
 
 VERDICTS = {"caught": "caught", "caught_cant_confirm": "caught as can't-confirm (safe)", "missed": "MISSED", "caught_at_recovery": "MISSED (noticed only when it ended)", "too_short_to_raise": "too short to raise",
-            "no_card_rule": "no card rule", "wrong_card": "WRONG CARD", "undetectable": "undetectable",
+            "no_card_rule": "no card rule", "wrong_card": "WRONG CARD",
+            "caught_on_partner": "caught on the partner probe (the card asks to check both)", "undetectable": "undetectable",
             "rejected_by_core": "rejected by Core", "accepted_by_core": "ACCEPTED BY CORE",
             "not_published": "no data (not scored)", "blind_spot": "silent probe (graded under Blind spots)"}
 BLIND_VERDICTS = {"false_reassurance": "FALSE REASSURANCE", "cant_confirm": "can't confirm (pass)",
@@ -741,12 +935,19 @@ def describe(ep: Dict[str, Any]) -> Tuple[str, str]:
     return what, expected or (f"{SENSOR_RULE} card, no domain card from {', '.join(ep['forbidden_fields'])}")
 
 
+def zone_text(item: Dict[str, Any]) -> str:
+    """The Zone column: `zone · device` for a multi-device zone's faults, blind spots and false alarms."""
+    return f"{item['zone']} · {item['device']}" if item.get("device") and item.get("type") != "real_event" else item["zone"]
+
+
 def raised_text(ep: Dict[str, Any]) -> str:
     parts = []
     if ep.get("raised"):
         r = ep["raised"]
         parts.append(f"{r['rule']} already active since {clock(r['time'])}" if r["already_active"] else
                      f"{r['rule']} at {clock(r['time'])} (+{r['delay_s']:.0f} s, {r['delay_samples']} samples)")
+        if r.get("device") and ep["type"] == "real_event":  # a real event in a multi-device zone: which device raised its card
+            parts[-1] += f" on {r['device']}"
     if ep.get("cant_confirm_from"):
         c = ep["cant_confirm_from"]
         parts.append(f"can't-confirm ({c['rule']}) since {clock(c['time'])}"
@@ -754,6 +955,9 @@ def raised_text(ep: Dict[str, Any]) -> str:
     if ep.get("raised_at_recovery"):
         r = ep["raised_at_recovery"]
         parts.append(f"{r['rule']} at {clock(r['time'])} (+{r['delay_s']:.0f} s), only after the fault ended")
+    if ep.get("raised_on_partner"):
+        r = ep["raised_on_partner"]
+        parts.append(f"{r['rule']} on the partner {r['device']} at {clock(r['time'])} (+{r['delay_s']:.0f} s)")
     parts += [f"{w['rule']} at {clock(w['time'])}" for w in ep.get("wrong_cards", [])]
     if not parts and ep.get("sensor_check_frames"):
         return f"nothing raised (sensor check seen on {ep['sensor_check_frames']} readings, never lasted {ep['raise_after_s']:.0f} s)"
@@ -773,7 +977,7 @@ def blind_spot_lines(cases: List[Dict[str, Any]]) -> List[str]:
         sign = (f"{clock(sig['time'])} (+{sig['delay_s']:.0f} s after silence, {sig['after_crossing_s']:+.0f} s vs the true "
                 f"crossing)" if sig else "nothing")
         via = ", ".join(VIA_TEXT[v] for v in c["via"]) or "nothing"
-        lines.append(f"| {c['zone']} | {clock(c['start_time'])} | {clock(c['end_time'])} | {c['field']} | "
+        lines.append(f"| {zone_text(c)} | {clock(c['start_time'])} | {clock(c['end_time'])} | {c['field']} | "
                      f"{', '.join(c['events']) or 'none'}{' (crossed ' + ', '.join(c['labels']) + ')' if c['labels'] else ''} | "
                      f"{c['core_refused_frames']} of its packets | {sign} | {via}"
                      f"{' (passive flag only)' if c['silent_flag_only'] else ''} | {BLIND_VERDICTS[c['outcome']]} |")
@@ -790,11 +994,11 @@ def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
              "|---|---|---|---|---|---|---|"]
     for ep in episodes:
         what, expected = describe(ep)
-        lines.append(f"| {ep['zone']} | {clock(ep['start_time'])} | {clock(ep['end_time'])} | {what} | {expected} | "
+        lines.append(f"| {zone_text(ep)} | {clock(ep['start_time'])} | {clock(ep['end_time'])} | {what} | {expected} | "
                      f"{raised_text(ep)} | {VERDICTS.get(ep['outcome'], ep['outcome'])} |")
     for fa in report["false_alarms"]:
         extra = f" (labels: {', '.join(fa['labels'])})" if fa.get("labels") else ""
-        lines.append(f"| {fa['zone']} | {clock(fa['time'])} | | normal operation | no card | {fa['rule']} at "
+        lines.append(f"| {zone_text(fa)} | {clock(fa['time'])} | | normal operation | no card | {fa['rule']} at "
                      f"{clock(fa['time'])}{extra} | FALSE ALARM |")
     if report.get("blind_spot_cases"):
         lines += blind_spot_lines(report["blind_spot_cases"])
@@ -807,7 +1011,9 @@ def markdown(report: Dict[str, Any], mode: str, truth: Path) -> str:
               f"- Sensor faults: {sensor['total']}; sensor_check caught {sensor['sensor_check_caught']}, wrong domain card "
               f"{sensor['trusted_wrong_card']}, too short to raise {sensor['too_short_to_raise']}, missed {sensor['missed']}"
               + (f" (of which {sensor['missed_noticed_only_at_recovery']} noticed only after the fault ended)"
-                 if sensor["missed_noticed_only_at_recovery"] else "") + ".",
+                 if sensor["missed_noticed_only_at_recovery"] else "")
+              + (f"; caught on the partner probe {sensor['sensor_check_caught_on_partner']}"
+                 if "sensor_check_caught_on_partner" in sensor else "") + ".",
               f"- Undetectable (plausible_offset): {s['undetectable']['total']}; sensor_check raised "
               f"{s['undetectable']['sensor_check_raised']}, wrong card {s['undetectable']['wrong_card']}.",
               f"- Dead clock: {s['dead_clock']['total']}; rejected by Core {s['dead_clock']['rejected_by_core']}, "
@@ -854,6 +1060,9 @@ def print_summary(report: Dict[str, Any], mode: str) -> None:
         print(f"[{mode}] blind spots {b['total']}: FALSE REASSURANCE {b['false_reassurance']}, can't confirm "
               f"{b['cant_confirm']} ({b['cant_confirm_by_silent_flag_only']} by the device-silent flag only), alerted "
               f"{b['alerted']}, too short {b['too_short_to_judge']}, no fault in window {b['no_fault_in_window']}")
+    if s.get("multi_device"):
+        zones = "; ".join(f"{zone} ({', '.join(map(str, devices))})" for zone, devices in s["multi_device"]["zones"].items())
+        print(f"[{mode}] multi-device zones {zones}: caught on the partner probe {sensor['sensor_check_caught_on_partner']}")
     rl = report.get("reading_level")
     if rl:
         print(f"[{mode}] normal frames {rl['normal_frames']}: with card {rl['normal_with_card']}, sensor check outside "

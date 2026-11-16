@@ -51,7 +51,8 @@ Short walkthrough, including grading Pomona against the truth log: [docs/FAKE_GR
 `fake_greenhouse.py` is a deterministic, physically plausible greenhouse for testing how
 Pomona handles broken sensors versus real problems. It runs two zones of farm `demo-farm`:
 `greenhouse-a` (`fake-substrate-01`, `greenhouse_substrate`) and `greenhouse-b`
-(`fake-hydro-01`, `hydroponic_greenhouse`). `greenhouse_tomato.py` is unchanged.
+(`fake-hydro-01`, `hydroponic_greenhouse`). `greenhouse_tomato.py` is unchanged. A scenario can give a zone
+several devices (see [Devices in a zone](#devices-in-a-zone)).
 
 A hidden TRUE state advances each tick (diurnal temperature and humidity, substrate drying and
 irrigation, EC and pH drift). A sensor layer adds noise and quantisation and applies faults.
@@ -112,6 +113,11 @@ shows only as "Hidden #n" with a Stop button; **Reveal hidden** (asks first) sho
 and ticks from then on; **Stop all**; and **Download session scenario**. Each zone card also has a
 **Calibrate** button (see Calibration below).
 
+A zone with several devices (see below) lists each device under the zone: its id, its sensors and its last packet.
+A fault row gets a device selector next to the field selector; it lists only the devices that carry the selected field.
+The Calibrate row has one too. If the same fault runs on two devices, each has its own Stop button. Real events
+(heat spike, dry zone) have no device selector: they change the zone's truth. A zone with one device looks as before.
+
 The answer key stays hidden while running: the page and API never expose the true values or the
 truth log's `expect`. Testers read the truth log after the run. The session download is the
 exception: it contains the real names of hidden injections, so label it as answer key and keep it
@@ -128,10 +134,11 @@ without a broker. Without it a dry run still skips sleeping.
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | The page |
-| `GET /api/catalog` | Zones (system type, sensor fields) and every injection: name, kind, description, `takes_field` / `needs_field` / `default_field`, applicable zones (found by trying to build it per zone), default params |
-| `GET /api/state` | `tick`, `interval`, `seconds_to_next_tick`, `queued`, `recorded`, `pending`, `revealed`; per zone the last sent reading (or null), `sequence`, whether the last tick `published`, and its running injections; a `hidden` list of `{"hidden": true, "id": n}` |
-| `POST /api/start` | `{name, zone, field?, params?}` |
-| `POST /api/stop` | `{name, zone, field?}`, or `{id}` for a hidden one |
+| `GET /api/catalog` | Zones (system type, sensor fields) and every injection: name, kind, description, `takes_field` / `needs_field` / `default_field`, applicable zones (found by trying to build it per zone), default params. A zone with several devices also lists `devices: [{device_id, sensors, calibratable}]` |
+| `GET /api/state` | `tick`, `interval`, `seconds_to_next_tick`, `queued`, `recorded`, `pending`, `revealed`; per zone the last sent reading (or null), `sequence`, whether the last tick `published`, and its running injections (for a zone with several devices these describe its first device); a `hidden` list of `{"hidden": true, "id": n}`. A zone with several devices also has `devices: [{device_id, sensors, sequence, published, last_sent, injections}]`, and its zone-level `injections` list the zone's events plus every device's faults, each fault with a `device` key |
+| `POST /api/start` | `{name, zone, field?, device?, params?}` |
+| `POST /api/stop` | `{name, zone, field?, device?}`, or `{id}` for a hidden one |
+| `POST /api/calibrate` | `{zone, field, device?}` |
 | `POST /api/stop_all` | Stop everything, hidden included |
 | `POST /api/hidden` | Start a random applicable injection from `random.Random(f"{seed}:hidden")`; returns its id |
 | `POST /api/reveal` | Show hidden injections by name from now on; returns them |
@@ -145,6 +152,69 @@ the seed; replaying it with the same seed, `--interval`, `--sim-speed`, `--start
 gives a byte-identical truth log (`run` in the file lists them). Truth log injections carry
 `source`: `scenario`, `manual` or `hidden`. A hidden injection never merges with a visible one of
 the same name, and a button's Stop never stops a hidden one.
+
+### Devices in a zone
+
+By default each zone has one device (its `ZoneConfig` device with every sensor of the zone). A scenario can give a zone
+several devices with a top-level `devices` key. A scenario without the key, and any zone it does not list, behaves
+exactly as before, byte for byte.
+
+```json
+"devices": {
+  "greenhouse-a": [
+    {"device_id": "climate-1", "sensors": ["air_temperature_c", "humidity_pct"]},
+    {"device_id": "climate-2", "sensors": ["air_temperature_c", "humidity_pct"],
+     "offsets": {"air_temperature_c": 0.4}, "wander": {"air_temperature_c": 0.3}},
+    {"device_id": "substrate-1", "sensors": ["ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c"]}]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `device_id` | Required. Unique in the zone; one MQTT topic segment (letters, digits, `_`, `-`, and `.` after the first character, at most 64 characters) |
+| `sensors` | Required, not empty. The probes this device carries, each one of the zone's sensors. A device may list `substrate_moisture_pct` instead of `soil_moisture_pct`: it then sends that name only (a device listing `soil_moisture_pct` sends both names, as today) |
+| `offsets` | Optional `{probe: number}`: a constant added to the probe's true value (where the probe hangs) |
+| `wander` | Optional `{probe: bound}`: a slow random walk of the probe's own, spread about `bound / 2.5`, clipped to plus or minus `bound` |
+
+The layout is checked when the `Simulation` is built, before the first tick, and a problem is a `ValueError` that names
+it. In brief:
+
+- `devices` is an object of zone id to a non-empty list of device objects; the zone exists; at most 8 devices per zone;
+  any key other than the four above is refused (so a typo such as `offset` is caught);
+- `device_id` is valid and unique; `sensors` is not empty, lists only the zone's sensors and no probe twice;
+- together, a zone's devices carry every sensor of the zone;
+- `offsets` and `wander` use canonical probe names (`soil_moisture_pct`, never the alias), name only probes that device
+  carries, hold finite numbers, and `wander` is not negative;
+- a zone listed with one device may not use `offsets`, `wander` or `substrate_moisture_pct`, because its truth rows
+  would not show the difference;
+- steps on a zone the layout lists are checked against it: a `device` must exist in the zone, a field fault's field
+  must be carried by that device (or by some device when no `device` is given), and an event may not carry `device`.
+  Steps on zones the layout does not list fail only when their tick runs, as before.
+
+Noise: the first device that carries a field uses the zone's own noise draw for it, so a zone split into devices with
+disjoint probes sends the same values as the one-device zone. A later device carrying the same field (a partner) has
+its own noise. Offsets and wander belong to the probe, not to a fault: the truth row's `true` stays the zone's truth.
+All devices of a zone use the tick's timestamp. A multi-device hydroponic zone sends no moisture placeholder.
+
+**The step `device` key.** Scenario steps (`start`, `stop`, `calibrate`) accept an optional `"device"`:
+
+- A **field fault** (`stuck`, `drift`, `jump`, `spike`, `noisy`, `probe_dropout`, `plausible_offset`) without `device`
+  goes on the first device in the list that carries the field (the fault's default field when the step names none).
+  With `device`, that device must carry it.
+- A **whole-device fault** (`dropout`, `dead_clock`) without `device` goes on the zone's first device.
+- An **event** takes no `device`: it changes the zone's truth, which every device sees.
+- A **stop** without `device` stops every matching fault in the zone; with `device`, only that device's. The same
+  fault on two devices (for example stuck humidity on `climate-1` and on `climate-2`) is two faults.
+- A **calibrate** without `device` goes to the first device that carries the field. The reference is that probe's own
+  true value.
+- In a zone with one device, `device` is accepted only when it equals that device's id.
+- **Hidden random** in a simulation with a multi-device zone picks among (injection, zone, device) combinations, and
+  the reveal names the device. Without a multi-device zone it draws exactly as before.
+- Recorded manual steps and the session download carry `device` only for zones with several devices, and the download
+  carries `devices` only when the scenario had it. Replaying a session needs this simulator version or newer.
+
+`step()` returns one `Reading` per device per tick (zones in config order, devices in list order). A zone with one
+device still gives one per tick; a caller that assumes one `Reading` per zone must allow for several.
 
 ### Scenarios
 
@@ -178,6 +248,18 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   probe on their deciding field, a probe silent alone, one fault each of `stuck`, `noisy`, `jump`, `drift` and `spike`,
   and a whole-device `dropout` of 165 ticks per zone. A `probe_dropout` start step may carry a `group` key
   (`coarse_only` or `silent`, default `silent`): the simulator ignores it, the eval uses it to tell the two families apart.
+- `scenarios/multi_device.json`: `demo.json` (same seed, 460 ticks and steps) with `greenhouse-a` split into two
+  devices: `climate-1` (air temperature, humidity) and `substrate-1` (EC, pH, soil moisture, substrate temperature).
+  `greenhouse-b` keeps one device. Every reading value equals `demo.json`'s, field by field, so the scorer should give
+  the same episodes with the same outcomes; the heat and cold cards, which read air on one device and substrate
+  temperature on the other, may come later, never earlier.
+- `scenarios/slow_drift.json`: 1000 ticks (about 8.3 hours), seed 23, the pair zone. `greenhouse-a` has `substrate-1`
+  (EC, pH, moisture, substrate temperature), `substrate-2` (moisture only, sent as `substrate_moisture_pct`, with an
+  offset and a wander) and two climate devices, `climate-1` and `climate-2` (the second with offsets and wander).
+  The first 240 ticks are clean. Then four slow drifts downward (air on `climate-1` and on `greenhouse-b`, humidity on
+  `climate-2`, moisture on `substrate-2`), a stuck humidity probe on `climate-1`, a humid night and a 20 minute
+  dropout of `climate-2`. Today's scorer calls the drifts missed (noticed only when they end); they are the
+  baseline for the planned pair check.
 - `scenarios/validation.json`: 15 ticks at `--interval 1`, used by `make local-validation`.
 - `scenarios/smoke.json`: 12 ticks, used by the tests.
 
@@ -246,6 +328,19 @@ temperature), `sent` (exactly the payload, or null), `active_faults`, `active_ev
 - `recovering_from`: names of sensor faults that stopped within the last 11 published samples on
   that zone. Pomona's history still holds the bad values, so a sensor check on such a `normal`
   frame is expected lingering, not a false alarm.
+
+In a zone with several devices there is one row per device per tick. `true`, the sim times, `active_events` and
+`expected_labels` are the zone's and repeat on each row; `device_id`, `published`, `sequence`, `sent`, `active_faults`,
+`calibrations` and the rest of `expect` are the device's, so a fault shows only on the row of the device that has it.
+Rows of these zones (and only these) also carry, after the usual keys:
+
+- `sensors`: the device's probes, canonical names;
+- `device_offset`: `{probe: offset + this tick's wander}`, only for a device that has `offsets` or `wander`;
+- `expect.device_labels`: the labels of the true state that this device's own probes could show (for example
+  `high_ec` only for a device with an EC probe). The scorer's reading-level counts use it.
+
+A zone with one device writes today's row, byte for byte, even in a log whose other zone has several devices. The
+console line (`summary_line`) adds `device=<id>` only for these zones.
 
 With `--core-url` each truth line also has `delivery`: `{"status": 201}` for what Core answered
 (422 for a dead clock), or the error status and message.

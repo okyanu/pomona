@@ -150,3 +150,69 @@ def test_the_partner_window_is_seven_days_on_sample_time(pomona, readings):
     pomona._device_fields.pop(("demo-farm", "greenhouse-a", "climate-1"))
     assert pomona._record_and_device_fields(("demo-farm", "greenhouse-a", "climate-1"), engine.core_packet(later(8)),
                                             BASE + timedelta(days=8)) is None
+
+
+# --- Slice 3 (docs/design/multi-device-zones-slice3.md 3.4): the alert `detail` in a multi-device zone -------------
+
+def faulty(readings, ph_from=150, hot_from=100):
+    """Zone A with a pH probe jumping out of range from `ph_from` and the air probe stuck at 36 C from `hot_from`:
+    a sensor card on each probe and a heat condition card."""
+    return [{**e, **({"ph": 15.0} if tick >= ph_from else {}), **({"air_temperature_c": 36.0} if tick >= hot_from else {})}
+            for tick, e in enumerate(readings)]
+
+
+def watch_monitor(pomona, monkeypatch):
+    """Record every call to the alert monitor (positional args, keyword args); the call itself goes through."""
+    calls = []
+    real = pomona.monitor.observe
+
+    def spy(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pomona.monitor, "observe", spy)
+    return calls
+
+
+def test_a_sensor_alert_in_a_two_device_zone_carries_the_check_text(pomona, readings):
+    got = run(pomona, [p for event in faulty(readings) for p in split(event)])
+    events = [e for g in got for e in g["alert_events"]]
+    raised = {(e["rule_id"], e["device_id"]): e for e in events if e["event"] == "raised"}
+    # each probe's sensor card carries the router's own check text for that probe
+    assert "pH probe calibration" in raised[("sensor_check", "substrate-1")]["detail"]
+    assert "air_temperature_c" in raised[("sensor_check", "climate-1")]["detail"]
+    # the heat condition card does not: its label is not a data-quality label
+    assert ("heat_stress_check", "climate-1") in raised and "detail" not in raised[("heat_stress_check", "climate-1")]
+    states = {(s["rule_id"], s["device_id"]): s for s in pomona.states()}
+    assert all(s.get("detail") for (rule, _), s in states.items() if rule == "sensor_check")
+    assert not [s for (rule, _), s in states.items() if rule != "sensor_check" and "detail" in s]
+    # whatever carries a detail is a sensor rule, and the text is never the routine line alone
+    assert {e["rule_id"] for e in events if e.get("detail")} <= {"sensor_check", "sensor_flatline"}
+    assert not [e for e in events if e.get("detail") and "routine monitoring" in e["detail"]]
+
+
+def test_the_monitor_gets_the_detail_only_when_there_is_one_and_the_labels_in_a_multi_device_zone(pomona, readings, monkeypatch):
+    calls = watch_monitor(pomona, monkeypatch)
+    got = run(pomona, [p for event in faulty(readings) for p in split(event)])
+    assert len(calls) == len(got)
+    assert calls[0][1] == {}  # the zone's very first packet is judged before the zone has a second device: today's call
+    assert all(len(args) == 5 for args, _ in calls)
+    kwargs = [kw for _, kw in calls[1:]]
+    assert all("data_quality_labels" in kw for kw in kwargs)  # every reading from the second packet on
+    for args, kw in calls[1:]:  # the data-quality labels are a part of the reading's labels
+        assert set(kw["data_quality_labels"]) <= set(args[4])
+    assert any(kw["data_quality_labels"] for _, kw in calls[1:])
+    with_text = [kw for kw in kwargs if "detail" in kw]
+    assert with_text and len(with_text) < len(kwargs)  # absent when the router has nothing to say
+    assert all(kw["detail"] for kw in with_text)
+
+
+def test_a_single_device_zone_calls_the_monitor_as_before_and_its_events_have_no_detail(pomona, readings, monkeypatch):
+    calls = watch_monitor(pomona, monkeypatch)
+    got = run(pomona, faulty(readings))  # the same faults, one device (the simulator's own) in the zone
+    assert all(kw == {} and len(args) == 5 for args, kw in calls) and len(calls) == len(got)
+    events = [e for g in got for e in g["alert_events"]]
+    assert {e["rule_id"] for e in events} >= {"sensor_check", "heat_stress_check"}
+    assert not [e for e in events if "detail" in e]
+    assert not [s for s in pomona.states() if "detail" in s]
+
