@@ -102,7 +102,7 @@ device (`"device": "climate-1"` in a step, or the device selector on the control
 go wrong. A real event (heat spike, dry zone) is the zone's truth and every device sees it. The truth log has one row
 per device per tick, and the scorer joins everything by zone and device. Two extra keys, `offsets` and `wander`, make a
 second probe of the same field sit a little differently from the first, as real probes do. The full list of keys is in
-the [simulator README](../examples/simulators/README.md#devices-in-a-zone).
+the [simulator README](https://github.com/okyanu/pomona/blob/main/examples/simulators/README.md#devices-in-a-zone).
 
 Two scenarios use it:
 

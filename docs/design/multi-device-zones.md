@@ -325,7 +325,7 @@ with per-device probes, offsets and wander, and faults per device), a truth log 
 scorer keyed by (zone, device) with the new `caught_on_partner` verdict, and the scenarios `multi_device.json` and
 `slow_drift.json`. The game is unchanged (one device per zone). User docs:
 [FAKE_GREENHOUSE.md](../FAKE_GREENHOUSE.md#zones-with-several-devices) and the
-[simulator README](../../examples/simulators/README.md#devices-in-a-zone). The list below is kept as the outline the
+[simulator README](https://github.com/okyanu/pomona/blob/main/examples/simulators/README.md#devices-in-a-zone). The list below is kept as the outline the
 design started from.
 
 - **Simulator:** `fake_greenhouse.py` zones get devices: `DeviceConfig(device_id, sensors)`.
