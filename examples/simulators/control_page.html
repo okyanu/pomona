@@ -46,6 +46,10 @@ select, input[type=text] { font: inherit; max-width: 100%; border: 1px solid var
 details { margin-top: 4px; font-size: .85rem; } details input { width: 100%; margin-top: 4px; font-family: ui-monospace, monospace; }
 .err { color: var(--danger); font-size: .85rem; min-height: 1.2em; overflow-wrap: anywhere; }
 .hidden-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.devices { display: grid; gap: 8px; margin-top: 8px; }
+.stops { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.device { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.device b { overflow-wrap: anywhere; }
 .chip { display: inline-flex; gap: 8px; align-items: center; background: var(--chip); border-radius: 6px; padding: 4px 8px; overflow-wrap: anywhere; }
 </style>
 </head>
@@ -95,13 +99,30 @@ async function api(path, body) {
   return data;
 }
 
+// A zone with several devices (zone.devices) lists them; a fault row or the calibrate row picks one among the
+// devices that carry the selected field. Without zone.devices none of this is built.
+function fillDevices(select, zone, field) {
+  const keep = select.value;
+  select.replaceChildren();
+  zone.devices.filter((d) => !field || d.sensors.includes(field))
+    .forEach((d) => select.append(h("option", { value: d.device_id, textContent: d.device_id })));
+  if ([...select.options].some((o) => o.value === keep)) select.value = keep;
+}
+
 function buildRow(zone, inj) {
   const row = { zone: zone.zone_id, inj, active: null };
   row.select = null;
+  row.deviceSelect = null;
   if (inj.takes_field) {
     row.select = h("select", { title: "field" });
     zone.sensors.forEach((f) => row.select.append(h("option", { value: f, textContent: f })));
     row.select.value = inj.default_field || zone.sensors[0];
+  }
+  if (zone.devices && inj.kind === "sensor_fault") {
+    row.deviceSelect = h("select", { title: "device" });
+    fillDevices(row.deviceSelect, zone, row.select ? row.select.value : null);
+    row.deviceSelect.onchange = () => refresh();
+    if (row.select) row.select.onchange = () => { fillDevices(row.deviceSelect, zone, row.select.value); refresh(); };
   }
   row.params = h("input", { type: "text", placeholder: JSON.stringify(inj.default_params) });
   row.details = h("details", {}, h("summary", { textContent: "params (JSON)" }), row.params);
@@ -110,8 +131,11 @@ function buildRow(zone, inj) {
   row.btn.onclick = () => press(row);
   const top = h("div", { class: "top" }, h("span", { class: "name", textContent: inj.name }));
   if (row.select) top.append(row.select);
+  if (row.deviceSelect) top.append(row.deviceSelect);
   top.append(row.btn);
+  row.stops = row.deviceSelect ? h("div", { class: "stops" }) : null;  // one Stop per running fault (devices only)
   row.el = h("div", { class: "row " + (inj.kind === "sensor_fault" ? "fault" : "event") }, top,
+    ...(row.stops ? [row.stops] : []),
     h("div", { class: "desc", textContent: inj.description }), row.details, row.err);
   return row;
 }
@@ -120,8 +144,17 @@ function build() {
   const root = $("zones");
   catalog.zones.forEach((zone) => {
     const values = h("dl");
+    const deviceList = h("div", { class: "devices" });
     const faults = h("div"), events = h("div");
-    const panel = { values, status: h("div", { class: "sub" }) };
+    const panel = { values, status: h("div", { class: "sub" }), deviceList, deviceEls: {} };
+    if (zone.devices) {
+      zone.devices.forEach((d) => {
+        const dl = h("dl"), title = h("div", { class: "sub" });
+        panel.deviceEls[d.device_id] = { dl, title };
+        deviceList.append(h("div", { class: "device" }, h("b", { textContent: d.device_id }),
+          h("div", { class: "sub", textContent: d.sensors.join(", ") }), title, dl));
+      });
+    }
     catalog.injections.filter((inj) => inj.zones.includes(zone.zone_id)).forEach((inj) => {
       const row = buildRow(zone, inj);
       rows[zone.zone_id + "|" + inj.name] = row;
@@ -132,41 +165,74 @@ function build() {
     zone.calibratable.forEach((f) => calSelect.append(h("option", { value: f, textContent: f })));
     const calErr = h("div", { class: "err" });
     const calBtn = h("button", { textContent: "Calibrate" });
+    let calDevice = null;
+    if (zone.devices) {
+      calDevice = h("select", { title: "device" });
+      const refill = () => fillDevices(calDevice, { devices: zone.devices.filter((d) => d.calibratable.includes(calSelect.value)) }, null);
+      calSelect.onchange = refill;
+      refill();
+    }
     calBtn.onclick = async () => {
       calErr.textContent = "";
-      try { await api("/api/calibrate", { zone: zone.zone_id, field: calSelect.value }); calErr.textContent = "Queued: applies at the next tick"; await refresh(); }
+      try { await api("/api/calibrate", { zone: zone.zone_id, field: calSelect.value, device: calDevice ? calDevice.value : undefined }); calErr.textContent = "Queued: applies at the next tick"; await refresh(); }
       catch (e) { calErr.textContent = e.message; }
     };
     const calibration = h("div", { class: "row" },
-      h("div", { class: "top" }, h("span", { class: "name", textContent: "calibrate" }), calSelect, calBtn),
+      h("div", { class: "top" }, h("span", { class: "name", textContent: "calibrate" }), calSelect, ...(calDevice ? [calDevice] : []), calBtn),
       h("div", { class: "desc", textContent: "A meter confirms this probe: Pomona accepts its current level as the new normal. Not a fault or event; the truth is unchanged." }), calErr);
     root.append(h("section", { class: "card" },
       h("h2", { textContent: zone.zone_id }),
-      h("div", { class: "sub", textContent: zone.device_id + " / " + zone.system_type }),
-      panel.status, values,
+      h("div", { class: "sub", textContent: (zone.devices ? zone.devices.length + " devices" : zone.device_id) + " / " + zone.system_type }),
+      panel.status, ...(zone.devices ? [deviceList] : [values]),
       h("h3", { textContent: "Sensor faults (reading wrong)" }), faults,
       h("h3", { textContent: "Real events (plant affected)" }), events,
       h("h3", { textContent: "Calibration (a meter confirms a probe)" }), calibration));
   });
 }
 
+function stopLabel(i) {
+  return "Stop" + (i.field ? " (" + i.field + ")" : "") + (i.device ? " on " + i.device : "") + (i.stopping ? " - ramping down" : "");
+}
+
+async function stopInstance(row, inj) {
+  row.err.textContent = "";
+  try { await api("/api/stop", { name: row.inj.name, zone: row.zone, field: inj.field || undefined, device: inj.device }); await refresh(); }
+  catch (e) { row.err.textContent = e.message; }
+}
+
 async function press(row) {
   row.err.textContent = "";
   try {
     if (row.active) {
-      await api("/api/stop", { name: row.inj.name, zone: row.zone, field: row.active.field || undefined });
+      await api("/api/stop", { name: row.inj.name, zone: row.zone, field: row.active.field || undefined, device: row.active.device });
     } else {
       let params;
       if (row.params.value.trim()) {
         try { params = JSON.parse(row.params.value); } catch (e) { throw new Error("params is not valid JSON"); }
       }
-      await api("/api/start", { name: row.inj.name, zone: row.zone, field: row.select ? row.select.value : undefined, params });
+      await api("/api/start", { name: row.inj.name, zone: row.zone, field: row.select ? row.select.value : undefined, params, device: row.deviceSelect ? row.deviceSelect.value : undefined });
     }
     await refresh();
   } catch (e) { row.err.textContent = e.message; }
 }
 
+function renderDeviceValues(zone) {
+  const panel = panels[zone.zone_id];
+  zone.devices.forEach((d) => {
+    const els = panel.deviceEls[d.device_id], sent = d.last_sent;
+    els.title.textContent = "Last packet " + (d.published === null ? "-" : d.published ? "published" : "not published (no packet)")
+      + (d.injections.length ? " [" + d.injections.map((i) => i.name + (i.field ? "(" + i.field + ")" : "")).join(", ") + "]" : "");
+    if (!sent) els.dl.innerHTML = "<dt>No reading yet</dt><dd></dd>";
+    else {
+      const keys = VALUE_FIELDS.filter((k) => k in sent).concat(["timestamp", "sequence"]);
+      els.dl.innerHTML = keys.map((k) => "<dt>" + esc(k) + "</dt><dd>" + esc(sent[k]) + "</dd>").join("");
+    }
+  });
+  panel.status.textContent = "Last tick " + zone.devices.map((d) => d.device_id + " " + (d.published === null ? "-" : d.published ? "published" : "not published")).join(", ");
+}
+
 function renderValues(zone) {
+  if (zone.devices) return renderDeviceValues(zone);
   const panel = panels[zone.zone_id], sent = zone.last_sent;
   if (!sent) { panel.values.innerHTML = "<dt>No reading yet</dt><dd></dd>"; }
   else {
@@ -177,17 +243,30 @@ function renderValues(zone) {
 }
 
 function renderRow(zone, row, state) {
-  const active = zone.injections.find((i) => i.name === row.inj.name) || null;
-  const pend = state.pending.find((p) => p.zone === zone.zone_id && p.name === row.inj.name);
+  // With devices, a row's fault is the one on the selected device and field; the selects stay in use.
+  const pick = row.deviceSelect;
+  const active = zone.injections.find((i) => i.name === row.inj.name
+    && (!pick || (i.device === pick.value && (!row.select || i.field === row.select.value)))) || null;
+  const pend = state.pending.find((p) => p.zone === zone.zone_id && p.name === row.inj.name && (!pick || p.device === pick.value));
   row.active = active;
   row.btn.disabled = !!pend;
   row.details.hidden = !!active || !!pend;
-  if (row.select) row.select.hidden = !!active || !!pend;
+  if (row.select) row.select.hidden = !pick && (!!active || !!pend);
   if (pend) { row.btn.textContent = pend.op === "start" ? "Queued: start" : "Queued: stop"; row.btn.className = ""; }
   else if (active) {
-    row.btn.textContent = "Stop" + (active.field ? " (" + active.field + ")" : "") + (active.stopping ? " - ramping down" : "");
+    row.btn.textContent = stopLabel(active);
     row.btn.className = "stop";
   } else { row.btn.textContent = "Start"; row.btn.className = "go"; }
+  if (row.stops) {
+    // Every other running instance of this fault stays stoppable from here, whatever the selects say.
+    row.stops.replaceChildren();
+    zone.injections.filter((i) => i.name === row.inj.name && i !== active).forEach((i) => {
+      const stopped = state.pending.some((p) => p.zone === zone.zone_id && p.name === row.inj.name && p.op === "stop" && (!p.device || p.device === i.device));
+      const btn = h("button", { class: "stop", textContent: stopped ? "Queued: stop (" + (i.field || "device") + ") on " + i.device : stopLabel(i), disabled: stopped });
+      btn.onclick = () => stopInstance(row, i);
+      row.stops.append(btn);
+    });
+  }
 }
 
 function renderHidden(state) {
@@ -196,7 +275,7 @@ function renderHidden(state) {
   list.replaceChildren();
   state.hidden.forEach((item) => {
     const label = state.revealed && item.name
-      ? "Hidden #" + item.id + ": " + item.name + " / " + item.zone + (item.field ? " / " + item.field : "") + (item.started_tick != null ? " (tick " + item.started_tick + ")" : "")
+      ? "Hidden #" + item.id + ": " + item.name + " / " + item.zone + (item.field ? " / " + item.field : "") + (item.device ? " / " + item.device : "") + (item.started_tick != null ? " (tick " + item.started_tick + ")" : "")
       : "Hidden #" + item.id + (item.queued ? " (queued)" : "");
     const stop = h("button", { class: "stop", textContent: "Stop", disabled: !!item.queued });
     stop.onclick = () => act(() => api("/api/stop", { id: item.id }));

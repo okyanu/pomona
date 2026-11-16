@@ -14,7 +14,8 @@ a verdict, the automation-engine turns labels into cards), as one importable cla
      sent a packet within 7 days of the reading) it also passes `device_fields`, the fields the device has sent in that
      window, as Core's feed does.
   4. Automation-engine: the real `AlertMonitor` (alerts.py, in-memory SQLite) with the real rules.yaml
-     rules, advanced by the reading's sample time (never the wall clock).
+     rules, advanced by the reading's sample time (never the wall clock). In a multi-device zone the alert also
+     carries the router's sensor check text (`detail`, `alert_detail`), as Core's feed sends it.
 
 `observe(capture=...)` hands the exact pipeline input of a reading to a callback and `evaluate_input` runs such an input
 again at another clock without touching the engine (the abstention eval's stale cases).
@@ -139,6 +140,23 @@ def pipeline_risk_labels(result: Dict[str, Any]) -> List[str]:
         *(result.get("nutrient_ph_ec") or {}).get("nutrient_risk_labels", []),
         *(result.get("crop_risk") or {}).get("risk_labels", []),
     ]))
+
+
+DETAIL_MAX_CHARS = 500  # the automation engine cuts to the same length
+ROUTINE_CHECK = "continue routine monitoring"
+
+
+def alert_detail(result: Dict[str, Any]) -> Optional[str]:
+    """Same as services/core/app/outcome_feed.py (copied: that package cannot be imported next to this one; the pin
+    test is services/core/tests/test_alert_detail_pin.py). The router's own sensor check text for one reading: its
+    safe next checks without "continue routine monitoring", joined with "; ", cut to 500 characters ending in "…".
+    None when there is nothing to say."""
+    checks = [c for c in (result.get("sensor_quality") or {}).get("safe_next_checks") or []
+              if isinstance(c, str) and c and c != ROUTINE_CHECK]
+    text = "; ".join(checks)
+    if len(text) > DETAIL_MAX_CHARS:
+        text = text[:DETAIL_MAX_CHARS - 1] + "…"
+    return text or None
 
 
 def core_packet(sent: Dict[str, Any]) -> Dict[str, Any]:
@@ -317,7 +335,13 @@ class InProcessPomona:
         del history[:-HISTORY_PACKETS]
         tracked.add({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})
         labels = pipeline_risk_labels(result)
-        verdict = self.monitor.observe(farm_id, zone_id, device_id, sample, labels)
+        if device_fields is None:  # a single-device zone: the monitor call is exactly as it always was
+            verdict = self.monitor.observe(farm_id, zone_id, device_id, sample, labels)
+        else:  # a multi-device zone: the check text and the data-quality labels, as Core's feed sends them
+            detail = alert_detail(result)
+            verdict = self.monitor.observe(
+                farm_id, zone_id, device_id, sample, labels, **({"detail": detail} if detail else {}),
+                data_quality_labels=(result.get("sensor_quality") or {}).get("data_quality_labels", []))
         out = {"accepted": True, "rejection": None, "farm_id": farm_id, "zone_id": zone_id, "device_id": device_id,
                "sample_time": sample, "labels": labels, "trust": result["trust_gate"]["trust_verdict"],
                "vetoed_fields": result["trust_gate"]["vetoed_fields"],

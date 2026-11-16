@@ -84,6 +84,62 @@ them in a row (about 60 s at 30 s ticks). So in `blind_spot.json` each probe-dro
 through the `sensor_check` card, or "alerted" by the event's own rule where another probe still carries the event;
 the passive device-silent flag stays a reported category for a node whose packets stop arriving altogether.
 
+## Zones with several devices
+
+A real zone often has more than one node: a climate box for air and humidity, a node in the substrate for pH, EC and
+moisture, sometimes two probes for the same field. A scenario can build that with a top-level `devices` key. It gives
+a zone a list of devices, each with its own probes:
+
+```json
+"devices": {"greenhouse-a": [
+  {"device_id": "climate-1", "sensors": ["air_temperature_c", "humidity_pct"]},
+  {"device_id": "substrate-1", "sensors": ["ec_ms_cm", "ph", "soil_moisture_pct", "substrate_temperature_c"]}]}
+```
+
+A zone that is not listed (and every zone in a scenario without the key) keeps one device, as before: nothing that ran
+before changes. Each device sends its own packets with its own `device_id` and `sequence`. A fault is started on one
+device (`"device": "climate-1"` in a step, or the device selector on the control page), so only that device's packets
+go wrong. A real event (heat spike, dry zone) is the zone's truth and every device sees it. The truth log has one row
+per device per tick, and the scorer joins everything by zone and device. Two extra keys, `offsets` and `wander`, make a
+second probe of the same field sit a little differently from the first, as real probes do. The full list of keys is in
+the [simulator README](../examples/simulators/README.md#devices-in-a-zone).
+
+Two scenarios use it:
+
+- `scenarios/multi_device.json`: `demo.json` with zone A split into `climate-1` (air, humidity) and `substrate-1`
+  (pH, EC, moisture, substrate temperature). The steps are the demo's, so the verdicts should match the demo's: the
+  same episodes with the same outcomes, zero false alarms.
+- `scenarios/slow_drift.json`: zone A has two climate devices and two moisture probes (`substrate-2` sends the
+  alias name `substrate_moisture_pct`). It has four slow drifts down, a stuck humidity probe, a humid night and a
+  dropout of `climate-2`. The first 240 ticks (2 hours) are clean.
+
+```bash
+SCENARIO=examples/simulators/scenarios/multi_device.json make fake-greenhouse     # against the Docker stack
+SCENARIO=examples/simulators/scenarios/slow_drift.json make fake-greenhouse-score # no Docker, about 8.3 hours
+python3 examples/simulators/fake_greenhouse.py --dry-run --out /tmp/e.jsonl --truth-log /tmp/t.jsonl \
+  --scenario examples/simulators/scenarios/slow_drift.json                        # no MQTT, no sleeping
+services/model-router/.venv/bin/python scripts/score_fake_greenhouse.py --truth /tmp/t.jsonl --offline \
+  --report /tmp/r.md
+```
+
+Scenarios that have a `devices` key need this simulator version or newer. An older one ignores the key and puts every
+step on the zone's single device. If your local stack already holds a one-device run, the old `fake-substrate-01`
+packets of zone A stay in Core's 7-day window, so zone A shows a third, quiet device. Use a fresh database for a clean
+picture.
+
+In the report, a fault or false alarm in a multi-device zone reads `zone · device` in the Zone column (for example
+`greenhouse-a · climate-1`), and a real event's "Pomona raised" names the device that raised its card. A card on any
+device of the zone counts for a real event. A sensor card counts only on the device that was faulted. Zones with one
+device look as before.
+
+What `slow_drift.json` gives today (offline, seed 23, 1000 ticks): 0 false alarms, 0 wrong cards, `caught_on_partner`
+0. The stuck humidity probe on `climate-1` is caught after about 90 s, and the humid night raises
+`high_humidity_fan` after about 30 minutes. The four slow drifts (air on `climate-1` and on zone B, humidity on
+`climate-2`, moisture on `substrate-2`) are each noticed only when they end. In a 46-minute real-time run against the stack
+(the scenario's first 92 ticks), a stuck humidity probe started on `climate-1` from the control page was caught after
+about 90 s, in stack mode and offline, with 0 false alarms; the dashboard showed the `also climate-2` pair lines, one
+trend per device and the alert with its device and check text.
+
 ## Reading the report
 
 `report_*.md` has one row per episode: where, when, what really happened, the expected answer, and
@@ -95,6 +151,7 @@ what Pomona raised, with a verdict.
 | caught as can't-confirm (safe) | A real event whose domain card never came, but the sensor check raised while that probe was flagged: Pomona said "check the probe" instead of acting on a doubtful reading |
 | MISSED | A real event that lasted longer than the rule's window raised nothing |
 | MISSED (noticed only when it ended) | A sensor fault whose check-the-sensor card was raised only after the fault stopped, when the reading snapped back to the true value (a slow drift of pH, EC or air temperature). The card's label began on the first honest reading, so the lie itself was not seen. Counted as a miss in the sensor-fault totals (the summary says how many of the misses were of this kind); a card whose label began during the fault but was raised a reading or two after it ended still counts as caught |
+| caught on the partner probe | Multi-device zones only. A sensor fault on one device raised no card on that device while it ran, but a sensor card was raised on a partner (another device of the zone that has a probe for the same field) inside the fault's window, from a label that began no later than the fault's last reading. A card already open on the partner does not count. Offline, the card must be about the fault's field (a partner reading was vetoed on it or flagged missing); in stack mode that check is skipped and any sensor card on a partner counts. The card asks to check both probes. Counted apart from caught and missed; `--fail-on-miss` does not fail on it |
 | too short to raise | The episode was shorter than the rule's `raise_after`; no card was possible |
 | no card rule | The label has no rule in `rules.yaml`, so Pomona has no card for it (every label the simulator can produce has one today) |
 | WRONG CARD | A sensor fault on one field produced a domain card built on it |
@@ -110,6 +167,13 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
 
 - **Time-lapse is not meaningful.** Pomona's drift checks count samples and its alert windows use
   sample time; a sped-up run (`--sim-speed` above 1) makes both unrealistic. Run in real time.
+- **A slow drift on one probe of a pair is still missed.** With two probes for one field in a zone (`slow_drift.json`),
+  a slow drift of one of them (air temperature, humidity or moisture) is not seen while it lasts, only when it ends
+  and the reading snaps back, exactly as with a single probe. The partner is not used yet: comparing the two probes is
+  a later slice (the slow-drift pair check). The scenario is the "before" picture for it. A drift on the only probe of
+  a field (zone B's air in the same scenario) will stay missed after that slice too.
+- **The first packet of a multi-device zone is judged alone.** It is checked before the zone's other devices have
+  reported, so a sensor check on that one reading can appear in the reading-level counts. It is a flag on one reading only; no card came from it in the runs above.
 - **Demos take time.** A card needs its label to persist for 10 minutes (30 for humidity) and a
   fault needs 11 samples to leave Pomona's history, so a meaningful run is 30 minutes or more.
 - What the scorer shows on the current rules: `heat_stress` raises the `heat_stress_check` card (check vents, fans and
