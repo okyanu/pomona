@@ -78,4 +78,51 @@ with (OUT / "wide_log_example.csv").open("w", newline="") as f:
         if step == 40:
             row[1] = "NaN"
         w.writerow(row)
+# 3) Pomona SD logger v0.2.1 output: clean data, one timestamp per logging cycle. This mirrors what
+# logger firmware 0.2.1 writes (every row of a cycle shares the string captured at the cycle start;
+# v0.2.0 stamped each row separately, which split cycles into partial packets). The loop polls every
+# 100 ms, so a node's cycle start has non-round seconds and slowly drifts by a second now and then.
+# Own Random so the samples above regenerate byte-identical.
+rng21 = random.Random(21)
+nodes21 = [
+    ("cress-hydro-node", "cress-hydro-a", "e41a07c9", datetime(2026, 10, 6, 6, 0, 7, tzinfo=timezone.utc),
+     [("sht31-1", "air_temperature_c", "C"), ("sht31-1", "humidity_pct", "%"),
+      ("ds18b20-1", "water_temperature_c", "C"), ("ph-probe-1", "ph", "pH")]),
+    ("cress-soil-node", "cress-soil-a", "5c90b2d3", datetime(2026, 10, 6, 6, 0, 11, tzinfo=timezone.utc),
+     [("sht31-1", "air_temperature_c", "C"), ("sht31-1", "humidity_pct", "%"),
+      ("ds18b20-1", "substrate_temperature_c", "C"), ("cap-moisture-1", "soil_moisture_pct", "%")]),
+]
+rows21 = []
+for device, zone, boot, first, fields in nodes21:
+    seq, drift = 0, 0
+    for step in range(36):
+        if step and rng21.random() < 0.15:
+            drift += 1
+        stamp = iso(first + timedelta(minutes=5 * step, seconds=drift))  # one string for the whole cycle
+        for sensor, field, unit in fields:
+            seq += 1
+            raw = ""
+            if field == "air_temperature_c":
+                value = 19.5 + step * 0.05 + rng21.uniform(-0.1, 0.1)
+            elif field == "humidity_pct":
+                value = 64 - step * 0.2 + rng21.uniform(-0.3, 0.3)
+            elif field == "water_temperature_c":
+                value = 17.2 + step * 0.02 + rng21.uniform(-0.1, 0.1)
+            elif field == "substrate_temperature_c":
+                value = 18.1 + step * 0.03 + rng21.uniform(-0.1, 0.1)
+            elif field == "ph":
+                volts = 2.517 + rng21.uniform(-0.01, 0.01)
+                raw = f"{volts:.4f}"
+                value = 7.0 + (2.50 - volts) / 0.17
+            else:  # soil_moisture_pct: raw ADC counts, higher = drier
+                raw_counts = round(2100 + step * 6 + rng21.uniform(-12, 12))
+                raw = str(raw_counts)
+                value = 100.0 * (2900 - raw_counts) / (2900 - 1400)
+            rows21.append([stamp, boot, seq, device, "home-pilot", zone, sensor, field, unit,
+                           raw, f"{value:.3f}", "valid", "cress-logger-0.2.1"])
+with (OUT / "pomona_sd_log_v021_example.csv").open("w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(header)
+    w.writerows(rows21)
+
 print("wrote", sorted(p.name for p in OUT.iterdir()))

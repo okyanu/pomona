@@ -1,7 +1,8 @@
 // Pomona watercress pilot logger: ESP32-S3 -> SD card CSV, monitoring only.
 //
-// Writes one CSV row per measurement every LOG_INTERVAL_MS. The CSV matches
-// scripts/import_sd_csv.py. There is no actuator output of any kind.
+// Writes one CSV row per measurement every LOG_INTERVAL_MS; all rows of a cycle share one
+// timestamp (see include/cycle_logic.h). The CSV matches scripts/import_sd_csv.py. There is no
+// actuator output of any kind.
 // Status: compiles (PlatformIO, hydro and soil variants); NOT bench-verified yet.
 
 #include <Arduino.h>
@@ -19,6 +20,7 @@
 #include "config.h"
 #include "ph_calibration.h"
 #include "upload_logic.h"
+#include "cycle_logic.h"
 
 // pH is logged as the median of several ADS1115 reads per interval. Analog pH
 // boards (PH-4502C style) swing ~1.6 pH within 5 minutes on single reads in
@@ -55,7 +57,7 @@
 #define UPLOAD_ENABLED 0
 #endif
 
-static const char *FIRMWARE = "cress-logger-0.2.0";
+static const char *FIRMWARE = "cress-logger-0.2.1";
 static const char *CSV_HEADER =
     "timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,"
     "measurement,unit,raw,value,quality,firmware";
@@ -71,20 +73,13 @@ bool sdOk = false;
 char bootId[17];
 uint32_t sequenceNo = 0;
 PhCalResult phCal = {PhCalState::Uncalibrated, "", 0.0f, 0.0f};
+bool ds18b20AwaitingFirstGood = true;  // boot, or last read was disconnected: an 85.0 is the power-on value
 char logPath[64];
 char ackPath[72];
 
 // Returns false until the clock has been set (NTP); rows then get an empty
 // timestamp, which the importer rejects instead of guessing a time.
-bool clockValid() { return time(nullptr) > 1704067200; }  // after 2024-01-01
-
-void isoNow(char *out, size_t len) {
-  if (!clockValid()) { out[0] = '\0'; return; }
-  time_t now = time(nullptr);
-  struct tm utc;
-  gmtime_r(&now, &utc);
-  strftime(out, len, "%Y-%m-%dT%H:%M:%SZ", &utc);
-}
+bool clockValid() { return time(nullptr) > CLOCK_VALID_AFTER; }  // after 2024-01-01
 
 void syncClockOnce() {
 #if defined(WIFI_SSID)
@@ -101,13 +96,12 @@ void syncClockOnce() {
 }
 
 // value may be NAN: it is then written empty (quality must not be "valid").
-void writeRow(const char *sensorId, const char *measurement, const char *unit,
+// The timestamp and clock validity come from the cycle's stamp, never from a fresh clock read.
+void writeRow(const CycleStamp &cycle, const char *sensorId, const char *measurement, const char *unit,
               const String &raw, float value, const char *quality) {
-  char ts[25];
-  isoNow(ts, sizeof(ts));
   String line;
   line.reserve(200);
-  line += ts; line += ',';
+  line += cycle.text; line += ',';
   line += bootId; line += ',';
   line += String(++sequenceNo); line += ',';
   line += DEVICE_ID; line += ',';
@@ -119,7 +113,7 @@ void writeRow(const char *sensorId, const char *measurement, const char *unit,
   line += raw; line += ',';
   if (!isnan(value)) line += String(value, 3);
   line += ',';
-  line += clockValid() ? quality : "suspect";
+  line += cycle.valid ? quality : "suspect";
   line += ',';
   line += FIRMWARE;
 
@@ -130,47 +124,54 @@ void writeRow(const char *sensorId, const char *measurement, const char *unit,
   if (f) { f.println(line); f.close(); }
 }
 
-void logSht31() {
+void logSht31(const CycleStamp &cycle) {
   if (!shtOk) {
-    writeRow("sht31-1", "air_temperature_c", "C", "", NAN, "disconnected");
-    writeRow("sht31-1", "humidity_pct", "%", "", NAN, "disconnected");
+    writeRow(cycle, "sht31-1", "air_temperature_c", "C", "", NAN, "disconnected");
+    writeRow(cycle, "sht31-1", "humidity_pct", "%", "", NAN, "disconnected");
     return;
   }
   float t = sht31.readTemperature();
   float h = sht31.readHumidity();
-  writeRow("sht31-1", "air_temperature_c", "C", "", t, isnan(t) ? "missing" : "valid");
-  writeRow("sht31-1", "humidity_pct", "%", "", h, isnan(h) ? "missing" : "valid");
+  writeRow(cycle, "sht31-1", "air_temperature_c", "C", "", t, isnan(t) ? "missing" : "valid");
+  writeRow(cycle, "sht31-1", "humidity_pct", "%", "", h, isnan(h) ? "missing" : "valid");
 }
 
-void logDs18b20() {
+void logDs18b20(const CycleStamp &cycle) {
+  // A probe missing at boot leaves DallasTemperature with a device count of 0 and it never searches
+  // the bus again by itself, so search again each cycle until one is found.
+  if (shouldRetryInit(ds18b20.getDeviceCount() > 0, true)) {
+    ds18b20.begin();
+    if (ds18b20.getDeviceCount() > 0) Serial.println("ds18b20 recovered");
+  }
   ds18b20.requestTemperatures();
   float t = ds18b20.getTempCByIndex(0);
-  bool gone = (t == DEVICE_DISCONNECTED_C);
+  Ds18b20Result r = classifyDs18b20(t, ds18b20AwaitingFirstGood);
+  ds18b20AwaitingFirstGood = r.awaitingFirstGood;
   // Hydro: probe sits in the reservoir. Soil: substrate temperature, which
   // Core has no field for yet, so it is logged under its own measurement
   // name only on the SD card and skipped by the importer (see README).
   const char *measurement = ZONE_IS_HYDRO ? "water_temperature_c" : "substrate_temperature_c";
-  writeRow("ds18b20-1", measurement, "C", "", gone ? NAN : t, gone ? "disconnected" : "valid");
+  writeRow(cycle, "ds18b20-1", measurement, "C", r.raw, r.value, r.quality);
 }
 
-void logMoisture() {
+void logMoisture(const CycleStamp &cycle) {
 #if !ZONE_IS_HYDRO
   int raw = analogRead(PIN_MOISTURE);
   // Capacitive probes read lower when wetter. Uncalibrated -> raw only.
   if (MOISTURE_RAW_DRY == MOISTURE_RAW_WET) {
-    writeRow("cap-moisture-1", "soil_moisture_pct", "%", String(raw), NAN, "suspect");
+    writeRow(cycle, "cap-moisture-1", "soil_moisture_pct", "%", String(raw), NAN, "suspect");
     return;
   }
   float pct = 100.0f * (MOISTURE_RAW_DRY - raw) / float(MOISTURE_RAW_DRY - MOISTURE_RAW_WET);
   pct = constrain(pct, 0.0f, 100.0f);
-  writeRow("cap-moisture-1", "soil_moisture_pct", "%", String(raw), pct, "valid");
+  writeRow(cycle, "cap-moisture-1", "soil_moisture_pct", "%", String(raw), pct, "valid");
 #endif
 }
 
-void logPh() {
+void logPh(const CycleStamp &cycle) {
 #if ZONE_IS_HYDRO && PH_PROBE_FITTED
   if (!adsOk) {
-    writeRow("ph-probe-1", "ph", "pH", "", NAN, "disconnected");
+    writeRow(cycle, "ph-probe-1", "ph", "pH", "", NAN, "disconnected");
     return;
   }
   int16_t reads[PH_SAMPLES];
@@ -186,13 +187,13 @@ void logPh() {
   // A reading at the ADC rail is a floating, shorted or over-range input, not a pH. Keep the
   // raw volts for the record and give no value.
   if (phReadingAtRail(median)) {
-    writeRow("ph-probe-1", "ph", "pH", String(volts, 4), NAN, "suspect");
+    writeRow(cycle, "ph-probe-1", "ph", "pH", String(volts, 4), NAN, "suspect");
     return;
   }
   // Two-point calibration: pH = PH_SLOPE * volts + PH_OFFSET. Until the
   // owner records a buffer calibration, log raw volts only.
   if (PH_SLOPE == 0.0f) {
-    writeRow("ph-probe-1", "ph", "pH", String(volts, 4), NAN, "suspect");
+    writeRow(cycle, "ph-probe-1", "ph", "pH", String(volts, 4), NAN, "suspect");
     return;
   }
   float ph = PH_SLOPE * volts + PH_OFFSET;
@@ -200,7 +201,7 @@ void logPh() {
   // A calibration that failed its sanity check (see boot line "ph_cal=") keeps its numbers but
   // every row is "suspect", so nothing downstream treats them as trusted.
   bool trusted = plausible && phCal.state == PhCalState::Ok;
-  writeRow("ph-probe-1", "ph", "pH", String(volts, 4), plausible ? ph : NAN,
+  writeRow(cycle, "ph-probe-1", "ph", "pH", String(volts, 4), plausible ? ph : NAN,
            trusted ? "valid" : "suspect");
 #endif
 }
@@ -366,10 +367,23 @@ void loop() {
   static uint32_t last = 0;
   if (last == 0 || millis() - last >= LOG_INTERVAL_MS) {
     last = millis();
-    logSht31();
-    logDs18b20();
-    logMoisture();
-    logPh();
+    // Boot-time init failures (loose wire, sensor powered late) are retried each cycle.
+    // Adafruit begin() deletes its previous I2C device object first, so repeating it does not leak.
+    if (shouldRetryInit(shtOk, true)) {
+      shtOk = sht31.begin(0x44);
+      if (shtOk) Serial.println("sht31 recovered");
+    }
+    if (shouldRetryInit(adsOk, ZONE_IS_HYDRO && PH_PROBE_FITTED)) {
+      adsOk = ads.begin(0x48);
+      if (adsOk) Serial.println("ads1115 recovered");
+    }
+    // One timestamp for every row of this cycle (the DS18B20 conversion and the pH median take
+    // seconds, so a per-row clock read would split the cycle across timestamps).
+    const CycleStamp cycle = makeCycleStamp(time(nullptr));
+    logSht31(cycle);
+    logDs18b20(cycle);
+    logMoisture(cycle);
+    logPh(cycle);
   }
 #if UPLOAD_ENABLED
   uploadIfDue();

@@ -4,9 +4,9 @@ Firmware for the [watercress pilot](../../docs/WATERCRESS_PILOT.md). One ESP32-S
 per zone writes sensor readings to a CSV file on a microSD card. Import the file
 into Pomona Core afterwards with `scripts/import_sd_csv.py`.
 
-**Status: compiles cleanly (PlatformIO 6.2, espressif32, 2026-09-27) for the hydro
-node, the soil node and with Wi-Fi clock sync enabled: about 6 % RAM and 11 % flash. Not yet
-bench-tested on hardware.** Treat the first 24–48 h dry run as the real test. The firmware drives no pumps, relays or dosing. Run
+**Status: firmware 0.2.1 compiles for the hydro node, the soil node and the hydro node with
+Wi-Fi upload enabled (PlatformIO, espressif32; flash about 11 % without and 29 % with upload). Host tests
+pass. Not yet bench-tested on hardware (not bench-verified).** Treat the first 24–48 h dry run as the real test. The firmware drives no pumps, relays or dosing. Run
 the air pump from its own plug.
 
 ## Sensors
@@ -35,6 +35,10 @@ for a one-time NTP clock sync at boot, then switched off. Without Wi-Fi or an RT
 rows get an **empty timestamp** and the importer rejects them, rather than
 storing a guessed time.
 
+Optional, not enabled: if your board's serial monitor is on the **native USB port** (not the UART
+port), `pio device monitor` may stay silent. Uncomment `build_flags = -DARDUINO_USB_CDC_ON_BOOT=1` in
+`platformio.ini` for that case.
+
 ## CSV format
 
 `/pomona_<device_id>.csv`, one row per measurement:
@@ -43,14 +47,30 @@ storing a guessed time.
 timestamp_utc,boot_id,sequence,device_id,farm_id,zone_id,sensor_id,measurement,unit,raw,value,quality,firmware
 ```
 
+- **One timestamp per cycle (firmware 0.2.1).** The logger reads the clock once at the start of each
+  logging cycle and every row of that cycle (SHT31, DS18B20, moisture, pH) carries that same
+  `timestamp_utc`, even though the DS18B20 conversion and the pH median take a few seconds. The
+  Sensor Data Checker joins rows into one packet per stream only when the timestamp string is
+  identical, so earlier firmware (0.2.0, which stamped each row separately) could show false
+  `missing_*` flags. If the clock is not set, the whole cycle has empty timestamps and `suspect` quality.
+- **Sensors retried each cycle (0.2.1).** A SHT31 or ADS1115 that did not answer at boot is
+  initialised again at the start of every cycle, so a loose wire or a late-powered sensor recovers
+  without a reboot (serial line `sht31 recovered` / `ads1115 recovered`). The ADS1115 is only retried
+  on a hydro node with the pH probe fitted. Until it answers, its rows are `disconnected`. The DS18B20
+  works the same way: a probe missing at boot is searched for again each cycle (serial line
+  `ds18b20 recovered`), and once found, its first read goes through the 85 °C rule below.
+- **DS18B20 85 °C power-on value (0.2.1).** The DS18B20 reads exactly 85.0 °C right after power-up. The
+  first good read after boot, or after a read that came back disconnected (a re-plugged probe
+  also powers up at 85), that is exactly 85.0 is written as `suspect` with an empty `value` and
+  `85.00` in `raw`. Any other reading ends this state, so a later 85.0 is `valid` as usual.
 - `boot_id` is a new random value on every power-up. `sequence` counts up
   within that boot. Together they make re-imports duplicate-free.
-- `quality` is `valid`, `missing`, `suspect` (uncalibrated or no clock) or
+- `quality` is `valid`, `missing`, `suspect` (uncalibrated, no clock or a DS18B20 power-on value) or
   `disconnected`. Rows that are not valid have an empty `value`.
 - `raw` keeps the ADC value or volts, so readings can be recalculated after a
   later calibration.
 
-## Wi-Fi upload (firmware 0.2.0, optional)
+## Wi-Fi upload (firmware 0.2.0+, optional)
 
 With `WIFI_SSID`, `WIFI_PASSWORD` and `CORE_URL` (for example `http://192.168.1.50:8080`) in
 `config.h`, the logger also sends its SD log to Pomona Core. The SD card stays the source of truth:
@@ -73,6 +93,18 @@ With `WIFI_SSID`, `WIFI_PASSWORD` and `CORE_URL` (for example `http://192.168.1.
 - Decision logic is in `include/upload_logic.h`; host test:
   `c++ -std=c++17 -Iinclude extras/test_upload_logic.cpp -o /tmp/t && /tmp/t`.
   Not bench-tested on the board.
+
+## Host tests
+
+The decision logic lives in headers without Arduino calls, so it runs on a PC. `main.cpp` calls the
+same functions. `include/cycle_logic.h` (cycle timestamp, sensor retry, DS18B20 85 °C rule):
+
+```bash
+c++ -std=c++17 -Wall -Wextra -Iinclude extras/test_cycle_logic.cpp -o /tmp/t && /tmp/t
+```
+
+The upload and pH tests are listed above and under Calibration. The checker sample
+`spaces/sensor-data-checker/samples/pomona_sd_log_v021_example.csv` mirrors 0.2.1 output (one timestamp per cycle).
 
 ## Calibration
 
