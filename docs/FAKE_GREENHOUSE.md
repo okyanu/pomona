@@ -132,13 +132,32 @@ In the report, a fault or false alarm in a multi-device zone reads `zone · devi
 device of the zone counts for a real event. A sensor card counts only on the device that was faulted. Zones with one
 device look as before.
 
-What `slow_drift.json` gives today (offline, seed 23, 1000 ticks): 0 false alarms, 0 wrong cards, `caught_on_partner`
-0. The stuck humidity probe on `climate-1` is caught after about 90 s, and the humid night raises
-`high_humidity_fan` after about 30 minutes. The four slow drifts (air on `climate-1` and on zone B, humidity on
-`climate-2`, moisture on `substrate-2`) are each noticed only when they end. In a 46-minute real-time run against the stack
-(the scenario's first 92 ticks), a stuck humidity probe started on `climate-1` from the control page was caught after
-about 90 s, in stack mode and offline, with 0 false alarms; the dashboard showed the `also climate-2` pair lines, one
-trend per device and the alert with its device and check text.
+What `slow_drift.json` gives (offline, seed 23, 1000 ticks), now that Core and the in-process engine compare each probe
+with the other probes of its zone (the slow-drift pair check, see
+[SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md#pair-check-two-or-more-probes-in-one-zone)). Before it, all four
+drifts were noticed only when they ended (+2460 s). Minutes count from the drift's start tick:
+
+| Drift | Result |
+|---|---|
+| air on `climate-1` (-0.1 C/min) | caught on the drifting probe, `climate-1`, after 32.0 minutes |
+| air on zone B's only probe | MISSED: there is no second probe, so it is noticed only when it ends (the single-probe limit) |
+| humidity on `climate-2` (-0.5 %RH/min) | caught on the drifting probe, `climate-2`, after 21.5 minutes |
+| moisture on `substrate-2` (`substrate_moisture_pct`, -0.5 %/min) | caught on the partner probe (`substrate-1` took the card): scored `caught_on_partner`, after 17.5 minutes |
+
+Which probe takes the card in a two-probe zone is close to a coin flip, so both outcomes pass. The stuck humidity probe
+on `climate-1` is still caught after about 90 s, the humid night still raises `high_humidity_fan` after about 30
+minutes, and there are 0 false alarms and 0 wrong cards. The game itself is unchanged: it has one probe per zone, so
+its Drift trick is still scored as missed until a second probe is added to a zone.
+
+In a 46-minute real-time run against the stack before the pair check (the scenario's first 92 ticks), a stuck humidity
+probe started on `climate-1` from the control page was caught after about 90 s, in stack mode and offline, with 0 false
+alarms; the dashboard showed the `also climate-2` pair lines, one trend per device and the alert with its device and
+check text.
+
+With the pair check, an 8-hour real-time stack run of `slow_drift.json` gave the same verdicts as the offline table above,
+with 0 false alarms and 0 wrong cards. In a stack run of the humidity drift on `climate-2`, the dashboard's humidity tile
+showed both values with "probes disagree: check both with a meter". The trust line said it could not confirm humidity,
+and the alert row named the device with the pair-check text.
 
 ## Reading the report
 
@@ -166,12 +185,21 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
 ## Honest limits
 
 - **Time-lapse is not meaningful.** Pomona's drift checks count samples and its alert windows use
-  sample time; a sped-up run (`--sim-speed` above 1) makes both unrealistic. Run in real time.
-- **A slow drift on one probe of a pair is still missed.** With two probes for one field in a zone (`slow_drift.json`),
-  a slow drift of one of them (air temperature, humidity or moisture) is not seen while it lasts, only when it ends
-  and the reading snaps back, exactly as with a single probe. The partner is not used yet: comparing the two probes is
-  a later slice (the slow-drift pair check). The scenario is the "before" picture for it. A drift on the only probe of
-  a field (zone B's air in the same scenario) will stay missed after that slice too.
+  sample time; a sped-up run (`--sim-speed` above 1) makes both unrealistic. Run in real time. A busy machine also
+  stretches real-time ticks, so wall-clock delays in a stack report can be longer than offline while the sample counts
+  agree.
+- **A slow drift of the only probe of a field is still missed.** The pair check needs a second device in the zone with
+  the same field, and judges a probe only when it reports at least every 5 minutes. Zone B's air probe in `slow_drift.json` and every probe of the
+  game have no partner, so their drifts are noticed only when they end. A drift of substrate temperature is not
+  covered even with a partner. With two probes the card may land on the good one; it asks to check both.
+- **The pair check adds partner flags to the reading-level counts.** In `slow_drift.json`, normal frames with a sensor
+  check outside a fault's tail went from 11 to 105. The 94 new ones are all on the partner of a device that is
+  faulted at that moment (88) or in its recovery tail (6), none with nothing faulted in the zone, and none raised a
+  card. In a two-probe zone the flag locks onto one probe. A flagged reading is vetoed and stops serving as a partner, so the
+  other probe has no usable partner and is not judged; it stays unvetoed and keeps serving as the partner, so the flagged
+  probe stays flagged. The lock can switch once from the drifter to the good probe: when one drifter reading lands just
+  under the limit, the good probe is judged against it and flagged, and from then on it holds the flag. Both mean "the
+  probes disagree", which is true; the card on the drifter, already raised, stays. The scorer counts them as normal frames because its tail rule is per faulted device.
 - **The first packet of a multi-device zone is judged alone.** It is checked before the zone's other devices have
   reported, so a sensor check on that one reading can appear in the reading-level counts. It is a flag on one reading only; no card came from it in the runs above.
 - **Demos take time.** A card needs its label to persist for 10 minutes (30 for humidity) and a
@@ -180,8 +208,9 @@ reading-level counts (normal frames with a card or a sensor check, trusted-wrong
   shading) after 10 minutes, and `cold_stress` (`cold_night`, air or substrate at or below 16 C) raises `cold_stress_check` (check heating and insulation) after 10 minutes; a slow drift of pH (0.02 per minute) is flagged after about 18 minutes
   (0.01 per minute after about 36, but 0.005 per minute over two hours stays unseen); a slow EC drift (0.05 mS/cm per
   minute) is flagged after about 10 minutes when it lasts 40 minutes, but a gentle or short one may be noticed only when it ends; a slow drift of
-  air temperature, humidity, substrate moisture or substrate temperature is not seen while it lasts, only when it
-  ends and the reading snaps back (scored as missed, "noticed only when it ended"); a fast EC drift (0.3 mS/cm per
+  air temperature, humidity or substrate moisture is seen while it lasts when the zone has a second probe for the
+  field (the pair check), and otherwise only when it ends and the reading snaps back (scored as missed, "noticed only
+  when it ended", the game's case); a drift of substrate temperature is not seen while it lasts; a fast EC drift (0.3 mS/cm per
   minute) is flagged within about 2 minutes; a stuck pH or EC probe is caught after about 6 minutes of freeze
   (shorter than 8 to 10 minutes it may not be); a +4 C air-temperature jump, a +15 %RH humidity jump, a +15 %
   substrate-moisture jump and a +4 C substrate-temperature jump are each flagged within a minute (and then accepted as the

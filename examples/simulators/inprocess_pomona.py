@@ -17,6 +17,16 @@ a verdict, the automation-engine turns labels into cards), as one importable cla
      rules, advanced by the reading's sample time (never the wall clock). In a multi-device zone the alert also
      carries the router's sensor check text (`detail`, `alert_detail`), as Core's feed sends it.
 
+Pair check (docs/design/slow-drift-pair-check.md, Design 2): in a multi-device zone where two or more devices carry a pair
+field (air temperature, humidity, soil/substrate moisture; `PAIR_FIELDS`), each device's reading is also judged against
+the zone's other devices. A per-zone `PairBuffer` keeps the judged rows (with what the pipeline vetoed) within the
+baseline window, and per device and field the series `pair_reference` reads; for each paired field the engine hands the
+device's own series and its partners' series to `pair_reference` (trusted_baseline.py, the function Core's outcome feed
+calls with rows; the two give the same result) and puts the result as `pair` into a copy
+of the field's `stream_baseline` entry, so the router's pair check sees what it sees on Core. A single-device zone (the
+whole game) runs none of this; `pair_check=False` switches it off. The buffer starts when the zone becomes paired (see
+`PairBuffer`), so the first device's earlier readings are not in it.
+
 `observe(capture=...)` hands the exact pipeline input of a reading to a callback and `evaluate_input` runs such an input
 again at another clock without touching the engine (the abstention eval's stale cases).
 
@@ -42,7 +52,9 @@ import math
 import re
 import sys
 import threading
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
+from itertools import chain
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -196,6 +208,124 @@ def load_pipeline(router_dir: Path = ROUTER_DIR):
     return _LOADED[key]
 
 
+# --- The pair buffer ------------------------------------------------------------------------
+
+PAIR_BUFFER_MAX_ROWS = 4000  # judged rows kept per zone, all devices together (the oldest go first)
+
+
+class PairBuffer:
+    """The judged readings of multi-device zones, for the pair check: per (farm, zone), per device, oldest first.
+
+    A row is `{device_id, timestamp (aware datetime), <the pair fields the reading carried>, vetoed_fields}`, the shape
+    `trusted_baseline.pair_reference` takes (Core's `stream_history` rows). Rows older than the zone's newest sample
+    time minus `keep_s` are dropped (the engine passes the baseline window plus the longest partner age, which is
+    what Core reads back too), and so are the oldest rows beyond `PAIR_BUFFER_MAX_ROWS` in a zone. Standard library
+    only. Rows are expected in sample-time order (an engine is fed that way); a late one is inserted in its place.
+
+    Start-up: the engine gives a zone a buffer when it first becomes paired, so a device's readings judged before that
+    are not in it, while Core still has them (see `InProcessPomona.observe`).
+
+    Series (speed): with `fields` and `entry` (`pair_row_entry`) given, the buffer also keeps, per device and field, the
+    series `pair_reference` takes (`own_series` / `partner_series`; four parallel lists, one entry per sample time),
+    updated as rows come and go, so a judgement does not read every buffered row again. They always equal what
+    `pair_reference` would build from the rows.
+    """
+
+    def __init__(self, keep_s: float, max_rows: int = PAIR_BUFFER_MAX_ROWS, fields: Tuple[str, ...] = (),
+                 entry: Optional[Callable[[Dict[str, Any], str], Optional[tuple]]] = None) -> None:
+        self.keep_s, self.max_rows = keep_s, max_rows
+        self.fields, self._entry = (fields, entry) if entry is not None else ((), None)
+        self._zones: Dict[Tuple[str, str], Dict[str, List[Dict[str, Any]]]] = {}  # zone -> device -> rows
+        self._series: Dict[Tuple[str, str], Dict[str, Dict[str, tuple]]] = {}  # zone -> device -> field -> series
+        self._newest: Dict[Tuple[str, str], datetime] = {}
+
+    def rows(self, zone: Tuple[str, str], device_id: str) -> List[Dict[str, Any]]:
+        """The device's own buffered rows, oldest first (the live list: do not change it)."""
+        return self._zones.get(zone, {}).get(device_id, [])
+
+    def partner_rows(self, zone: Tuple[str, str], device_id: str):
+        """An iterator over every other device's buffered rows (each device oldest first)."""
+        return chain.from_iterable(rows for device, rows in self._zones.get(zone, {}).items() if device != device_id)
+
+    def series(self, zone: Tuple[str, str], device_id: str, field: str) -> tuple:
+        """The device's series of the field (the live lists: do not change them); empty lists if it has none."""
+        return self._series.get(zone, {}).get(device_id, {}).get(field) or ([], [], [], [])
+
+    def partner_series(self, zone: Tuple[str, str], device_id: str, field: str) -> Dict[str, tuple]:
+        """Every other device's series of the field, for the devices that have one (device id -> series)."""
+        return {device: found[field] for device, found in self._series.get(zone, {}).items()
+                if device != device_id and field in found}
+
+    def _rebuild(self, zone: Tuple[str, str], device_id: str) -> None:
+        """The device's series again from its rows (after a row was inserted late or dropped by the row cap)."""
+        found: Dict[str, tuple] = {}
+        for field in self.fields:
+            latest: Dict[datetime, tuple] = {}  # one entry per sample time, the last row wins
+            for row in self._zones[zone][device_id]:
+                entry = self._entry(row, field)
+                if entry is not None:
+                    latest[row["timestamp"]] = entry
+            if latest:
+                ordered = sorted(latest.items())
+                found[field] = ([t for t, _ in ordered], [t.timestamp() for t, _ in ordered],
+                                [e[0] for _, e in ordered], [e[1] for _, e in ordered])
+        self._series.setdefault(zone, {})[device_id] = found
+
+    def _append(self, zone: Tuple[str, str], row: Dict[str, Any]) -> None:
+        """The row, which is not older than the device's newest, joins its series."""
+        found = self._series.setdefault(zone, {}).setdefault(row["device_id"], {})
+        stamp = row["timestamp"]
+        for field in self.fields:
+            entry = self._entry(row, field)
+            if entry is None:
+                continue
+            stamps, times, values, vetoed = found.setdefault(field, ([], [], [], []))
+            if stamps and stamps[-1] == stamp:  # the same sample time again: the last row wins
+                values[-1], vetoed[-1] = entry
+            else:
+                stamps.append(stamp)
+                times.append(stamp.timestamp())
+                values.append(entry[0])
+                vetoed.append(entry[1])
+
+    def add(self, zone: Tuple[str, str], row: Dict[str, Any]) -> None:
+        devices = self._zones.setdefault(zone, {})
+        rows = devices.setdefault(row["device_id"], [])
+        stamp = row["timestamp"]
+        late = bool(rows) and stamp < rows[-1]["timestamp"]
+        if late:
+            rows.insert(bisect_right([r["timestamp"] for r in rows], stamp), row)
+        else:
+            rows.append(row)
+        if self._entry is not None:
+            if late:
+                self._rebuild(zone, row["device_id"])
+            else:
+                self._append(zone, row)
+        newest = max(self._newest.get(zone, stamp), stamp)
+        self._newest[zone] = newest
+        floor = newest - timedelta(seconds=self.keep_s)
+        total = 0
+        for device, items in devices.items():
+            cut = 0
+            while cut < len(items) and items[cut]["timestamp"] < floor:
+                cut += 1
+            if cut:
+                del items[:cut]
+                for lists in self._series.get(zone, {}).get(device, {}).values():  # the same cut, by sample time
+                    drop = bisect_left(lists[0], floor)
+                    if drop:
+                        for part in lists:
+                            del part[:drop]
+            total += len(items)
+        while total > self.max_rows:  # the oldest row of the zone goes
+            device = min((d for d, items in devices.items() if items), key=lambda d: devices[d][0]["timestamp"])
+            del devices[device][0]
+            total -= 1
+            if self._entry is not None:
+                self._rebuild(zone, device)
+
+
 # --- The engine ---------------------------------------------------------------------------
 
 class InProcessPomona:
@@ -212,7 +342,8 @@ class InProcessPomona:
     def __init__(self, rules: Optional[List[Dict[str, Any]]] = None, defaults: Optional[Tuple[int, int]] = None, *,
                  router_dir: Path = ROUTER_DIR, core_app: Path = CORE_APP, automation_app: Path = AUTOMATION_APP,
                  min_sample_time: datetime = MIN_SAMPLE_TIME, max_events: int = 1_000_000,
-                 loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+                 loop: Optional[asyncio.AbstractEventLoop] = None, pair_check: bool = True) -> None:
+        self.pair_check = pair_check
         self.rules = rules if rules is not None else load_rules(Path(automation_app) / "rules.yaml")
         self.defaults = defaults if defaults is not None else alert_defaults(automation_app)
         self.min_sample_time = min_sample_time
@@ -235,6 +366,9 @@ class InProcessPomona:
         self._streams: Dict[Tuple[str, str, str], Any] = {}  # per stream, its StreamBaseline (Core's trusted reference)
         # (farm_id or None, zone_id, device_id or None, measurement, performed_at); None matches any
         self._calibrations: List[Tuple[Optional[str], str, Optional[str], str, str]] = []
+        # the judged rows of zones with two or more devices carrying a pair field (the pair check); none otherwise
+        self._pairs = PairBuffer(self._baseline.DEFAULT_WINDOW_S + self._baseline.PAIR_MAX_AGE_MAX_S,
+                                 fields=self._baseline.PAIR_FIELDS, entry=self._baseline.pair_row_entry)
 
     # Core's calibration endpoint: a person checked the probe against a reference meter.
 
@@ -253,6 +387,22 @@ class InProcessPomona:
         farm, zone, device = stream
         return [{"measurement": field, "performed_at": at} for f, z, d, field, at in self._calibrations
                 if z == zone and f in (None, farm) and d in (None, device)]
+
+    def _zone_calibrations(self, farm: str, zone: str) -> List[Dict[str, Any]]:
+        """Every calibration recorded for the zone on any device (the pair starts at the newest one)."""
+        return [{"measurement": field, "performed_at": at} for f, z, d, field, at in self._calibrations
+                if z == zone and f in (None, farm)]
+
+    def _paired_devices(self, stream: Tuple[str, str, str], sample: datetime) -> int:
+        """How many devices of the stream's farm and zone carry a pair field now (Core's `device_fields` counting rule)."""
+        found = 0
+        for other, rows in self._device_fields.items():
+            if other[:2] != stream[:2]:
+                continue
+            if any(name in rows and rows[name][0] <= sample and rows[name][1] >= sample - RETENTION
+                   for name in self._baseline.PAIR_FIELDS):
+                found += 1
+        return found
 
     # Multi-device zones: the same bookkeeping as Core's device_fields table (store.py), on sample time.
 
@@ -323,6 +473,38 @@ class InProcessPomona:
                 baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MIN_N, baseline.DEFAULT_MAX_AGE_S or None,
                 baseline.DEFAULT_SCAN_LIMIT)
         reference = tracked.baseline(self._stream_calibrations(stream), sample)
+        zone = (farm_id, zone_id)
+        paired = self.pair_check and device_fields is not None and self._paired_devices(stream, sample) >= 2
+        if paired and reference:
+            # Pair check (a copy of each paired field's entry: the StreamBaseline's own state is not touched). The buffer
+            # of a zone starts at the first reading judged while the zone is paired. Core also has the readings judged
+            # before that, so the two can differ in the first baseline window (2 h) after a zone becomes paired:
+            # - the joining device's first offsets: the partner reading of its first one or two readings is from before the
+            #   buffer, so Core has up to two more offsets (`n` up to 2 higher, the first entry up to 2 readings earlier,
+            #   and a median that can differ by a few percent of the limit while `n` is small) until they leave the window;
+            # - the first device's own rows from before the buffer count in Core's cadence (partner age) and flat
+            #   tests: only an irregular early cadence, or a stream that went flat within the first window, changes
+            #   an entry; both are outside the readings the engine is fed (regular 30 s ticks).
+            # After one window the two are equal (tests: scripts/tests/test_inprocess_pair.py,
+            # services/core/tests/test_pair_inprocess_equality.py).
+            current = {"device_id": device_id, "timestamp": sample, **{name: sensor.get(name) for name in baseline.PAIR_FIELDS}}
+            calibrations = None
+            reference = dict(reference)
+            for name in baseline.PAIR_FIELDS:
+                if name in reference:
+                    # Pre-built series (the buffer keeps them): no partner series of the field means no pair entry, so
+                    # that case (e.g. two devices that carry different pair fields) costs nothing.
+                    partners = self._pairs.partner_series(zone, device_id, name)
+                    if not partners:
+                        continue
+                    if calibrations is None:
+                        calibrations = self._zone_calibrations(farm_id, zone_id)
+                    entry = baseline.pair_reference(
+                        (), (), name, baseline.pair_start_time(calibrations, name, sample), current,
+                        baseline.DEFAULT_WINDOW_S, baseline.DEFAULT_MAX_AGE_S or None,
+                        own_series=self._pairs.series(zone, device_id, name), partner_series=partners)
+                    if entry is not None:
+                        reference[name] = {**reference[name], "pair": entry}
         pipeline_input = {"farm_context": farm, "sensor": sensor, "expected_fields": [], "history": prior,
                           "stream_baseline": reference or None, "now": sample + timedelta(seconds=1)}
         if device_fields is not None:  # absent in a single-device zone
@@ -334,6 +516,11 @@ class InProcessPomona:
         history.append(sensor)
         del history[:-HISTORY_PACKETS]
         tracked.add({**sensor, "timestamp": sample, "vetoed_fields": result["trust_gate"]["vetoed_fields"]})
+        if paired:  # the judged row joins the zone's buffer (from here on the zone has one)
+            values = {name: sensor[name] for name in baseline.PAIR_FIELDS if sensor.get(name) is not None}
+            if values:
+                self._pairs.add(zone, {"device_id": device_id, "timestamp": sample, **values,
+                                       "vetoed_fields": list(result["trust_gate"]["vetoed_fields"])})
         labels = pipeline_risk_labels(result)
         if device_fields is None:  # a single-device zone: the monitor call is exactly as it always was
             verdict = self.monitor.observe(farm_id, zone_id, device_id, sample, labels)

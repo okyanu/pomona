@@ -414,6 +414,14 @@ const context = vm.createContext({
   assert.equal(html('ph'), '6.5<div class="tile-src">substrate-1 · 20 min</div>');
   assert.equal(html('ec'), '3 mS/cm<div class="tile-src">substrate-1 · 20 min</div>');
   assert.equal(html('vpd'), '1.38 kPa<div class="tile-src">climate-1 · 40 s</div>');
+  // probes disagree (docs/design/slow-drift-pair-check.md 4b): the chosen value, the other probe's value without
+  // "(not used)" even though the router vetoed it, and the meter line
+  const disagreeFields = {...snapshot.fields, humidity_pct: {...snapshot.fields.humidity_pct, disagree: true}};
+  multiOverview({}, {...snapshot, fields: disagreeFields});
+  await run('refresh()');
+  assert.equal(html('humidity'), '55 %<div class="tile-src">climate-1 · 40 s</div><div class="tile-src">also climate-2: 58 %</div><div class="tile-src">probes disagree: check both with a meter</div>');
+  assert.ok(!html('humidity').includes('(not used)'));
+  assert.equal(html('air'), '24.5 °C<div class="tile-src">climate-1 · 40 s</div><div class="tile-src">also climate-2: 23.6 °C</div>', 'other tiles are unchanged');
   const crossFields = {...snapshot.fields, humidity_pct: {...snapshot.fields.humidity_pct, device_id: 'climate-2', others: []}};
   multiOverview({}, {...snapshot, fields: crossFields});
   await run('refresh()');

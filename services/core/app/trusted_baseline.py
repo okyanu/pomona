@@ -47,7 +47,8 @@ arrival included); change one only together with the other.
 from __future__ import annotations
 
 import math
-from bisect import bisect_right, insort_left
+import statistics
+from bisect import bisect_left, bisect_right, insort_left
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -496,3 +497,216 @@ class StreamBaseline:
             if stats is not None:
                 out[field] = stats
         return out
+
+
+# --- Pair check: one probe judged against the other probes of its zone (docs/design/slow-drift-pair-check.md) ---
+# A slow drift of one probe cannot be told from real weather by that probe's own history, but two probes in one
+# zone see the same weather, so the difference between them barely moves. A drift changes the difference.
+# Fields that are paired. Substrate temperature is left out: it has no calibration path, so a flag could not be cleared.
+PAIR_FIELDS = ("air_temperature_c", "humidity_pct", "soil_moisture_pct", "substrate_moisture_pct")
+# Offsets (own minus partners) needed before the pair is judged: 6 minutes at 30 s, 1 hour at 5 min.
+PAIR_MIN_N = 12
+# At most this many partner devices count in one partner value (the first by device id that have a fresh reading).
+PAIR_MAX_PARTNERS = 8
+# A partner reading counts when it is at most this many own sample intervals older than the own reading: 2.5 lets
+# one missed partner packet pass. The result is kept between 60 s and 750 s (750 s is 2.5 intervals of 5 minutes).
+PAIR_AGE_INTERVALS = 2.5
+PAIR_MAX_AGE_MIN_S = 60
+PAIR_MAX_AGE_MAX_S = 750
+# A stream that reports less often than this (median of its last PAIR_INTERVALS intervals) is not paired.
+PAIR_MAX_CADENCE_S = 300
+PAIR_INTERVALS = 12
+# How far the difference may move before the router flags it. A copy of the router's PAIR_DRIFT_LIMITS (the router
+# owns them; a router-side test pins the copy).
+PAIR_DRIFT_LIMITS = {"air_temperature_c": 3.0, "humidity_pct": 10.0, "soil_moisture_pct": 8.0, "substrate_moisture_pct": 8.0}
+# A reading whose own step from the previous one is this big (a third of the limit) is not judged: the partner has
+# not reported a shared change yet, so the difference would jump for one reading.
+PAIR_FAST_STEP = {field: limit / 3 for field, limit in PAIR_DRIFT_LIMITS.items()}
+
+
+def pair_start_time(calibrations: List[Dict[str, Any]], field: str, now: Any) -> Optional[datetime]:
+    """When the pair of `field` starts: the newest calibration (on any device of the zone) that covers the field and was
+    performed at or before `now`, compared as times. None when there is none."""
+    return _latest_calibrations(calibrations, parse_time(now)).get(field)
+
+
+def _pair_value(row: Dict[str, Any], field: str, alias: Optional[str]) -> Optional[float]:
+    """A row's finite value under `field`, else under its alias."""
+    value = _number(row.get(field))
+    if value is None and alias is not None:
+        value = _number(row.get(alias))
+    return value
+
+
+def _pair_series(rows: Iterable[Dict[str, Any]], field: str, alias: Optional[str], before: datetime,
+                 floor: Optional[datetime] = None) -> List[tuple]:
+    """(sample time, value, vetoed) of the rows carrying a finite value of the field, sample time before `before`,
+    oldest first, one per sample time (the last row given wins). With `floor`, `rows` must be oldest first and the
+    walk (newest first) stops once it is past `floor` and has PAIR_INTERVALS + 1 sample times: the window, the
+    rhythm and the previous reading are all it needs, so a long stored history is not parsed."""
+    found: Dict[datetime, tuple] = {}
+    for row in (reversed(rows) if floor is not None else rows):
+        stamp = parse_time(row.get("timestamp"))
+        if stamp is None or stamp >= before:
+            continue
+        value = _pair_value(row, field, alias)
+        if value is None:
+            continue
+        vetoed = row.get("vetoed_fields") or ()
+        if floor is None:
+            found[stamp] = (value, field in vetoed or alias in vetoed)
+            continue
+        found.setdefault(stamp, (value, field in vetoed or alias in vetoed))
+        if stamp < floor and len(found) > PAIR_INTERVALS:
+            break
+    return [(stamp, value, vetoed) for stamp, (value, vetoed) in sorted(found.items())]
+
+
+def pair_row_entry(row: Dict[str, Any], field: str) -> Optional[tuple]:
+    """(value, vetoed) of one row for `field` (under its alias if it has no finite value under the name), None when the
+    row carries no finite value of the field. The one place that says what a row contributes to a pair series."""
+    alias = ALIASES.get(field)
+    value = _pair_value(row, field, alias)
+    if value is None:
+        return None
+    vetoed = row.get("vetoed_fields") or ()
+    return value, field in vetoed or alias in vetoed
+
+
+def _as_series(entries: List[tuple]) -> tuple:
+    """The series form `pair_reference` works on, from (sample time, value, vetoed) entries oldest first with one entry per
+    sample time: parallel lists (sample times, epoch seconds, values, vetoed flags)."""
+    return ([e[0] for e in entries], [e[0].timestamp() for e in entries], [e[1] for e in entries], [e[2] for e in entries])
+
+
+def _flat(values: List[float], vetoed: List[bool], lo: int, hi: int) -> bool:
+    """True when the not-vetoed values at positions lo..hi are at least PAIR_MIN_N and all within IDENTICAL_EPSILON of the
+    first (a placeholder or a dead probe); the walk stops at the first one that differs."""
+    first, count = None, 0
+    for i in range(lo, hi):
+        if vetoed[i]:
+            continue
+        if first is None:
+            first = values[i]
+        elif abs(values[i] - first) > IDENTICAL_EPSILON:
+            return False
+        count += 1
+    return count >= PAIR_MIN_N
+
+
+def pair_reference(own_rows: List[Dict[str, Any]], partner_rows: Iterable[Dict[str, Any]], field: str,
+                   pair_start: Optional[datetime], current: Dict[str, Any], window_s: float,
+                   lapse_s: Optional[float] = None, *, own_series: Optional[tuple] = None,
+                   partner_series: Optional[Dict[Any, tuple]] = None) -> Optional[Dict[str, Any]]:
+    """The `pair` entry for one field of the reading `current`, or None (no judgement for this reading).
+
+    `own_rows`: the own stream's stored readings before `current`, oldest first (dicts with `timestamp`, the sensor
+    fields and `vetoed_fields`, as Core's `stream_history` gives them). `partner_rows`: judged readings of the zone's
+    other devices (the same shape, plus `device_id`), any order; a vetoed reading is left out here. `current`: the
+    reading being judged (`device_id`, `timestamp`, values). `pair_start`: calibration time (see `pair_start_time()`).
+
+    For every own reading in the window the partner value is the median of each partner device's latest reading
+    that is older and not too old; the offset is own minus that. The reference is the median offset against the
+    same set of partner devices as now. Returns None while there are fewer than PAIR_MIN_N such offsets, with no
+    partner now, for a flat or slow stream, for a field both names of which the device sends (judged under the first
+    name only), when the newest offset is older than `lapse_s`, and on a fast own step.
+
+    Fast path (the in-process engine keeps these between readings, so it need not read every row again; the result
+    is the same as from the rows): `own_series` and `partner_series` (device id -> series; a device of `current`'s own id
+    is left out) replace `own_rows` and `partner_rows`, which are then not read. A series is four parallel lists, oldest
+    first, one entry per sample time (the last row of that time wins): sample times (aware UTC datetimes), the same as
+    epoch seconds, values and vetoed flags, as `pair_row_entry()` gives them. It may hold entries at or after `current`'s time.
+    """
+    if field not in PAIR_FIELDS:
+        return None
+    now = parse_time(current.get("timestamp"))
+    alias = ALIASES.get(field)
+    value_now = _pair_value(current, field, alias)
+    if now is None or value_now is None:
+        return None
+    if alias is not None and _number(current.get(field)) is not None and _number(current.get(alias)) is not None \
+            and list(ALIASES).index(field) > list(ALIASES).index(alias):
+        return None  # both names: one probe, judged once, under the first name
+    own_device = current.get("device_id")
+    start = now - timedelta(seconds=window_s)
+    if own_series is None or partner_series is None:
+        # `own_series` here is the part of the own stream the judgement needs (see `_pair_series`)
+        own_series = _as_series(_pair_series(own_rows, field, alias, now, start))
+        by_device: Dict[Any, List[Dict[str, Any]]] = {}
+        for row in partner_rows:
+            device = row.get("device_id")
+            if device != own_device and device is not None:
+                by_device.setdefault(device, []).append(row)
+        partner_series = {device: _as_series(_pair_series(rows, field, alias, now)) for device, rows in by_device.items()}
+    # Partner devices: usable readings (not vetoed, from the pair start on, before now) as sorted epoch seconds and values.
+    # A device's series is read where it is: from `first` (the pair start) to its end before now, vetoed entries skipped.
+    partners: List[tuple] = []  # (device id, times, values, vetoed flags, first position), sorted by device id
+    for device in sorted(partner_series):
+        if device == own_device or device is None:
+            continue
+        stamps, times, values, vetoed = partner_series[device]
+        end = bisect_left(stamps, now)
+        first = 0 if pair_start is None else bisect_left(stamps, pair_start, 0, end)
+        last = end - 1
+        while last >= first and vetoed[last]:
+            last -= 1
+        if last < first:
+            continue  # no usable reading
+        if _flat(values, vetoed, max(first, bisect_left(stamps, start, first, end)), end):
+            continue  # a flat partner is never a partner
+        partners.append((device, times, values, vetoed, first))
+    if not partners:
+        return None
+    own_stamps, own_times, own_values, own_vetoed = own_series
+    own_end = bisect_left(own_stamps, now)
+    own_first = bisect_left(own_stamps, start, 0, own_end)  # the window starts here
+    # Own sample rhythm: the median of the last intervals sets how old a partner reading may be.
+    stamps = own_stamps[max(own_end - (PAIR_INTERVALS + 1), 0):own_end]
+    gaps = [(b - a).total_seconds() for a, b in zip(stamps, stamps[1:])]
+    max_age = float(PAIR_MAX_AGE_MAX_S)
+    if gaps:
+        cadence = statistics.median(gaps)
+        if cadence > PAIR_MAX_CADENCE_S:
+            return None
+        max_age = min(max(PAIR_AGE_INTERVALS * cadence, PAIR_MAX_AGE_MIN_S), PAIR_MAX_AGE_MAX_S)
+    if own_end and abs(value_now - own_values[own_end - 1]) >= PAIR_FAST_STEP[field]:
+        return None  # a sudden own step: a shared change has not reached the partner's reading yet
+    if _flat(own_values, own_vetoed, own_first, own_end):
+        return None  # a flat own stream (a placeholder or a dead probe) is not judged
+
+    def partner_at(moment: float) -> Optional[tuple]:
+        """(partner device ids, partner value) at `moment`: each device's latest usable reading strictly before it, at
+        most `max_age` older; the first PAIR_MAX_PARTNERS devices that have one."""
+        ids, found = [], []
+        for device, times, values, vetoed, first in partners:
+            position = bisect_left(times, moment) - 1
+            while position >= first and vetoed[position]:
+                position -= 1
+            if position >= first and moment - times[position] <= max_age:
+                ids.append(device)
+                found.append(values[position])
+                if len(ids) == PAIR_MAX_PARTNERS:
+                    break
+        if not ids:
+            return None
+        return tuple(ids), (found[0] if len(found) == 1 else statistics.median(found))
+
+    at_now = partner_at(now.timestamp())
+    if at_now is None:
+        return None
+    ids_now, partner_value = at_now
+    offsets: List[float] = []
+    newest: Optional[datetime] = None
+    for i in range(own_first if pair_start is None else bisect_left(own_stamps, pair_start, own_first, own_end), own_end):
+        if own_vetoed[i]:
+            continue
+        at = partner_at(own_times[i])
+        if at is not None and at[0] == ids_now:
+            offsets.append(own_values[i] - at[1])
+            newest = own_stamps[i]
+    if len(offsets) < PAIR_MIN_N:
+        return None
+    if lapse_s is not None and (now - newest).total_seconds() > lapse_s:
+        return None
+    return {"offset": round(statistics.median(offsets), 6), "n": len(offsets), "partner_value": round(partner_value, 6),
+            "partners": len(ids_now), "partner_device": ids_now[0] if len(ids_now) == 1 else None, "device": own_device}

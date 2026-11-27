@@ -12,13 +12,14 @@ import queue
 import threading
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.schemas import SensorEvent, utc_now
 from app.store import SensorEventStore, event_store
-from app.trusted_baseline import stream_baseline
+from app.trusted_baseline import (ALIASES, PAIR_FIELDS, PAIR_MAX_AGE_MAX_S, pair_reference, pair_start_time,
+                                  stream_baseline)
 
 logger = logging.getLogger(__name__)
 
@@ -138,18 +139,45 @@ class OutcomeFeed:
             history.append(packet)
         return history
 
-    def _stream_baseline(self, event: SensorEvent) -> Dict[str, Dict[str, Any]]:
-        """Sticky trusted reference for the event's stream: stored readings before it, less what the pipeline vetoed."""
-        prior = self._store.stream_history(event, settings.trust_baseline_scan_limit)
+    def _stream_baseline(self, event: SensorEvent, prior: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Dict[str, Any]]:
+        """Sticky trusted reference for the event's stream: stored readings before it, less what the pipeline vetoed.
+        `prior` is the stream's stored history when the caller has already read it."""
+        if prior is None:
+            prior = self._store.stream_history(event, settings.trust_baseline_scan_limit)
         return stream_baseline(prior, self._store.stream_calibrations(event), event.timestamp,
                                settings.trust_baseline_window_s, settings.trust_baseline_min_n,
                                settings.trust_baseline_max_age_s or None)
 
+    def _add_pairs(self, event: SensorEvent, prior: List[Dict[str, Any]], baseline: Dict[str, Dict[str, Any]]) -> None:
+        """Pair check (docs/design/slow-drift-pair-check.md): add a `pair` entry to each paired field's own reference
+        entry, built against the zone's other devices. A zone with no other device carrying the field runs no query."""
+        fields = [name for name in PAIR_FIELDS if name in baseline]
+        if not fields:
+            return
+        names = sorted({*fields, *(ALIASES[name] for name in fields if name in ALIASES)})
+        devices = self._store.zone_pair_devices(event, names)
+        if not devices:
+            return
+        window_s = settings.trust_baseline_window_s
+        partners = self._store.zone_partner_history(event, devices, names,
+                                                    event.timestamp - timedelta(seconds=window_s + PAIR_MAX_AGE_MAX_S))
+        calibrations = self._store.zone_calibrations(event.farm_id, event.zone_id)
+        current = {"device_id": event.device_id, "timestamp": event.timestamp,
+                   **{name: getattr(event, name, None) for name in PAIR_FIELDS}}
+        for name in fields:
+            pair = pair_reference(prior, partners, name, pair_start_time(calibrations, name, event.timestamp), current,
+                                  window_s, settings.trust_baseline_max_age_s or None)
+            if pair is not None:
+                baseline[name]["pair"] = pair
+
     def _process(self, event: SensorEvent) -> None:
         sensor = event.model_dump(mode="json")
         sensor.pop("source", None)
-        baseline = self._stream_baseline(event)
+        prior = self._store.stream_history(event, settings.trust_baseline_scan_limit)
+        baseline = self._stream_baseline(event, prior)
         device_fields = self._store.device_fields_for(event)  # None in a single-device zone: the key is then absent
+        if settings.pair_check and device_fields is not None:
+            self._add_pairs(event, prior, baseline)
         result = _post(settings.model_router_url, "/v1/pipeline/evaluate", {
             "scenario_id": "core_feed",
             "farm_context": {
@@ -173,7 +201,8 @@ class OutcomeFeed:
         if gate:  # what this reading's verdict was, so later readings' references leave vetoed values out
             quality = result.get("sensor_quality") or {}
             self._store.add_trust(event, gate.get("trust_verdict", "trusted"), gate.get("vetoed_fields") or [],
-                                  quality.get("data_quality_labels") or [], quality.get("safe_next_checks") or [])
+                                  quality.get("data_quality_labels") or [], quality.get("safe_next_checks") or [],
+                                  quality.get("pair_disagreement_fields"))  # None when the pair check flagged nothing (4b)
         # The check text goes to alerts only in a multi-device zone (device_fields is not None); a single-device
         # zone's request body is unchanged.
         detail = alert_detail(result) if device_fields is not None else None

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Judge each device of a multi-device zone on its own expected fields (docs/design/multi-device-zones.md).
     # 0 = every zone is single-device, as before.
     multi_device_zones: bool = True
+    # Judge a probe against the other probes of its zone (slow drift; docs/design/slow-drift-pair-check.md). Needs
+    # multi_device_zones. 0 = no pair entry and no partner queries.
+    pair_check: bool = True
     device_timeout_seconds: int = Field(default=120, ge=1)
     db_path: Path = Path("data/pomona.db")
     api_key: str = ""
