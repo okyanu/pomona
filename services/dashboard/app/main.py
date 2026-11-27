@@ -290,6 +290,8 @@ TREND_LIMIT = 120  # an hour at 30 s
 # fields it supplies vetoed, because the router does not take them as labels from another device.
 GLOBAL_VETO_LABELS = frozenset({"stale_reading", "insufficient_context", "unit_mismatch"})
 ROUTINE_CHECK = "continue routine monitoring"
+# The moisture probe may be published under either name (Core's trusted_baseline.ALIASES).
+ALIASES = {"soil_moisture_pct": "substrate_moisture_pct", "substrate_moisture_pct": "soil_moisture_pct"}
 DETAIL_MAX_CHARS = 500
 _clock = time.monotonic  # tests replace this to move the caches' time
 _snapshot_cache: Dict[tuple, tuple] = {}  # (farm, zone) -> (expires, snapshot)
@@ -545,6 +547,19 @@ async def device_checks(snapshot: Dict[str, Any]) -> DeviceChecks:
         if flagged or not own_vetoed:  # a flagged probe outside the zone view puts nothing on the zone's badge
             _add_unique(out.labels, labels)
             _add_unique(out.checks, [c for c in row.get("safe_next_checks") or [] if c != ROUTINE_CHECK])
+    # Probes disagree (docs/design/slow-drift-pair-check.md 4b): Core marked the field, so no advice uses either value
+    # (it goes to the router as vetoed), and the pair text of every live probe that took the flag goes on the zone's
+    # badge even when that probe does not supply the field (the loop above skips such a probe).
+    disagree = {name for name, field in (snapshot.get("fields") or {}).items() if field.get("disagree")}
+    if disagree:
+        both = disagree | {ALIASES[name] for name in disagree if name in ALIASES}
+        _add_unique(out.vetoed, sorted(disagree))
+        for device in sorted(snapshot.get("devices") or [], key=lambda d: d["device_id"]):
+            trust = device.get("trust") or {}
+            if device.get("stale") or trust.get("status") != "judged" or not both & set(trust.get("pair_fields") or ()):
+                continue
+            _add_unique(out.labels, trust.get("data_quality_labels") or [])
+            _add_unique(out.checks, [c for c in trust.get("safe_next_checks") or [] if c != ROUTINE_CHECK])
     return out
 
 
@@ -1666,7 +1681,8 @@ async function refreshData() {
       const f = fields[name];
       if (!f) { $(id).textContent = '--'; return; }
       const lines = [typeof f.age_s === 'number' ? `${f.device_id} · ${ageText(f.age_s)}` : `${f.device_id}`,
-        ...(f.others || []).map((o) => `also ${o.device_id}: ${format(o.value)}${o.vetoed ? ' (not used)' : ''}`)];
+        ...(f.others || []).map((o) => `also ${o.device_id}: ${format(o.value)}${o.vetoed && !f.disagree ? ' (not used)' : ''}`),
+        ...(f.disagree ? ['probes disagree: check both with a meter'] : [])];  // docs/design/slow-drift-pair-check.md 4b
       $(id).innerHTML = `${escapeHtml(format(f.value))}${lines.map((line) => `<div class="tile-src">${escapeHtml(line)}</div>`).join('')}`;
     };
     tile('air', 'air_temperature_c', (v) => value(v, ' °C'));

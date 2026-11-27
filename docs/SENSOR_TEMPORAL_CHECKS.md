@@ -187,6 +187,7 @@ browser checker mirrors in JavaScript) and every threshold was set on the real l
 | `sensor_drift_possible` (step) for air temperature, humidity, substrate moisture and substrate temperature | The reading differs from the newest trusted reading (`last_value`, `last_at`) by more than max(smallest allowance, speed x minutes since that reading). Air 3 C and 1 C/min; humidity 12 %RH and 4 %RH/min; moisture 8 % and 2 %/min; substrate temperature 1.5 C and 0.3 C/min. A flagged reading is vetoed, so the reference stays put and the step stays flagged until the allowance has grown to cover it (4 minutes for +4 C air, 4 for +15 %RH, 8 for +15 % moisture, 13 for +4 C substrate), then the new level is accepted | air 0.054 % (the Reference compartment holds 17 C glitches), 0.002 % elsewhere; humidity 0.021 % (Reference glitches), 0.010 % (IUACAAS), 0.008 % (Digilog), about 0 elsewhere; moisture 0.017 % (Digilog, one 79 % glitch held until the allowance covers it), 0 elsewhere; substrate temperature 0.006 % (Digilog, one 2.4 C glitch), 0 elsewhere |
 | `noisy_signal_possible` for humidity, air temperature, pH, substrate moisture and substrate temperature | The median step over the last 12 readings is at least the limit **and** the window has not simply moved in one direction (its net movement is at most half of the distance it travelled). The 5-minute limits are 10 %RH, 2 C, 0.5 pH, 1 % moisture and 0.4 C; they shrink with the square root of the sample interval, never below the floors 3 %RH, 0.4 C, 0.1 pH, 2.5 % and 0.5 C. **EC** has one fixed limit, 0.20 mS/cm, used as it is (no scaling), and is judged only when the median sample interval of the window is 90 seconds or less | humidity: 0.084 % (AICU), 0.056 % (IUACAAS), 0.025 % (Digilog), about 0 elsewhere; air: 0.029 % (Reference), about 0 elsewhere; pH: 0.061 % (AICU), 0 elsewhere (the unshielded pond pH is noisy on purpose and already flagged by the 11-packet rule); moisture and substrate temperature: 0. At 30 seconds, on 3 months of real 10-second data (see the last section): air, humidity and pH 0 of 308,285 windows each; EC at 0.20, 0 of about 0.92 million windows per probe at every rate from 10 to 90 seconds |
 | `baseline_drift_possible` for pH, now also for a slow drift | As before, but a pH stream that normally changes every sample (the same 70 % test) is judged against the spread of its trusted readings older than half an hour (Core's `spread_lag`) instead of the spread of the whole window. A drift in progress is trusted until it is a threshold away, which widens the whole-window spread until 3 x spread hides it; the lagged spread has not seen the newest half hour | no change in the real logs: no real drain stream changes every sample, so they keep the full spread. Only the pond pH is judged this way: 0.49 % to 0.64 % of its readings (with the 2 h lapse), inside the 2 % guard. EC is not judged this way (see below) |
+| `baseline_drift_possible` as a **pair check** for air temperature, humidity and substrate moisture (both moisture names), in a zone with two or more devices | Core compares the probe with the other probes of the same zone that report the same field (their median, if there are several). It keeps the usual difference, the median of that difference over the last 2 hours, from at least 12 readings, and flags the reading when the difference has moved from the usual by the limit: air 3 C, humidity 10 %RH, moisture 8 %. A probe is judged only when it reports at least every 5 minutes. A partner's reading counts when it is earlier than the probe's and recent enough for the judged probe (2.5 of that probe's intervals, 60 to 750 seconds), so give both probes the same cadence, 5 minutes or faster. A flagged reading is vetoed and no longer serves as a partner or as part of the usual difference, so the flag lasts while the difference stays over the limit. A reading that is itself a step of a third of the limit or more (air 1 C, humidity 3.3 %RH, moisture 2.7 %) is not judged, because the partner has not reported a shared change yet. A calibration of the field on any device of the zone restarts the pair. Details: [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md#pair-check-two-or-more-probes-in-one-zone) | UF chamber (4 probes, 30 s, about 107 days; measured when the check was designed): 0 flagged readings with three partners; the worst single pair flags 28 to 45 air readings (1 to 3 cards) and one or two pairs flag 3 to 7 humidity readings (1 card each); every other pair 0. AGC2 slab 1 against slab 2 (5 min): 0 in 5 of 6 compartments; Digilog 47 to 48 of 45,311 readings (0.10 %, 4 cards), from real slab glitches. Those few cards are accepted (the owner's decision) and ask to check both probes. The limits come from one chamber and one greenhouse |
 
 Why each shape:
 
@@ -252,22 +253,38 @@ Limits that remain:
 - A step is flagged for as long as it is physically impossible and then accepted as the new level without a
   calibration (a heat spike must not be held back): +4 C air for about 4 minutes, +15 %RH for about 4 minutes,
   +15 % moisture for about 8, +4 C substrate temperature for about 13. Removing a long drift snaps the reading
-  back and trips the same check, so a 40-minute drift raises a sensor card only when it ends. The scorer does not
+  back and trips the same check, so a 40-minute drift of a probe that is alone in its zone raises a sensor card only when it ends. The scorer does not
   credit that: a sensor card whose label run began after the fault's last reading is scored "MISSED (noticed only
   when it ended)" (verdict `caught_at_recovery`), in the game and in `make fake-greenhouse-score`.
-- **Still MISSED in the game: a slow drift of air temperature, humidity, substrate moisture or substrate
-  temperature** (0.1 C, 0.5 %RH, 0.5 %, 0.1 C per minute, 40 minutes: noticed only when it ends, which is scored
-  as missed). A drift can only be told from the real thing by its level against the probe's recent past, and
-  the real logs do not leave room for a level that catches these while they last. Real readings leave their
-  trusted 2 h median by (1 % of readings / 0.01 % of readings): air 3.3 to 8.7 C / 6.5 to 14 C, humidity 12.6 to
-  16.3 %RH / 27 to 50, substrate temperature 1.1 to 2.1 C / 6 to 10 C. The drifts reach 4 C, 20 %RH and 4 C
-  at their end, so a limit that fires while they last is crossed by 1 % of real readings. Moisture leaves its
-  median by 2 to 7 % / 7.4 to 12.7 %, so a limit near 13 % would fit the real logs, but the dry-zone event is a
-  moisture fall of 1.2 %/min with the same signature at a different speed (a drift of 0.5 %/min is its slow
-  version), and a level check would turn that event into "can't confirm the probe" and withhold its water-level
-  card, which is worse than missing a drift. A pH drift is different: it is steep against a steady probe's own
-  noise and is caught (0.02 pH per minute after about 18 minutes, 0.01 after about 36), while 0.005 per minute over
-  two hours stays inside the window and is not.
+- **A slow drift of air temperature, humidity or substrate moisture is caught with a second device in the zone, and still
+  MISSED with one.** The drifts of the game (0.1 C, 0.5 %RH, 0.5 % per minute, 40 minutes) are caught while they last
+  when another device of the zone reports the same field and the probe itself reports at least every 5 minutes (the pair check, row above). In
+  the fake greenhouse's `slow_drift.json` (a layout with two climate probes and two moisture probes, one seed) the
+  cards came after about 32 minutes (air), 21.5 (humidity) and 17.5 (moisture). A probe that is alone in its zone is
+  judged only against its own past, and then the drift is noticed only when it ends and the reading snaps back,
+  which is scored as missed (`caught_at_recovery`). A probe can only be told from the real thing by its level against
+  its own recent past, and the real logs do not leave room for a level that catches these while they last. Real
+  readings leave their trusted 2 h median by (1 % of readings / 0.01 % of readings): air 3.3 to 8.7 C / 6.5 to 14 C,
+  humidity 12.6 to 16.3 %RH / 27 to 50. The drifts reach 4 C and 20 %RH at their end, so a limit that fires while
+  they last is crossed by 1 % of real readings. Moisture leaves its median by 2 to 7 % / 7.4 to 12.7 %, so a limit
+  near 13 % would fit the real logs, but the dry-zone event is a moisture fall of 1.2 %/min with the same signature
+  at a different speed (a drift of 0.5 %/min is its slow version), and a level check would turn that event into
+  "can't confirm the probe" and withhold its water-level card, which is worse than missing a drift. Two probes see the
+  same weather and the same irrigation, so their difference barely moves in a real event, which is why the pair
+  check can use a much tighter limit.
+- **Substrate temperature drift stays MISSED, with or without a second probe.** Real readings leave the 2 h median by
+  1.1 to 2.1 C / 6 to 10 C, and a flagged level could never be confirmed: Core has no calibration for substrate
+  temperature, so a flagged pair could never be cleared. It is left out of the pair check.
+- **The pair check has limits of its own.** It needs a second device with the same field, and judges a probe only when that probe reports at least every 5
+  minutes. A zone with one probe, or a probe that reports less often than every 5 minutes, keeps the old behaviour; a
+  slower partner still works when its reading is recent enough. Both probes drifting alike is
+  not caught. A drift slower than about the limit over 2 hours (air 0.025 C per minute) moves the reference before it
+  crosses the limit, and is caught late or not at all. With only two probes it is close to a coin flip which one
+  takes the flag, so the card may land on the good probe; it asks for a meter on both. The limits come from one
+  hydroponic chamber and one greenhouse; revisit them when a real greenhouse with two air probes in one zone
+  appears. A pH drift is different: it is steep against a steady probe's own noise and is caught on its own (0.02 pH
+  per minute after about 18 minutes, 0.01 after about 36), while 0.005 per minute over two hours stays inside the
+  window and is not.
 - **EC slow drift is partly missed.** EC is judged against the whole-window spread (see above), which a drift in
   progress widens. A steep drift is caught (0.05 mS/cm per minute for 40 minutes, and 0.1), but 0.025 and
   0.0125 per minute over 80 to 120 minutes are caught in 2 of 3 seeds and otherwise noticed only when the drift

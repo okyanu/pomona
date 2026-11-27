@@ -15,8 +15,9 @@ No phase completed; no hardware bench test, field data or model release claimed.
   to tune the step, freeze, noise and drift checks; a failed check vetoes the
   reading before the crop rules and raises a `sensor_check` card. A noisy EC
   check covers streams sampled every 90 s or faster. Slow drift of air,
-  humidity, moisture and substrate temperature is still not caught (see
-  [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md)).
+  humidity and moisture is caught while it lasts when the zone has a second probe for the field (the pair check). A
+  probe alone in its zone, and substrate temperature, are still missed; the game has one probe per zone, so its Drift
+  trick is still scored missed (see [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md)).
 - **Fake greenhouse.** A simulator with injected sensor faults and real-world
   events, a truth log and a scorer (`make fake-greenhouse-score`), and the
   public [Try to fool Pomona](https://huggingface.co/spaces/Okyanus/try-to-fool-pomona)

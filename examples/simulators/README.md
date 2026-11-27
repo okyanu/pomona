@@ -258,8 +258,10 @@ JSON, scheduled by tick (not wall time) so replays are exact:
   offset and a wander) and two climate devices, `climate-1` and `climate-2` (the second with offsets and wander).
   The first 240 ticks are clean. Then four slow drifts downward (air on `climate-1` and on `greenhouse-b`, humidity on
   `climate-2`, moisture on `substrate-2`), a stuck humidity probe on `climate-1`, a humid night and a 20 minute
-  dropout of `climate-2`. Today's scorer calls the drifts missed (noticed only when they end); they are the
-  baseline for the planned pair check.
+  dropout of `climate-2`. The slow-drift pair check is built (`docs/design/slow-drift-pair-check.md`). With seed 23 the
+  scorer gives: air on `climate-1` caught at 32.0 minutes on the drifting probe, humidity on `climate-2` caught at 21.5
+  minutes on the drifting probe, moisture caught on the partner (`substrate-1`) at 17.5 minutes, and air on zone B's single
+  probe missed (no partner).
 - `scenarios/validation.json`: 15 ticks at `--interval 1`, used by `make local-validation`.
 - `scenarios/smoke.json`: 12 ticks, used by the tests.
 

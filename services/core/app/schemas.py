@@ -318,6 +318,9 @@ class ZoneSnapshotField(BaseModel):
     sample_time: str
     age_s: float
     others: List[ZoneSnapshotOther]
+    # Probes disagree (docs/design/slow-drift-pair-check.md 4b): set (true) only while a live device's latest judged row
+    # has a pair flag on this field; absent otherwise (the endpoint excludes unset keys), so every other answer is unchanged.
+    disagree: Optional[bool] = None
 
 
 class ZoneSnapshotDevice(BaseModel):
@@ -332,7 +335,8 @@ class ZoneSnapshotDevice(BaseModel):
     device_fields: List[str]
     supplied: List[str]
     # {"status": "pending"}, or {"status": "judged", "trust_verdict", "vetoed_fields", "data_quality_labels",
-    # "safe_next_checks"} (the last two null for a verdict recorded before they were kept).
+    # "safe_next_checks"} (the last two null for a verdict recorded before they were kept), plus the optional
+    # "pair_fields" (a sorted list) only when the pair check flagged a field on this row.
     trust: Dict[str, Any]
 
 

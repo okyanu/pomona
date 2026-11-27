@@ -1233,6 +1233,96 @@ def test_checks_of_several_devices_are_merged_without_repeats(monkeypatch):
     assert checks_of(snapshot_of(a, b)) == (["ph", "ec_ms_cm"], ["stuck_value"], ["inspect ph", "inspect ec"], [])
 
 
+# --- probes disagree (docs/design/slow-drift-pair-check.md 4b) -------------------------------------------------------
+
+PAIR_TEXT = ("pair check: humidity_pct on climate-1 is 10.4 %RH lower than usual against climate-2 "
+             "(now -11.9, usually -1.5). Check both with a meter; calibrate only the one that was wrong.")
+
+
+def flagged(field="humidity_pct", check=PAIR_TEXT):
+    """A judged row that took the pair flag: its own veto, the drift label, the pair text first, and `pair_fields`."""
+    return {**judged([field], ["baseline_drift_possible"], [check, "continue routine monitoring"]), "pair_fields": [field]}
+
+
+def disagreeing(snap, devices, *names):
+    """Core's snapshot as it is while the probes disagree on `names`: no switching, the zone value stays the first live
+    candidate's (`snapshot_of` follows slice 2's rule alone and would move to the other probe)."""
+    live = [d for d in devices if not d["stale"]]
+    for name in names:
+        first, *rest = [d for d in live if d["event"].get(name) is not None]
+        snap["fields"][name] = {"value": first["event"][name], "device_id": first["device_id"], "sample_time": first["sample_time"],
+                                "age_s": 30.0, "others": [{"device_id": d["device_id"], "value": d["event"][name],
+                                                           "sample_time": d["sample_time"], "vetoed": False} for d in rest],
+                                "disagree": True}
+        snap["sources"][name] = [first["device_id"]]
+    for d in devices:
+        d["supplied"] = [n for n, f in snap["fields"].items() if f["device_id"] == d["device_id"]]
+    return snap
+
+
+def pair_zone(first_trust, second_trust, **second_kw):
+    return (device("climate-1", {"humidity_pct": 60.0}, first_trust),
+            device("climate-2", {"humidity_pct": 55.0}, second_trust, **second_kw))
+
+
+def test_a_disagree_field_is_vetoed_and_the_flagging_probes_pair_text_goes_to_the_checks(monkeypatch):
+    Stack(monkeypatch)
+    first, second = pair_zone(flagged(), judged())
+    snap = disagreeing(snapshot_of(first, second), [first, second], "humidity_pct")
+    assert snap["fields"]["humidity_pct"]["device_id"] == "climate-1"
+    assert checks_of(snap) == (["humidity_pct"], ["baseline_drift_possible"], [PAIR_TEXT], [])
+
+
+def test_the_pair_text_of_a_flagging_probe_that_does_not_supply_the_field_also_goes_to_the_checks(monkeypatch):
+    Stack(monkeypatch)
+    first, second = pair_zone(judged(), flagged())  # climate-2 took the flag; climate-1 supplies the zone's humidity
+    snap = disagreeing(snapshot_of(first, second), [first, second], "humidity_pct")
+    assert second["supplied"] == []
+    out = asyncio.run(dashboard_main.device_checks(snap))
+    assert out.keys() == {"known_vetoed_fields": ["humidity_pct"], "known_data_quality_labels": ["baseline_drift_possible"],
+                          "known_safe_next_checks": [PAIR_TEXT]}  # the text intact, and short enough for the router (300)
+    assert len(PAIR_TEXT) <= 300
+    assert out.mask({"humidity_pct": 60.0, "ph": 6.0}) == {"ph": 6.0}
+
+
+def test_without_disagree_a_flagged_probe_outside_the_zone_view_still_changes_nothing(monkeypatch):
+    Stack(monkeypatch)
+    first, second = pair_zone(judged(), flagged())
+    assert checks_of(snapshot_of(first, second)) == ([], [], [], [])  # as before 4b
+
+
+def test_pair_fields_on_a_row_change_nothing_while_the_snapshot_has_no_disagree(monkeypatch):
+    Stack(monkeypatch)
+    plain = judged(["humidity_pct"], ["stuck_value"], ["inspect humidity_pct"])
+    for trust in (plain, {**plain, "pair_fields": ["humidity_pct"]}):
+        only = device("climate-1", {"humidity_pct": 60.0}, trust)
+        assert checks_of(snapshot_of(only)) == (["humidity_pct"], ["stuck_value"], ["inspect humidity_pct"], [])
+
+
+def test_the_alias_flag_counts_for_a_disagree_field_under_the_other_moisture_name(monkeypatch):
+    Stack(monkeypatch)
+    soil = device("probe-1", {"soil_moisture_pct": 40.0}, judged())
+    substrate = device("probe-2", {"substrate_moisture_pct": 35.0}, flagged("substrate_moisture_pct", "pair check: moisture text"))
+    snap = disagreeing(snapshot_of(soil, substrate), [soil, substrate], "soil_moisture_pct")  # only the soil field carries the mark here
+    assert checks_of(snap) == (["substrate_moisture_pct", "soil_moisture_pct"], ["baseline_drift_possible"],
+                               ["pair check: moisture text"], [])
+
+
+def test_a_stale_probes_pair_fields_add_nothing_to_a_disagree_field(monkeypatch):
+    Stack(monkeypatch)
+    first, second = pair_zone(judged(), flagged(), stale=True)
+    # (Core would not mark the field here; the dashboard must not use a stale probe's row either)
+    snap = disagreeing(snapshot_of(first, second), [first, second], "humidity_pct")
+    assert checks_of(snap) == (["humidity_pct"], [], [], [])
+
+
+def test_a_pending_probes_pair_fields_add_nothing_to_a_disagree_field(monkeypatch):
+    Stack(monkeypatch)
+    first, second = pair_zone(judged(), {"status": "pending", "pair_fields": ["humidity_pct"]})
+    snap = disagreeing(snapshot_of(first, second), [first, second], "humidity_pct")
+    assert checks_of(snap) == (["humidity_pct"], [], [], [])  # climate-2 supplies nothing, so it is not judged here either
+
+
 # --- the dashboard judges a pending device itself --------------------------------------------------------------
 
 def stuck_result(vetoed, label="stuck_value", check="inspect humidity_pct: near-zero variance may indicate a stuck or clipped probe"):
@@ -1549,3 +1639,15 @@ def test_failed_service_calls_do_not_leak_internal_text_to_the_browser(monkeypat
     assert all(item["available"] is False and "unavailable" in item["error"] for item in statuses.values())
     assert statuses["model_router"]["error"].startswith("model router unavailable")
     assert secret in caplog.text  # the detail stays in the log
+
+
+def test_dashboard_moisture_aliases_match_cores():
+    # The dashboard keeps its own copy of the moisture alias map; it must stay the same as Core's.
+    import importlib.util
+
+    core_file = Path(__file__).resolve().parents[2] / "core" / "app" / "trusted_baseline.py"
+    spec = importlib.util.spec_from_file_location("core_trusted_baseline_for_alias_pin", core_file)
+    core_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core_module)
+    assert dashboard_main.ALIASES == core_module.ALIASES
+    assert dashboard_main.ALIASES  # not an empty map on both sides

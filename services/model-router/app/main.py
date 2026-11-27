@@ -16,7 +16,7 @@ from app.audit import read_pipeline_audit, write_pipeline_audit
 from app.config import settings
 from app.expected_fields import KNOWN_SENSOR_FIELDS
 from app.registry import discover_models, get_model
-from app.sensor_quality import route_sensor_quality_reasoner
+from app.sensor_quality import route_sensor_quality_reasoner, valid_pair
 from app.safety_triage import route_safety_triage_reasoner
 from app.nutrient_ph_ec import route_nutrient_ph_ec_reasoner
 from app.pipeline import evaluate_pipeline
@@ -336,7 +336,9 @@ class PipelineEvaluateRequest(DeviceZoneKeys):
     stream_baseline: Optional[Dict[str, Dict[str, Any]]] = Field(
         default=None,
         description=("Core's sticky trusted reference per field: {median, n, window_s, last_change_at}, optionally "
-                     "{spread, spread_lag, last_value, last_at, change_share, change_steps, longest_run_s}."),
+                     "{spread, spread_lag, last_value, last_at, change_share, change_steps, longest_run_s, pair}. "
+                     "`pair` (multi-device zones) is {offset, n, partner_value, partners, partner_device, device}: "
+                     "how far this probe usually reads from the other probes of its zone."),
     )
     proposed_command: Optional[Dict[str, Any]] = None
     actor: str = "assistant_model"
@@ -374,6 +376,12 @@ class PipelineEvaluateRequest(DeviceZoneKeys):
                 if number is not None and (isinstance(number, bool) or not isinstance(number, (int, float))
                                            or not math.isfinite(number) or number < 0):
                     raise ValueError(f"stream_baseline.{field}.{key} must be a non-negative number")
+            # Pair entry (multi-device zones, only Core sends it, so a malformed one is a Core bug).
+            pair = stats.get("pair")
+            if pair is not None and valid_pair(pair) is None:
+                raise ValueError(
+                    f"stream_baseline.{field}.pair must be {{offset, partner_value: finite numbers; n, partners: "
+                    "positive whole numbers; partner_device: text or null; device: text}")
         return value
 
     @field_validator("history")

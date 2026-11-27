@@ -86,6 +86,25 @@ reading (`missing_ec`, ...) instead of showing a calm zone: the dashboard's sens
   - `MULTI_DEVICE_ZONES=0` turns this off (every zone is judged as single-device).
   - A fast device in a shared zone shortens how far back a slow device's stored history reaches (retention is per
     zone).
+  - **Drift detection needs a second device.** A slow drift of one probe (air temperature, humidity or substrate
+    moisture) is caught while it lasts when another device in the same zone reports the same field and the probe itself reports
+    **at least every 5 minutes**; Core then judges each probe against the others (the pair check, see
+    [SENSOR_QUALITY_REASONER.md](./SENSOR_QUALITY_REASONER.md#pair-check-two-or-more-probes-in-one-zone)). A probe is judged only
+    when it reports at least every 5 minutes, and a partner's reading counts when it is earlier and recent enough for
+    the judged probe (2.5 of that probe's intervals, 60 to 750 seconds), so give both probes the same cadence, 5
+    minutes or faster. A zone with one probe, or a probe that reports less often, keeps the old behaviour: a drift is
+    noticed only when it ends. Substrate temperature drift is not covered. `PAIR_CHECK=0` turns the pair check off.
+    - **One zone per shared air space.** The check assumes the probes of a zone see the same weather. Probes in
+      different rooms or different compartments must not share a `zone_id`, or their normal differences will be read
+      as drift.
+    - **Retention is per zone**, so two devices that share a zone each keep about half of `MAX_EVENTS`' history
+      (three keep about a third); a 30-second probe and a 5-minute probe in one zone leave the slow one little.
+    - **Calibrate only the probe that was wrong.** A calibration of the field on any device of the zone restarts the
+      pair reference. If the good probe is calibrated while the other is still drifted, today's difference becomes
+      the new normal. The check text says: check both with a meter, calibrate only the one that was wrong.
+    - In a zone with only two probes it is close to a coin flip which one is flagged first, so the card may name the
+      good probe. While the probes disagree, the zone view treats that field as "can't confirm": the air or humidity tile
+      shows both values with "probes disagree: check both with a meter", and no advice uses either value.
   - **The zone view** (slice 2, `docs/design/multi-device-zones-slice2.md`): the dashboard builds one view of the zone
     from every device instead of showing the newest packet.
     - Each reading field comes from one device. Core's `GET /v1/sensors/zone-snapshot` uses only each device's latest

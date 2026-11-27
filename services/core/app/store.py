@@ -12,6 +12,7 @@ from typing import Optional
 
 from app.config import settings
 from app.schemas import READING_FIELDS, SensorEvent, SensorObservation, CalibrationEvent, CorrectedObservation, utc_now
+from app.trusted_baseline import ALIASES
 
 
 CLEANUP_INTERVAL = timedelta(minutes=1)  # the age-based deletes run at most this often per database and table
@@ -107,7 +108,9 @@ class SensorEventStore:
             # The sensor-check result the verdict came from (JSON lists), so the zone snapshot can carry it
             # (docs/design/multi-device-zones-slice2.md 2.2). A table from before keeps NULL in its old rows.
             trust_columns = {r[1] for r in db.execute("PRAGMA table_info(event_trust)")}
-            for column in ("data_quality_labels", "safe_next_checks"):
+            # `pair_fields`: the fields the pair check flagged on that reading (JSON list, NULL when none)
+            # (docs/design/slow-drift-pair-check.md 4b).
+            for column in ("data_quality_labels", "safe_next_checks", "pair_fields"):
                 if column not in trust_columns:
                     db.execute(f"ALTER TABLE event_trust ADD COLUMN {column} TEXT")
             # Which fields each device has sent in a live full packet, and when (first and last `received_at`): the
@@ -500,22 +503,85 @@ class SensorEventStore:
             return None
         return sorted(row["field"] for row in counting if row["device_id"] == event.device_id and row["field"] != PACKET_FIELD)
 
+    def zone_pair_devices(self, event: SensorEvent, fields) -> list:
+        """The other devices of the event's farm and zone that have carried any of `fields`, sorted: the pair check's
+        partners. The same time rule as `device_fields_for` (first_seen <= the event's received_at, last_seen >= it
+        minus the retention days). Empty when the multi-device switch is off."""
+        fields = list(fields)
+        if not settings.multi_device_zones or not fields:
+            return []
+        received = event.received_at or utc_now()
+        until = received.isoformat()
+        since = (received - timedelta(days=settings.retention_days)).isoformat()
+        marks = ",".join("?" * len(fields))
+        with self._lock, self._connect() as db:
+            rows = db.execute(f"""SELECT DISTINCT device_id FROM device_fields WHERE farm_id=? AND zone_id=?
+                AND device_id != ? AND field IN ({marks})
+                AND julianday(first_seen) <= julianday(?) AND julianday(last_seen) >= julianday(?)""",
+                              (event.farm_id, event.zone_id, event.device_id, *fields, until, since)).fetchall()
+        return sorted(row["device_id"] for row in rows)
+
+    def zone_partner_history(self, event: SensorEvent, devices, field_names, since: datetime) -> list[dict]:
+        """Judged readings (an `event_trust` row exists) of the given partner devices of the event's zone with sample
+        time in [`since`, the event's), as small dicts: `device_id`, `timestamp` (aware UTC), the `field_names` they
+        carry and `vetoed_fields`. Oldest first per device; of one sample time the newest stored payload comes last.
+        At most `trust_baseline_scan_limit` rows per device (the newest ones)."""
+        start, end = sample_epoch(since), sample_epoch(event.timestamp)
+        names = list(field_names)
+        out: list[dict] = []
+        if start is None or end is None:
+            return out
+        with self._lock, self._connect() as db:
+            for device in devices:
+                rows = db.execute("""SELECT e.payload, t.vetoed_fields FROM sensor_events e
+                    JOIN event_trust t ON t.farm_id=e.farm_id AND t.zone_id=e.zone_id AND t.device_id=e.device_id
+                        AND t.sample_time=e.timestamp
+                    WHERE e.farm_id=? AND e.zone_id=? AND e.device_id=? AND e.sample_epoch >= ? AND e.sample_epoch < ?
+                    ORDER BY e.sample_epoch DESC, e.id DESC LIMIT ?""",
+                                  (event.farm_id, event.zone_id, device, start, end,
+                                   settings.trust_baseline_scan_limit)).fetchall()
+                for row in reversed(rows):
+                    packet = json.loads(row["payload"])
+                    if not any(isinstance(packet.get(name), (int, float)) and not isinstance(packet.get(name), bool)
+                               for name in names):
+                        continue  # carries none of the fields
+                    item = {name: packet[name] for name in names if name in packet}
+                    item["device_id"] = device
+                    item["timestamp"] = _parse_time(packet["timestamp"])
+                    item["vetoed_fields"] = json.loads(row["vetoed_fields"]) if row["vetoed_fields"] else []
+                    out.append(item)
+        return out
+
+    def zone_calibrations(self, farm_id: str, zone_id: str, limit: int = 200) -> list[dict]:
+        """The zone's newest `limit` calibrations on any device: `measurement` and `performed_at` (the measurement is only
+        inside the JSON payload, so the caller picks by it and compares the parsed times)."""
+        with self._lock, self._connect() as db:
+            rows = db.execute("SELECT payload FROM calibration_events WHERE farm_id=? AND zone_id=? "
+                              "ORDER BY timestamp DESC LIMIT ?", (farm_id, zone_id, limit)).fetchall()
+        items = [json.loads(row["payload"]) for row in rows]
+        return [{"measurement": item["measurement"], "performed_at": item["performed_at"]} for item in items]
+
     def add_trust(self, event: SensorEvent, trust_verdict: str, vetoed_fields: list,
-                  labels: Optional[list] = None, checks: Optional[list] = None) -> None:
+                  labels: Optional[list] = None, checks: Optional[list] = None,
+                  pair_fields: Optional[list] = None) -> None:
         """Record the pipeline's trust verdict, and the data-quality labels and safe next checks behind it, for a stored
-        reading (replaces an earlier verdict for it). `labels` / `checks` None store NULL: not recorded."""
+        reading (replaces an earlier verdict for it). `labels` / `checks` None store NULL: not recorded.
+        `pair_fields` are the fields the pair check flagged on this reading (docs/design/slow-drift-pair-check.md 4b);
+        None or empty store NULL."""
         created = utc_now()
         cutoff = (created - timedelta(days=settings.retention_days)).isoformat()
         with self._lock, self._connect() as db:
             db.execute("""INSERT INTO event_trust (farm_id, zone_id, device_id, sample_time, trust_verdict, vetoed_fields,
-                created_at, data_quality_labels, safe_next_checks) VALUES (?,?,?,?,?,?,?,?,?)
+                created_at, data_quality_labels, safe_next_checks, pair_fields) VALUES (?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(farm_id, zone_id, device_id, sample_time) DO UPDATE SET
                 trust_verdict=excluded.trust_verdict, vetoed_fields=excluded.vetoed_fields,
-                data_quality_labels=excluded.data_quality_labels, safe_next_checks=excluded.safe_next_checks""",
+                data_quality_labels=excluded.data_quality_labels, safe_next_checks=excluded.safe_next_checks,
+                pair_fields=excluded.pair_fields""",
                        (event.farm_id, event.zone_id, event.device_id, event.timestamp.isoformat(), trust_verdict,
                         json.dumps(sorted(vetoed_fields)), created.isoformat(),
                         None if labels is None else json.dumps(list(labels)),
-                        None if checks is None else json.dumps(list(checks))))
+                        None if checks is None else json.dumps(list(checks)),
+                        json.dumps(sorted(pair_fields)) if pair_fields else None))
             db.execute("DELETE FROM event_trust WHERE created_at < ?", (cutoff,))
 
     def zone_snapshot(self, farm_id: str, zone_id: str, stale_after_s: int = 0) -> dict:
@@ -572,13 +638,22 @@ class SensorEventStore:
                 trust = device["trust"]
                 return trust["status"] == "judged" and name in trust["vetoed_fields"]
 
-            chosen = next((d for d in candidates if not vetoes(d)), candidates[0])
+            # Probes disagree (docs/design/slow-drift-pair-check.md 4b): a non-stale device carrying the field (or its
+            # moisture alias) whose latest judged row lists it in `pair_fields` marks the field. The value stays the
+            # first candidate's even if that probe took the flag (no switching to the other one); the dashboard hands
+            # the field to the router as vetoed, so no advice uses either value.
+            names = {name, ALIASES.get(name)}
+            disagree = any(d["trust"]["status"] == "judged" and names & set(d["trust"].get("pair_fields") or ())
+                           and names & set(d["_present"]) for d in live)
+            chosen = candidates[0] if disagree else next((d for d in candidates if not vetoes(d)), candidates[0])
             fields[name] = {
                 "value": getattr(latest[chosen["device_id"]], name), "device_id": chosen["device_id"],
                 "sample_time": chosen["sample_time"], "age_s": chosen["age_s"],
                 "others": [{"device_id": d["device_id"], "value": getattr(latest[d["device_id"]], name),
                             "sample_time": d["sample_time"], "vetoed": vetoes(d)}
                            for d in candidates if d is not chosen]}
+            if disagree:
+                fields[name]["disagree"] = True
         for device in devices:
             device["supplied"] = [name for name, field in fields.items() if field["device_id"] == device["device_id"]]
 
@@ -621,15 +696,18 @@ class SensorEventStore:
     def _device_trust(self, farm_id, zone_id, device_id, event: SensorEvent) -> dict:
         """The event_trust row of the device's latest packet as `judged`, or `pending` when Core has recorded none."""
         with self._lock, self._connect() as db:
-            row = db.execute("""SELECT trust_verdict, vetoed_fields, data_quality_labels, safe_next_checks FROM event_trust
+            row = db.execute("""SELECT trust_verdict, vetoed_fields, data_quality_labels, safe_next_checks, pair_fields FROM event_trust
                 WHERE farm_id=? AND zone_id=? AND device_id=? AND sample_time=?""",
                              (farm_id, zone_id, device_id, event.timestamp.isoformat())).fetchone()
         if row is None:
             return {"status": "pending"}
         def listed(text):
             return json.loads(text) if text is not None else None
-        return {"status": "judged", "trust_verdict": row["trust_verdict"], "vetoed_fields": listed(row["vetoed_fields"]) or [],
-                "data_quality_labels": listed(row["data_quality_labels"]), "safe_next_checks": listed(row["safe_next_checks"])}
+        judged = {"status": "judged", "trust_verdict": row["trust_verdict"], "vetoed_fields": listed(row["vetoed_fields"]) or [],
+                  "data_quality_labels": listed(row["data_quality_labels"]), "safe_next_checks": listed(row["safe_next_checks"])}
+        if row["pair_fields"]:  # only when the pair check flagged a field (4b), so every other output is unchanged
+            judged["pair_fields"] = listed(row["pair_fields"])
+        return judged
 
     @staticmethod
     def _zone_context(devices: list, latest: dict):

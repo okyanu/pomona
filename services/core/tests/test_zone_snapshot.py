@@ -409,8 +409,9 @@ def test_an_old_database_gets_the_new_event_trust_columns_and_keeps_its_rows(tmp
     with store._connect() as db:
         columns = [r[1] for r in db.execute("PRAGMA table_info(event_trust)")]
         row = db.execute("SELECT * FROM event_trust").fetchone()
-    assert columns[-2:] == ["data_quality_labels", "safe_next_checks"]
+    assert columns[-3:] == ["data_quality_labels", "safe_next_checks", "pair_fields"]  # pair_fields: slow-drift pair check 4b
     assert row["vetoed_fields"] == '["ph"]' and row["data_quality_labels"] is None and row["safe_next_checks"] is None
+    assert row["pair_fields"] is None
 
 
 def test_a_new_database_has_the_columns_and_add_trust_overwrites_them(clock):

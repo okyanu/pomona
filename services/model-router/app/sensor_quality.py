@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import math
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 
@@ -130,6 +131,26 @@ STEP_LIMITS = {
     "substrate_temperature_c": (1.5, 0.3, "C", "a second thermometer"),
 }
 STEP_FIELDS = tuple(STEP_LIMITS)
+# Pair check (docs/design/slow-drift-pair-check.md): Core's `stream_baseline[field]["pair"]` says how far this probe usually
+# reads from the other probes of its zone (`offset`) and what they read now (`partner_value`). The probe is flagged when
+# that difference has moved by the limit or more, which is how a slow drift in one probe of two is noticed: real
+# weather moves both probes and leaves the difference alone. The limits come from the real pairs (the UF hydroponic
+# chamber, four probes in 30 s steps, about 107 days; the AGC2 greenhouse, two Grodan slab probes per compartment, 5-minute
+# steps) and from the game's drift (0.1 C, 0.5 %RH or 0.5 % per minute for 40 minutes): a looser limit does not catch the
+# drift in time (air at 3.5 C is caught at 35 of the 40 minutes), a tighter one flags the real pairs more. At these
+# limits the real data flags none with three partners; the worst single pair gives 1 to 3 air cards and 1 humidity card
+# in 107 days, and one greenhouse compartment's slab glitches give 4 moisture cards in 157 days. Those cards are accepted
+# (the owner, 2026-11-16) and say "check both probes". Substrate temperature is left out: it has no calibration path.
+PAIR_DRIFT_LIMITS = {
+    "air_temperature_c": 3.0,
+    "humidity_pct": 10.0,
+    "soil_moisture_pct": 8.0,
+    "substrate_moisture_pct": 8.0,
+}
+PAIR_UNITS = {"air_temperature_c": "°C", "humidity_pct": "%RH", "soil_moisture_pct": "%", "substrate_moisture_pct": "%"}
+# One probe may carry both moisture names; the pair check then speaks once for the pair of names.
+PAIR_ALIAS_GROUPS = {"soil_moisture_pct": "moisture", "substrate_moisture_pct": "moisture"}
+PAIR_DEVICE_MAX_CHARS = 32
 # A rise in substrate moisture from a trusted level below this is not judged by speed: a slab that dry (the water-level
 # card fires below 10 %) is rewetted by one irrigation, which the fake greenhouse's dry zone shows as +40 % in one
 # sample. The real logs never get that dry (lowest 54 %, apart from one 0 % glitch), so they say nothing about how
@@ -392,6 +413,72 @@ LAGGED_SPREAD_FIELDS = ("ph",)
 CALIBRATION_HINT = "if a meter agrees with the reading, it is real: record a calibration for this probe to accept it"
 
 
+def _pair_number(value: Any) -> Optional[float]:
+    """A finite number (not a bool, not a string), else None: the `pair` entry comes from Core and is checked strictly."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _pair_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def valid_pair(pair: Any) -> Optional[Dict[str, Any]]:
+    """Core's `pair` entry when every key is well formed, else None (a malformed entry is ignored)."""
+    if not isinstance(pair, dict):
+        return None
+    offset, partner_value = _pair_number(pair.get("offset")), _pair_number(pair.get("partner_value"))
+    partner_device = pair.get("partner_device")
+    if (offset is None or partner_value is None or not _pair_count(pair.get("n")) or not _pair_count(pair.get("partners"))
+            or not (partner_device is None or isinstance(partner_device, str)) or not isinstance(pair.get("device"), str)):
+        return None
+    return {"offset": offset, "partner_value": partner_value, "partners": pair["partners"],
+            "partner_device": partner_device, "device": pair["device"]}
+
+
+def _pair_device_name(device: str) -> str:
+    """A device id for the check text: no control characters (as the alert engine's clean_detail), at most 32 characters."""
+    device = "".join(ch for ch in device if unicodedata.category(ch) != "Cc")
+    return device[:PAIR_DEVICE_MAX_CHARS - 1] + "…" if len(device) > PAIR_DEVICE_MAX_CHARS else device
+
+
+def apply_pair_check(
+    field: str,
+    current: float,
+    pair: Any,
+    labels: List[str],
+    suspect_fields: List[str],
+    checks: List[str],
+    pair_fields: Optional[List[str]] = None,
+) -> bool:
+    """The probe's difference from the other probes of its zone has moved by the limit or more (`pair`: Core's entry).
+
+    Returns True when it flagged the field. The text goes first in `checks`, so a cut of the check list keeps it.
+    """
+    limit = PAIR_DRIFT_LIMITS.get(field)
+    entry = valid_pair(pair)
+    if limit is None or entry is None:
+        return False
+    now_difference = current - entry["partner_value"]
+    moved = now_difference - entry["offset"]
+    if abs(moved) < limit:
+        return False
+    if entry["partners"] == 1 and entry["partner_device"] is not None:
+        partner = _pair_device_name(entry["partner_device"])
+    else:
+        partner = f"the median of {entry['partners']} other probes in this zone"
+    add_unique(labels, "baseline_drift_possible")
+    add_unique(suspect_fields, field)
+    if pair_fields is not None:
+        add_unique(pair_fields, field)
+    checks.insert(0, f"pair check: {field} on {_pair_device_name(entry['device'])} is {abs(moved):.1f} {PAIR_UNITS[field]} "
+                     f"{'higher' if moved > 0 else 'lower'} than usual against {partner} "
+                     f"(now {now_difference:.1f}, usually {entry['offset']:.1f}). "
+                     "Check both with a meter; calibrate only the one that was wrong.")
+    return True
+
+
 def apply_persistent_checks(
     sensor: Dict[str, Any],
     history: List[Dict[str, Any]],
@@ -399,21 +486,31 @@ def apply_persistent_checks(
     labels: List[str],
     suspect_fields: List[str],
     checks: List[str],
+    pair_fields: Optional[List[str]] = None,
 ) -> None:
     """Judge the reading against Core's sticky trusted reference for its stream (see Core's trusted_baseline.py).
 
     The reference is the median of the readings in which the field was not vetoed, so a step or a frozen
     probe stays flagged for as long as it lasts instead of becoming the new normal after one history window.
     A calibration recorded for the probe re-anchors it. Malformed entries are ignored.
+    `pair_fields`, when given, collects the fields the pair check flagged.
     """
     if not isinstance(stream_baseline, dict):
         return
     sampled = parse_timestamp(sensor.get("timestamp"))
     previous_packet = next((p for p in reversed(history) if isinstance(p, dict)), {})
+    pair_groups_flagged = set()
     for field, stats in stream_baseline.items():
         current = numeric(sensor.get(field))
         if not isinstance(stats, dict) or current is None:
             continue
+        # Pair check: against the other probes of the zone (Core's `pair`, only multi-device zones). Deliberately not
+        # mirrored in spaces/sensor-data-checker/persistent.js (the browser checker judges one uploaded stream), and the
+        # parity case generators never emit `pair`. One text per alias group (a probe carrying both moisture names).
+        group = PAIR_ALIAS_GROUPS.get(field, field)
+        if field in PAIR_DRIFT_LIMITS and group not in pair_groups_flagged and "pair" in stats:
+            if apply_pair_check(field, current, stats.get("pair"), labels, suspect_fields, checks, pair_fields):
+                pair_groups_flagged.add(group)
         median = numeric(stats.get("median"))
         threshold = BASELINE_DRIFT_THRESHOLDS.get(field)
         low, high = PLAUSIBLE_RANGES.get(field, (-math.inf, math.inf))
@@ -672,7 +769,8 @@ def derive_sensor_quality(
         checks.append("confirm the latest telemetry timestamp before using this packet")
 
     apply_temporal_checks(sensor, list(history or []), labels, suspect_fields, checks)
-    apply_persistent_checks(sensor, list(history or []), stream_baseline, labels, suspect_fields, checks)
+    pair_fields: List[str] = []
+    apply_persistent_checks(sensor, list(history or []), stream_baseline, labels, suspect_fields, checks, pair_fields)
 
     if not checks:
         checks.append("continue routine monitoring")
@@ -682,7 +780,7 @@ def derive_sensor_quality(
     else:
         rationale = "Sensor packet needs verification before downstream risk or action reasoning."
 
-    return {
+    result = {
         "data_quality_labels": labels,
         "missing_fields": missing_fields,
         "suspect_fields": suspect_fields,
@@ -690,6 +788,9 @@ def derive_sensor_quality(
         "human_review_required": bool(labels or missing_fields or suspect_fields),
         "rationale": rationale,
     }
+    if pair_fields:
+        result["pair_disagreement_fields"] = pair_fields  # only when the pair check flagged a field
+    return result
 
 
 def route_sensor_quality_reasoner(

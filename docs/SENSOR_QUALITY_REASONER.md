@@ -98,6 +98,9 @@ Absent keys: no merge runs, no new key appears, and the output is byte-identical
 }
 ```
 
+The result gains one optional key, `pair_disagreement_fields` (a list of field names), only when the pair check flagged a
+field on this reading (see [Pair check](#pair-check-two-or-more-probes-in-one-zone)).
+
 ## Allowed Labels
 
 ```json
@@ -219,6 +222,92 @@ slab probes hold one 0.1 C value for up to 9 h; and a drift needs 3 times the pr
 drain pH and EC leave their 2 h median by 0.35 / 0.4 on 1 to 3 % of readings. Moisture has no persistent stuck
 or level check (a hydroponic zone sends a constant placeholder), only the step and noise checks. The unattended numbers are high on historical logs
 for a reason that is not a defect, see [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md#longer-memory-in-cores-feed).
+
+## Pair check: two or more probes in one zone
+
+A slow drift of one probe cannot be told from the real thing by comparing the probe with its own past: real readings
+leave their own 2 h median by more than the whole drift of the game. A second probe in the same zone sees the same
+weather and the same irrigation, so the **difference** between the two barely moves in a real event and does move when
+one probe drifts. The design and its evidence are in `docs/design/slow-drift-pair-check.md`.
+
+Core's outcome feed adds a `pair` entry to a field's `stream_baseline` entry, only when the zone has another device
+that reports the same field (multi-device zones, see
+[HARDWARE_EVENT_CONTRACT.md](./HARDWARE_EVENT_CONTRACT.md)):
+
+```json
+"pair": {"offset": -1.5, "n": 40, "partner_value": 61.2, "partners": 1,
+         "partner_device": "climate-2", "device": "climate-1"}
+```
+
+- `offset`: the usual difference, `own - partner`: the median over the probe's earlier readings in the 2 h window that
+  were not vetoed and had the same partner device(s) as now. `n` is how many; at least 12 are needed (`PAIR_MIN_N`:
+  6 minutes at 30 s, 1 hour at 5 minutes), else there is no `pair` entry.
+- `partner_value`: what the other probes read now. With one partner it is that probe's latest reading; with several it
+  is the median of their latest readings (the mean of the middle two for an even count; at most 8 partner devices).
+  `partners` is how many were used, `partner_device` is set only when there is exactly one, and `device` is the probe
+  being judged.
+- **Which partner readings count.** Another device of the same farm and zone, matched through the moisture aliases
+  (`substrate_moisture_pct` pairs with `soil_moisture_pct`). Its reading is earlier than the probe's own and not older
+  than 2.5 times the probe's own median interval (60 to 750 seconds), so one missed packet does not drop the partner.
+  It has been judged (it has an `event_trust` row), is a finite number and was not vetoed on that field. A flagged
+  reading therefore stops serving as a partner, so a fault caught on one probe does not make the other look wrong.
+  A device whose readings of the field are all one value (a constant moisture placeholder on a hydroponic zone) is not
+  a partner. If the partner set changes (a probe goes quiet or joins), the usual difference is collected afresh against
+  the new set.
+- **Calibration.** A calibration of the field on **any** device of the zone restarts the pair reference for every
+  device (the grower has just checked a probe with a meter). Own-stream references are not affected. Calibrate only the
+  probe that was wrong: calibrating the good one makes today's difference the new normal.
+- **Cadence.** A stream whose median interval is over 5 minutes is not paired and not judged. Such a device can still
+  serve as a partner when its readings are fresh enough.
+- **Fast-change skip.** A reading whose own step from the previous reading is a third of the limit or more (air
+  1.0 C, humidity 3.3 %RH, moisture 2.7 %) is not judged: the partner's reading is always earlier, so a change both
+  probes share (an irrigation pulse, a humidity step) shows up in the own reading before the partner has reported
+  it. Core then sends no `pair` entry for that reading. The next reading is judged normally. A drift at the game's rates never
+  triggers the skip.
+
+The router's check (`apply_persistent_checks` in `services/model-router/app/sensor_quality.py`) computes
+`moved = (current - partner_value) - offset` and, when `|moved|` reaches the limit, adds `baseline_drift_possible`,
+the field as a suspect field and a check text:
+
+| Field | Limit | 40-minute game drift caught after |
+|---|---|---|
+| `air_temperature_c` | 3.0 C | about 30 minutes (0.1 C per minute) |
+| `humidity_pct` | 10 %RH | about 20 minutes (0.5 %RH per minute) |
+| `soil_moisture_pct`, `substrate_moisture_pct` | 8 % | about 16 minutes (0.5 % per minute) |
+
+A card needs 3 flagged readings in a row, which adds 1 to 1.5 minutes at 30-second sampling. The times assume 2 hours
+of drift-free history. The limits do not scale with the sample rate. Substrate temperature, pH and EC have no pair check
+(substrate temperature has no calibration path, so a flagged pair could never be cleared).
+
+- **Check text**, first in `safe_next_checks`:
+  `pair check: humidity_pct on climate-1 is 10.4 %RH lower than usual against climate-2 (now -11.9, usually -1.5). Check both with a meter; calibrate only the one that was wrong.`
+  With several partners it says "against the median of 3 other probes in this zone". It names both devices because Core
+  stores the text and passes it on to the other devices' evaluations. Device ids are cut to 32 characters and lose control
+  characters; the whole text stays under the 300-character limit for known checks.
+- **No separate clear threshold.** A flagged reading is vetoed and stays out of the usual difference, so the flag lasts for
+  as long as `|moved|` stays over the limit.
+- **Which probe is flagged.** In a zone with two probes it is close to a coin flip which one crosses the limit first,
+  so the card may land on the good probe. With three or more probes the drifter is compared with the median of the
+  others and crosses first. Either way the text asks for a meter on both. When no partner reading is usable (the other
+  probe is silent, unjudged or vetoed), nothing is judged and the flag clears; an alert already raised stays until its
+  clear window passes.
+- **`pair_disagreement_fields`**: the sensor-quality result gains this list (the fields the pair check flagged on this
+  reading) only when it is not empty, so every other output is unchanged. Core stores it per judged reading, and
+  the zone view uses it: while any live device of a zone has a pair flag on a field, the zone treats that field as
+  "can't confirm" for every probe (no advice uses either value). The dashboard's air or humidity tile shows both values
+  with "probes disagree: check both with a meter", and the trust line names the first probe (for example "Can't
+  confirm: humidity (climate-1) not used"). It ends when no device's latest reading carries the
+  flag. Moisture has no zone tile, so a moisture disagreement shows only on the trust badge.
+- **`PAIR_CHECK`.** Core's setting `pair_check` (environment variable `PAIR_CHECK`, default on) turns the whole pair
+  path off: no `pair` entry and no partner query. `PAIR_CHECK=0` leaves multi-device zones otherwise unchanged;
+  `MULTI_DEVICE_ZONES=0` turns the pair check off too, because every zone is then judged as one stream. The in-process
+  engine of the fake greenhouse takes `pair_check=True` as a constructor argument.
+- **Limits.** A zone with one probe is not helped, and both probes drifting alike are not caught. The limits come from
+  one hydroponic chamber (four probes, 30-second readings, about 107 days) and one greenhouse (two slab probes per
+  compartment, 5-minute readings), where the worst real pair crosses them now and then: a few false cards on one pair, and four
+  moisture cards from slab glitches in one compartment (accepted, each says "check both probes"). The check is not
+  mirrored in the browser checker (`spaces/sensor-data-checker/persistent.js`), which judges one uploaded stream. See
+  [SENSOR_TEMPORAL_CHECKS.md](./SENSOR_TEMPORAL_CHECKS.md) for the real-data numbers.
 
 ## Related design drafts
 

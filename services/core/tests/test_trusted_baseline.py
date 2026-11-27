@@ -37,7 +37,7 @@ def test_module_is_stdlib_only_so_the_scorer_can_load_it_by_path():
     tree = ast.parse(Path(tb.__file__).read_text())
     imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     imported |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert imported <= {"__future__", "bisect", "collections", "math", "datetime", "typing"}
+    assert imported <= {"__future__", "bisect", "collections", "math", "statistics", "datetime", "typing"}
 
 
 def test_median_ignores_vetoed_readings_and_needs_min_n():
