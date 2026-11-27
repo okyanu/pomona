@@ -48,6 +48,42 @@ const flagged = (results) => results.filter((r) => r.out.data_quality_labels.len
     `gaps ${issues.gaps.length}, reboots ${issues.reboots.length}`);
 }
 
+// ---- Pomona SD log v0.2.1 (one timestamp per logging cycle) ----
+// The sample mirrors logger firmware 0.2.1 output: every row of a cycle shares the timestamp captured at
+// the cycle start, so each cycle is exactly one full packet per stream. (v0.2.0 stamped each row separately,
+// which split cycles into partial packets and produced false missing_* labels.) Made by make_samples.py.
+{
+  const ctx = { crop: "watercress", system_type: "hydroponic_dwc" };
+  const csv = C.parseCsv(read("pomona_sd_log_v021_example.csv"));
+  const built = C.buildPackets(csv.headers, csv.rows);
+  assert.equal(built.format, "long");
+  assert.equal(built.streams.length, 2);
+  const cycles = 36;
+  const expectedFields = {
+    "cress-hydro-node · cress-hydro-a": ["air_temperature_c", "humidity_pct", "water_temperature_c", "ph"],
+    "cress-soil-node · cress-soil-a": ["air_temperature_c", "humidity_pct", "substrate_temperature_c", "soil_moisture_pct"],
+  };
+  const otherLabels = [];
+  for (const s of built.streams) {
+    const fields = expectedFields[s.key];
+    assert.ok(fields, `unexpected stream ${s.key}`);
+    assert.equal(s.packets.length, cycles, `${s.key}: one packet per cycle`);
+    for (const p of s.packets) {
+      for (const f of fields) assert.ok(f in p.packet, `${s.key} ${p.timestamp}: missing field ${f}`);
+    }
+    const { results } = C.checkLog({ ...built, streams: [s] }, ctx, fields, NOW);
+    for (const r of results) {
+      const labels = r.out.data_quality_labels;
+      assert.deepEqual(labels.filter((x) => x.startsWith("missing_")), [], `${s.key} ${r.packet.timestamp}: ${labels}`);
+      // flatline_possible may appear: slow signals at 5-minute steps trip its tolerance (same as the block above).
+      otherLabels.push(...labels.filter((x) => x !== "flatline_possible").map((x) => `${s.key} ${r.packet.timestamp} ${x}`));
+    }
+  }
+  // Clean data: nothing except (possibly) flatline_possible is expected.
+  assert.deepEqual(otherLabels, []);
+  console.log(`SD log v0.2.1: ${built.streams.map((s) => s.packets.length).join("+")} packets, no missing_* labels`);
+}
+
 // ---- Wide spreadsheet log ----
 {
   const ctx = { crop: "lettuce", system_type: "hydroponic" };
